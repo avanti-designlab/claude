@@ -1,0 +1,57 @@
+{
+  "title": "5 AI tools that buy back your week",
+  "brand": {
+    "accent": "#2E6BFF"
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "eyebrow": "Productivity",
+      "title": "5 AI tools that buy back your week",
+      "subtitle": "The stack I use to save 10+ hours, every week.",
+      "icons": ["openai", "notion", "zapier", "canva", "figma"]
+    },
+    {
+      "type": "step",
+      "step": "1",
+      "eyebrow": "Write faster",
+      "icon": "openai",
+      "title": "Draft anything in seconds",
+      "line": "Turn a one-line idea into emails, posts, and outlines — then you just edit."
+    },
+    {
+      "type": "step",
+      "step": "2",
+      "eyebrow": "Stay organized",
+      "icon": "notion",
+      "title": "One home for every doc",
+      "line": "Notes, tasks, and projects in a single searchable workspace you actually trust."
+    },
+    {
+      "type": "list",
+      "eyebrow": "Automate the busywork",
+      "title": "Wire your apps together",
+      "items": [
+        { "icon": "zapier", "title": "Auto-route new leads", "line": "Form to CRM to Slack, no copy-paste" },
+        { "icon": "canva",  "title": "On-brand graphics fast", "line": "Templates that stay consistent" },
+        { "icon": "figma",  "title": "Design in the browser", "line": "Mockups your team can edit live" }
+      ]
+    },
+    {
+      "type": "stat",
+      "eyebrow": "The payoff",
+      "value": "10",
+      "unit": "hrs",
+      "label": "saved every single week",
+      "line": "That's a full work-week back every month — spent on what actually moves the needle."
+    },
+    {
+      "type": "cta",
+      "eyebrow": "Get the stack",
+      "title": "Want my exact setup?",
+      "line": "I'll send you the full toolkit and the automations I run.",
+      "keyword": "TOOLS",
+      "handle": "@yourhandle"
+    }
+  ]
+}

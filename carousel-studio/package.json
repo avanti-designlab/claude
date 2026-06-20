@@ -1,0 +1,19 @@
+{
+  "name": "carousel-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Topic -> animated 1080x1350 Instagram carousel (one MP4 per slide).",
+  "scripts": {
+    "gen": "node gen.js",
+    "render": "bash render.sh"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@sparticuz/chromium": "^131.0.0",
+    "ffmpeg-static": "^5.2.0",
+    "gsap": "^3.12.5",
+    "puppeteer-core": "^23.0.0",
+    "simple-icons": "^13.0.0"
+  }
+}

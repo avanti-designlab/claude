@@ -1,0 +1,15 @@
+# deps (re-create with `npm install` — pulls Chromium + ffmpeg binaries)
+node_modules/
+
+# generated render artifacts (regenerate with `node gen.js` + `bash render.sh`)
+output/frames/
+output/qa/
+output/mp4/
+
+# generated slides (regenerate with `node gen.js`)
+slides/*.html
+slides/manifest.json
+
+# scratch
+_qa.mjs
+*.log
