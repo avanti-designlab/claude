@@ -233,4 +233,38 @@ function cta(s, ctx){
   return { body, anim };
 }
 
-export const TEMPLATES = { cover, step, list, stat, cta };
+export const TEMPLATES = { cover, step, list, stat, cta, png };
+
+/* =============================== PNG ==============================
+   Animate a finished, flat slide image (your existing design) as a
+   whole frame: fade in, then a slow Ken Burns drift. The image is
+   never altered — it fills 1080x1350 (object-fit:cover) and moves.
+   motion: kenburns-in | kenburns-out | pan-left | pan-right | pan-up
+   ================================================================= */
+function png(s, ctx){
+  const src = s.image;
+  const motion = s.motion || 'kenburns-in';
+  const dur = typeof s.motionDur === 'number' ? s.motionDur : 4.0;
+
+  // start/end transforms. scale>1 overscan keeps edges covered while panning.
+  const P = {
+    'kenburns-in' : { from:{scale:1.05,xp:-0.6,yp:-0.6}, to:{scale:1.14,xp:0.8,yp:0.8} },
+    'kenburns-out': { from:{scale:1.16,xp:1.0,yp:1.0},   to:{scale:1.05,xp:0,yp:0}     },
+    'pan-left'    : { from:{scale:1.12,xp:2.4,yp:0},     to:{scale:1.13,xp:-2.4,yp:0}  },
+    'pan-right'   : { from:{scale:1.12,xp:-2.4,yp:0},    to:{scale:1.13,xp:2.4,yp:0}   },
+    'pan-up'      : { from:{scale:1.12,xp:0,yp:2.4},     to:{scale:1.13,xp:0,yp:-2.4}  },
+  }[motion] || { from:{scale:1.05,xp:0,yp:0}, to:{scale:1.14,xp:0.8,yp:0.8} };
+
+  const body = `
+  <div class="pslide" style="position:absolute;inset:0;overflow:hidden;background:#000">
+    <img id="img" src="${src}" alt=""
+      style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;will-change:transform,opacity">
+  </div>`;
+
+  const anim = `
+    gsap.set("#img",{scale:${P.from.scale},xPercent:${P.from.xp},yPercent:${P.from.yp},opacity:0,transformOrigin:"50% 50%"});
+    tl.to("#img",{opacity:1,duration:.55,ease:"power2.out"},0)
+      .to("#img",{scale:${P.to.scale},xPercent:${P.to.xp},yPercent:${P.to.yp},duration:${dur},ease:"sine.inOut"},0);
+  `;
+  return { body, anim };
+}
