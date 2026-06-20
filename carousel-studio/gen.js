@@ -15,17 +15,38 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TEMPLATES } from './lib/templates.js';
+import { resolveIcon, normalizeSvg } from './lib/icons.js';
+
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const gi = name => normalizeSvg(resolveIcon(name).svg); // inline glyph
+
+// AMG-style dotted brand mark (approximate; replace with real logo file when supplied)
+const DOTMARK = `<svg class="dotmark" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="2.4"/><circle cx="5" cy="13" r="2.4"/><circle cx="11" cy="9.5" r="2.4"/><circle cx="11" cy="16.5" r="2.4"/><circle cx="17" cy="6" r="2.4"/><circle cx="17" cy="13" r="2.4"/></svg>`;
+
+function footerHTML(footer){
+  if (!footer) return '';
+  const items = [];
+  if (footer.phone)   items.push(`<span class="fitem">${gi('phone')}${esc(footer.phone)}</span>`);
+  if (footer.address) items.push(`<span class="fitem">${gi('pin')}${esc(footer.address)}</span>`);
+  if (footer.web)     items.push(`<span class="fitem">${gi('globe')}${esc(footer.web)}</span>`);
+  if (footer.email)   items.push(`<span class="fitem">${gi('mail')}${esc(footer.email)}</span>`);
+  const mark = footer.brand ? `<span class="brandmark">${DOTMARK}${esc(footer.brand)}</span>` : '';
+  return `<div class="footerbar">${mark}<span class="finfo">${items.join('')}</span></div>`;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FPS = 30;
 
 function brandCSS(brand = {}){
-  const keys = ['accent','bg-core','bg-edge','plate','tile','ink'];
+  const keys = ['accent','accent-2','bg-core','bg-edge','plate','tile','ink','font'];
   const decl = keys.filter(k => brand[k]).map(k => `  --${k}: ${brand[k]};`).join('\n');
   return decl ? `:root{\n${decl}\n}` : '';
 }
 
-function pageHTML(slide, anim, body, brand, hold){
+function pageHTML(slide, anim, body, brand, hold, ctx){
+  const footer = brand.footer;
+  const pagecount = brand.pageCounter !== false && ctx
+    ? `<div class="pagecount"><b>${ctx.index+1}</b> | ${ctx.total}</div>` : '';
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -33,8 +54,10 @@ function pageHTML(slide, anim, body, brand, hold){
 <link rel="stylesheet" href="../styles/base.css">
 <style>${brandCSS(brand)}</style>
 </head>
-<body>
+<body class="${footer?'has-footer':''}">
 ${body}
+${pagecount}
+${footerHTML(footer)}
 <script src="../assets/gsap.min.js"></script>
 <script>
 (function(){
@@ -87,7 +110,7 @@ async function main(){
     const ctx = { index:i, total:slides.length };
     const { body, anim } = tpl(s, ctx);
     const hold = typeof s.hold === 'number' ? s.hold : 1.4;
-    const html = pageHTML(s, anim, body, brand, hold);
+    const html = pageHTML(s, anim, body, brand, hold, ctx);
     const name = String(i+1).padStart(2,'0') + '-' + s.type + '.html';
     await fs.writeFile(path.join(slidesDir,name), html, 'utf8');
     manifest.push({ file:name, type:s.type });

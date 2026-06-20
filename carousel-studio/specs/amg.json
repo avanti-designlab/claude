@@ -1,0 +1,57 @@
+{
+  "title": "AMG Insurance — All Your Insurance Needs in One Place",
+  "brand": {
+    "accent": "#2E9E63",
+    "accent-2": "#A4DC0F",
+    "plate": "#173A28",
+    "bg-core": "#F3F3EC",
+    "bg-edge": "#DCE7CB",
+    "tile": "#FFFFFF",
+    "ink": "#16140F",
+    "font": "Poppins",
+    "footer": {
+      "brand": "AMG",
+      "phone": "(248) 592-0080",
+      "web": "insuranceamg.com",
+      "address": "16600 18 Mile Rd, Clinton Twp, MI"
+    }
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "eyebrow": "AMG Insurance Services",
+      "title": "All Your Insurance Needs in One Place",
+      "subtitle": "Health · Travel · Short-Term · Family",
+      "icons": ["shield", "heart", "family", "plane"]
+    },
+    {
+      "type": "step",
+      "eyebrow": "Travel",
+      "icon": "plane",
+      "title": "Traveling Abroad?",
+      "line": "Travel insurance covers you in emergencies away from home."
+    },
+    {
+      "type": "step",
+      "eyebrow": "Short-Term",
+      "icon": "briefcase",
+      "title": "Between Jobs?",
+      "line": "Short-term health plans keep you insured in the gap."
+    },
+    {
+      "type": "step",
+      "eyebrow": "Peace of Mind",
+      "icon": "shield",
+      "title": "No Gaps, No Worries",
+      "line": "Stay protected wherever life takes you."
+    },
+    {
+      "type": "cta",
+      "eyebrow": "Get Covered Today",
+      "title": "Get Covered Today!",
+      "line": "Contact us to find the right short-term or travel plan.",
+      "button": "Call (248) 592-0080",
+      "buttonIcon": "phone"
+    }
+  ]
+}

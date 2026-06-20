@@ -29,7 +29,7 @@ const swipeHTML = `<div class="swipe">Swipe ${normalizeSvg(resolveIcon('arrow').
 // centered dark headline plate, icons/elements ringed around it, fills frame.
 function cover(s, ctx){
   const icons = (s.icons||[]).slice(0,6);
-  const RX = 496, RY = 520;            // orbit ellipse — wider than the plate so nothing collides
+  const RX = 470, RY = 470;            // orbit ellipse — clears the plate, frame edges, and footer band
   const start = -Math.PI/2;            // first orb at top (eyebrow lives INSIDE the plate, so top is clear)
   const orbs = icons.map((name,i)=>{
     const a = start + (i/Math.max(icons.length,1))*Math.PI*2;
@@ -43,7 +43,7 @@ function cover(s, ctx){
     <div class="ring" id="ring">${orbs}</div>
     <div class="col center" style="z-index:2">
       <div class="plate" id="plate" style="padding:64px 60px;max-width:604px;text-align:center">
-        ${s.eyebrow?`<div class="eyebrow" id="eb" style="color:var(--accent);justify-content:center;margin-bottom:26px">${esc(s.eyebrow)}</div>`:''}
+        ${s.eyebrow?`<div class="eyebrow" id="eb" style="color:var(--accent-2);justify-content:center;margin-bottom:26px">${esc(s.eyebrow)}</div>`:''}
         <div class="h-1" id="head" style="font-size:74px;line-height:.98">${esc(s.title)}</div>
         ${s.subtitle?`<div class="lead" id="sub" style="color:var(--on-plate-soft);margin-top:26px;font-size:32px">${esc(s.subtitle)}</div>`:''}
       </div>
@@ -194,7 +194,17 @@ function stat(s, ctx){
 /* =============================== CTA =============================== */
 // comment-keyword call to action — the closer.
 function cta(s, ctx){
-  const kw = s.keyword || 'GO';
+  const kw = s.keyword;
+  // keyword mode -> comment-keyword pill; otherwise a plain branded button
+  const pill = kw
+    ? `<div class="pill" style="font-size:40px;padding:26px 46px">
+         <span style="width:34px;height:34px;display:inline-flex;color:#fff">${normalizeSvg(resolveIcon('message').svg)}</span>
+         Comment &ldquo;<span id="kw">${esc(kw)}</span>&rdquo;
+       </div>`
+    : `<div class="pill" style="font-size:40px;padding:26px 50px">
+         <span style="width:34px;height:34px;display:inline-flex;color:#fff">${normalizeSvg(resolveIcon(s.buttonIcon||'phone').svg)}</span>
+         ${esc(s.button || 'Get a Quote')}
+       </div>`;
   const body = `
   <div class="stage center">
     <div class="bloom a"></div><div class="bloom b"></div>
@@ -204,10 +214,7 @@ function cta(s, ctx){
         <div class="h-1" id="head" style="font-size:78px">${esc(s.title||'Want the full playbook?')}</div>
         ${s.line?`<div class="lead" id="line" style="color:var(--on-plate-soft);margin-top:28px">${esc(s.line)}</div>`:''}
         <div class="row center" id="kwrap" style="margin-top:46px;justify-content:center">
-          <div class="pill" style="font-size:40px;padding:26px 46px">
-            <span style="width:34px;height:34px;display:inline-flex;color:#fff">${normalizeSvg(resolveIcon('message').svg)}</span>
-            Comment &ldquo;<span id="kw">${esc(kw)}</span>&rdquo;
-          </div>
+          ${pill}
         </div>
       </div>
       ${s.handle?`<div class="kicker" id="handle">${esc(s.handle)}</div>`:''}
