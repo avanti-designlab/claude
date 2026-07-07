@@ -5,6 +5,10 @@ on:
     branches: [main, staging]
   pull_request:
 
+# This job only checks out and builds — no write access needed.
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest

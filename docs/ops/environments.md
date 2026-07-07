@@ -17,7 +17,7 @@ Rules:
 
 ## Environment variables
 
-Template: `.env.example` (checked in, no values). Local dev: copy to `.env.local` (gitignored). Vercel: set per-environment values in Project → Settings → Environment Variables (Production / Preview / Development). CI uses placeholder values — nothing in CI needs real secrets at this stage.
+Template: `.env.example` (checked in, no values). Local dev: copy to `.env.local` (gitignored). Vercel: set per-environment values in Project → Settings → Environment Variables (Production / Preview / Development). CI sets **no env vars at all** — the build is designed to need none at this stage (env validation happens at call time, not import time). Do not "fix" CI by adding placeholder secrets.
 
 | Variable | Scope | Purpose |
 |---|---|---|

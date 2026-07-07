@@ -1,8 +1,11 @@
 /**
- * Environment access with fail-fast validation.
+ * Public environment access with fail-fast validation.
  *
  * Validation happens at call time (not import time) so `next build` succeeds
  * without secrets — CI and preview builds don't need a real Supabase project.
+ *
+ * Server-only secrets live in env.server.ts (guarded by "server-only"), never
+ * here — this module is imported by client code.
  */
 
 function required(name: string): string {
@@ -21,15 +24,4 @@ export function getPublicSupabaseConfig() {
     url: required("NEXT_PUBLIC_SUPABASE_URL"),
     anonKey: required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
   };
-}
-
-/**
- * Service-role key: bypasses RLS. Admin/migration tooling only — never call
- * this from a tenant-facing request path (doc 03 §2).
- */
-export function getServiceRoleKey(): string {
-  if (typeof window !== "undefined") {
-    throw new Error("Service-role key must never be accessed in the browser.");
-  }
-  return required("SUPABASE_SERVICE_ROLE_KEY");
 }

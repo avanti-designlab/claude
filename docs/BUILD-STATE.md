@@ -8,7 +8,7 @@
 | Step | Item | Owner | Gate | Status |
 |---|---|---|---|---|
 | 0.0 | Agent team + 4 skills operationalized (doc 01) | operator + orchestrator | — | ✅ Done (2026-07-07) — 12 agents in `.claude/agents/`, 4 skills in `.claude/skills/` |
-| 0.1 | Project scaffold (Next.js + Supabase + Vercel, CI/CD, staging/prod, secrets, CF Workers readiness) | devops-deployment | Code Review | ✅ Done (2026-07-07) — passed Code Review; operator-side provisioning steps listed in `ops/environments.md` |
+| 0.1 | Project scaffold (Next.js + Supabase + Vercel, CI/CD, staging/prod, secrets, CF Workers readiness) | devops-deployment | Code Review | ✅ Done (2026-07-07) — Code Review **PASS** (see gate record below); operator-side provisioning steps listed in `ops/environments.md` |
 | 0.2 | 4 skills implemented + tested in isolation | build agents | Code Review + QA | ⏸ **Blocked — awaiting operator confirmation to proceed past scaffold** |
 | 0.3 | Multi-tenant data model (F1) | lead-backend-data-architect | Code Review (security+isolation) + QA isolation suite | ⏸ **Blocked — awaiting operator confirmation** |
 | 0.4 | Design system + theming (F2) | lead-ui-ux-designer | Design Review | ⏸ **Blocked — awaiting operator confirmation** |
@@ -16,6 +16,12 @@
 | 1.x | Phase 1 feature work | (per doc 07) | (per doc 07) | 🚫 Blocked by Freeze Gate 0 |
 | 🔒 | **GATE 1a** — single-vertical validation (real estate, GG as client zero, full loop end-to-end) | orchestrator | loop proven + case-study metrics | 🚫 Not reached |
 | 🔒 | **GATE 1** — Phase 1 ships multi-vertical | orchestrator | validated loop across seed verticals + M1b active | 🚫 Not reached |
+
+## Gate records
+
+**2026-07-07 · 0.1 Project scaffold · Code Review → PASS** (0 blockers, 1 major, 4 minors).
+- Major (process): 0.1 was marked done in this file before the review verdict landed. No file change was required (the review passed), but the standing correction is recorded: **gate status is written from the verdict, never ahead of it.**
+- Minors, disposition: env server-only split (fixed — `src/lib/env.server.ts` with `server-only` guard), CI `permissions: contents: read` (fixed), `docs/ops/environments.md` CI-env wording (fixed), worker-types note for Phase 1.3 (documented in `workers/edge-autofix/README.md`; due at 1.3).
 
 ## Freeze log (frozen-foundation decisions + post-freeze changes)
 
