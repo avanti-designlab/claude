@@ -35,6 +35,9 @@ export {
   type TenantThemeOptions,
 } from "./serialize";
 
+// Font-stack grammar gate (stored-CSS-injection defense)
+export { validateFontStack } from "./font-stack";
+
 // Accessibility validation + correction
 export {
   CONTRAST_REQUIREMENTS,

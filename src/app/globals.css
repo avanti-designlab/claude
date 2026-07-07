@@ -1,26 +1,317 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/* ==========================================================================
+   F2 — "Signal" design system (doc 06 §2–3)
+   --------------------------------------------------------------------------
+   Every brand-expressive value on this page is a design token. The token
+   blocks marked `@signal-tokens:*` are the OUTPUT of the brand-kit pipeline
+   (src/lib/skills/brand-kit): the dark block is toCssVariables(
+   SIGNAL_DEFAULT_TOKENS) verbatim, and the light block is the light-adapted
+   palette computed by buildBrandKit against the Signal light surface. A unit
+   test (src/lib/theme/globals-parity.test.ts) recomputes both through the
+   library and fails if this file drifts from the pipeline.
+
+   Tenant themes override the same custom properties at runtime via
+   `:root[data-tenant-theme]` (src/lib/theme/engine.ts) — zero component
+   changes. A hardcoded brand value anywhere outside these token blocks is a
+   bug (doc 06 §3; enforced by src/lib/theme/no-hardcoded-colors.test.ts).
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Self-hosted faces. Real family names (not build-time hashes) because font
+   stacks are runtime token values — a tenant theme carries plain CSS font
+   stacks in `tenants.theme.font`. Fraunces ships only for the tenant-font
+   demo on /design-system.
+   -------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/fonts/space-grotesk-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/plex-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/plex-mono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/plex-mono-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Fraunces";
+  src: url("/fonts/fraunces-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --------------------------------------------------------------------------
+   Default theme — Signal dark (the instrument's native mode; tenant #1).
+   Exact output of toCssVariables(SIGNAL_DEFAULT_TOKENS).
+   -------------------------------------------------------------------------- */
+/* @signal-tokens:dark:start */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --surface: #14181f;
+  --surface-raised: #1c222b;
+  --ink: #e9ecf1;
+  --muted: #98a2b3;
+  --accent: #e3a94f;
+  --positive: #45c496;
+  --negative: #ef7466;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.125rem;
+  --text-2xl--font-weight: 600;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-3xl--font-weight: 600;
+  --text-display: 3.5rem;
+  --text-display--line-height: 1.05;
+  --text-display--font-weight: 640;
+  --text-score: 5.25rem;
+  --text-score--line-height: 1;
+  --text-score--font-weight: 650;
+
+  --space-unit: 4px;
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+}
+/* @signal-tokens:dark:end */
+
+/* --------------------------------------------------------------------------
+   Derived chrome — computed FROM tokens by a single rule each; never a brand
+   value. The on-color foregrounds pick whichever of surface/ink carries the
+   higher WCAG contrast against the fill (same rule as
+   deriveOnColorForegrounds in src/lib/theme/engine.ts, which recomputes them
+   per tenant theme). Overlay/border/input/scrim are ink- or surface-tinted
+   mixes, so they re-derive automatically under any theme scope.
+   -------------------------------------------------------------------------- */
+/* @signal-derived:dark:start */
+:root {
+  --accent-foreground: var(--surface);
+  --positive-foreground: var(--surface);
+  --negative-foreground: var(--surface);
+  --overlay: color-mix(in oklab, var(--ink) 8%, transparent);
+  --border: color-mix(in oklab, var(--ink) 14%, transparent);
+  --input: color-mix(in oklab, var(--ink) 20%, transparent);
+  --ring: var(--accent);
+  --scrim: color-mix(in oklab, var(--surface) 55%, transparent);
+  --radius: 0.5rem;
+}
+/* @signal-derived:dark:end */
+
+/* --------------------------------------------------------------------------
+   Light-adapted Signal (doc 06: dark is the default; this variant is computed
+   by buildBrandKit — accent/positive/negative auto-corrected for the light
+   surface). Applies when the OS prefers light and no explicit override is
+   set, or when data-theme="light" is forced. Only color tokens change.
+   -------------------------------------------------------------------------- */
+/* @signal-tokens:light:start */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --surface: #f4f6f9;
+    --surface-raised: #e7ebf2;
+    --ink: #1b202a;
+    --muted: #5c6677;
+    --accent: #b4791d;
+    --positive: #309772;
+    --negative: #eb5241;
+    --accent-foreground: var(--ink);
+    --positive-foreground: var(--ink);
+    --negative-foreground: var(--ink);
   }
 }
+:root[data-theme="light"] {
+  --surface: #f4f6f9;
+  --surface-raised: #e7ebf2;
+  --ink: #1b202a;
+  --muted: #5c6677;
+  --accent: #b4791d;
+  --positive: #309772;
+  --negative: #eb5241;
+  --accent-foreground: var(--ink);
+  --positive-foreground: var(--ink);
+  --negative-foreground: var(--ink);
+}
+/* @signal-tokens:light:end */
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* --------------------------------------------------------------------------
+   Tailwind theme wiring. `inline` maps mean utilities carry `var(--token)`
+   references that resolve per scope — this is what makes a tenant-theme
+   override re-skin every utility with zero component changes.
+
+   The default Tailwind palette is wiped (`--color-*: initial`): the ONLY
+   color utilities that exist are token-driven. `bg-red-500` does not compile
+   to anything here — by design (doc 06 §3).
+   -------------------------------------------------------------------------- */
+@theme inline {
+  --color-*: initial;
+
+  /* Doc 06 §2 named tokens */
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-positive-foreground: var(--positive-foreground);
+  --color-negative-foreground: var(--negative-foreground);
+
+  /* Derived chrome */
+  --color-overlay: var(--overlay);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* shadcn/ui semantic aliases — re-pointed at the same tokens so every
+     vendored component is tenant-themed without local edits. */
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface-raised);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-secondary: color-mix(in oklab, var(--ink) 10%, var(--surface));
+  --color-secondary-foreground: var(--ink);
+  --color-destructive: var(--negative);
+  --color-destructive-foreground: var(--negative-foreground);
+
+  /* Faces (runtime vars — tenant fonts swap at the token layer) */
+  --font-*: initial;
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  /* Tailwind's dynamic spacing derives from the token unit:
+     p-4 = calc(var(--space-unit) * 4) = --space-4. */
+  --spacing: var(--space-unit);
+
+  /* Radius scale (shadcn convention, from the single --radius) */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Type scale — static instrument chrome (tenants.theme carries colors +
+   fonts, not scale; doc 03 §3), so these are literal theme values. Variable
+   names match toCssVariables output and are parity-tested. */
+/* @signal-tokens:type-scale:start */
+@theme {
+  --text-*: initial;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.125rem;
+  --text-2xl--font-weight: 600;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-3xl--font-weight: 600;
+  --text-display: 3.5rem;
+  --text-display--line-height: 1.05;
+  --text-display--font-weight: 640;
+  --text-score: 5.25rem;
+  --text-score--line-height: 1;
+  --text-score--font-weight: 650;
+}
+/* @signal-tokens:type-scale:end */
+
+/* --------------------------------------------------------------------------
+   Base. Quiet, legible, token-driven.
+   -------------------------------------------------------------------------- */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    font-family: var(--font-body);
+    background-color: var(--surface);
+  }
+
+  body {
+    background-color: var(--surface);
+    color: var(--ink);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+
+  /* Visible keyboard focus everywhere (doc 06 §7). Zero specificity so
+     component-level focus treatments (shadcn ring + outline-none) win. */
+  :where(:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }

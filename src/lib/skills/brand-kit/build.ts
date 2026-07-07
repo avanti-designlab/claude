@@ -25,6 +25,7 @@ import {
   SIGNAL_SPACING,
   SIGNAL_TYPOGRAPHY,
 } from "./defaults";
+import { validateFontStack } from "./font-stack";
 import { deepClone } from "./structural";
 
 export interface BrandColorInput {
@@ -135,18 +136,20 @@ function resolveColors(input: BrandColorInput): ColorTokens {
   };
 }
 
+/**
+ * Each face is gated through `validateFontStack` (font-family grammar
+ * whitelist) BEFORE it can reach `toCssVariables` — font stacks are emitted
+ * verbatim into stylesheets, so a hostile value (`}`/`;`/`<`/`url(`) throws
+ * here like a malformed color does, and the theme engine falls back to
+ * Signal. See font-stack.ts for the threat model.
+ */
 function resolveTypography(input?: BrandTypographyInput): TypographyTokens {
   const resolved: TypographyTokens = {
-    display: input?.display ?? SIGNAL_TYPOGRAPHY.display,
-    body: input?.body ?? SIGNAL_TYPOGRAPHY.body,
-    mono: input?.mono ?? SIGNAL_TYPOGRAPHY.mono,
+    display: validateFontStack(input?.display ?? SIGNAL_TYPOGRAPHY.display, "display"),
+    body: validateFontStack(input?.body ?? SIGNAL_TYPOGRAPHY.body, "body"),
+    mono: validateFontStack(input?.mono ?? SIGNAL_TYPOGRAPHY.mono, "mono"),
     scale: deepClone(input?.scale ?? SIGNAL_TYPOGRAPHY.scale),
   };
-  for (const face of ["display", "body", "mono"] as const) {
-    if (typeof resolved[face] !== "string" || resolved[face].trim() === "") {
-      throw new Error(`typography.${face} must be a non-empty font stack`);
-    }
-  }
   if (Object.keys(resolved.scale).length === 0) {
     throw new Error("typography.scale must define at least one step");
   }

