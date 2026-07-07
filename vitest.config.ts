@@ -7,6 +7,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "supabase/tests/**/*.test.ts"],
+    // The tenant-isolation suite (supabase/tests/) needs a live Postgres and
+    // runs via `npm run test:isolation` (vitest.isolation.config.ts) — kept
+    // out of the default run so it can never silently skip. See doc 03 §7.
+    include: ["src/**/*.test.ts"],
   },
 });
