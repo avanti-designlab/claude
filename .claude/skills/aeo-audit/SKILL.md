@@ -36,4 +36,4 @@ Rubric weights follow the loaded playbook: `local_intensity` gates checks 8–10
 `aeo-seo-logic-engineer` (M2 audit, M4 competitor gap analysis), `content-quality` (AEO-formatting review).
 
 ## Status
-Skill defined (Phase 0). The standalone, isolation-tested implementation (crawler adapters + rubric scorer at `src/lib/skills/aeo-audit/`) is built and QA-gated in build step 0.2 — this skill then wraps that library.
+**Implemented** at `src/lib/skills/aeo-audit/` (81 isolation tests; entry point `runAudit(site, playbook)`, fully deterministic — all time math anchored to `site.crawledAt`; individual checks exported for M4 competitor analysis; robots parser reusable by M5). The crawler that fills `CrawledSite` is Phase 1 M2 work — this library is the scoring rubric only. Passed the 0.2 gate (Code Review + QA, remediated and re-verified 2026-07-07). Doc-silent threshold assumptions are logged in BUILD-STATE for Freeze Gate 0 ratification.

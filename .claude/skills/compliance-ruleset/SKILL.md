@@ -53,4 +53,4 @@ Per-vertical compliance rules that gate content and ads output. Nothing ships fo
 A generated playbook's drafted compliance ruleset is marked **"requires legal/compliance review before use"** when the industry is regulated (health, legal, financial, cannabis-adjacent, alcohol, …). It is a draft until a human approves it; the compliance-review agent gates it harder.
 
 ## Status
-Skill defined (Phase 0). The standalone, isolation-tested implementation (rule engine + per-vertical rule data at `src/lib/skills/compliance/`) is built and QA-gated in build step 0.2 — this skill then wraps that library.
+**Implemented** at `src/lib/skills/compliance/` (91 isolation tests; `checkCompliance` entry point, 32 rules across the five seed verticals, every rule carrying a legal reference). Fails closed on unknown verticals AND on zero-rules-evaluated; seed rulesets are immutable at runtime — replacing one is a reviewed code change, never an API call. Passed the 0.2 gate (Code Review + QA, remediated and re-verified 2026-07-07). This skill wraps that library; it pre-screens — it never replaces the compliance-review agent or human sign-off.

@@ -27,4 +27,4 @@ Encode a brand into an enforceable, locked kit: design tokens + voice profile. O
 `lead-ui-ux-designer` (theming), the content pipeline (M8 voice), the social module (M11 creative).
 
 ## Status
-Skill defined (Phase 0). The standalone, isolation-tested implementation (token builder + validators at `src/lib/skills/brand-kit/`) is built and QA-gated in build step 0.2 — this skill then wraps that library.
+**Implemented** at `src/lib/skills/brand-kit/` (87 isolation tests; `buildBrandKit` / `lockKit` / `reviseKit` / `toCssVariables` / `toTenantTheme`, WCAG contrast validation with auto-correction across all 10 F2 policy pairs — every foreground validated on both `surface` and `surfaceRaised`). Passed the 0.2 gate (Code Review + QA, remediated and re-verified 2026-07-07). This skill wraps that library — the 0.4 theming engine consumes it.
