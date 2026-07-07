@@ -23,6 +23,8 @@ This is the complete build brief for an **AI-native agency operating system**: A
 | 06 | **Design System & UI Spec** | shadcn/Tailwind foundation, Recharts, Aceternity/Magic UI moments, white-label theming, key screens |
 | 07 | **Build Sequence & Execution Checklist** | Task-by-task build order Phase 0 → Phase 2, freeze gates, per-block owner + review gate, what parallelizes — the timeline the Orchestrator drives from |
 
+Published API/data contracts live in **`contracts/`** — `contracts/data-model.md` (v1.0.0, Published) is the binding F1 data-model & multi-tenancy contract; agents build against it, not against the SQL directly.
+
 ## The core idea in one paragraph
 
 Select a client's vertical at onboarding → the **Industry Playbook** loads and auto-generates a custom AEO/SEO/GEO/local plan → the **audit engine** scores the site → the **brand-consistent production engine** generates humanized, compliant, on-brand content and schema → the **auto-fix engine** publishes it directly to the client's site (WordPress/Webflow/Wix via API, Framer via edge worker) with full rollback safety → the **visibility tracker** measures whether AI citation and rankings moved → **competitor reverse-engineering** feeds the next plan. Built multi-tenant and white-label from day one so it runs the operator's own agency first, then licenses to other agencies.
