@@ -67,6 +67,18 @@ export function isoDateToEpoch(value: string): number {
   return Date.parse(value.includes("T") ? value : `${value}T00:00:00Z`);
 }
 
+/**
+ * Epoch millis for the FUTURE_DATE reference point ("now"). A valid injected
+ * ISO `referenceDate` (SchemaGenerationRequest.referenceDate) makes the check
+ * deterministic and replayable; when it is absent — or not a valid ISO date —
+ * this falls back to the wall clock, the library's only nondeterministic read.
+ */
+export function referenceEpoch(referenceDate?: string): number {
+  return referenceDate !== undefined && isValidIsoDate(referenceDate)
+    ? isoDateToEpoch(referenceDate)
+    : Date.now();
+}
+
 /* ------------------------------------------------------------------ */
 /* Durations & times                                                   */
 /* ------------------------------------------------------------------ */

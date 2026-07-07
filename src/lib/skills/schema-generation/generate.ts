@@ -20,6 +20,7 @@ import type {
   GeneratableSchemaType,
   JsonLdObject,
   SchemaBrandContext,
+  SchemaGenerationReady,
   SchemaGenerationRequest,
   SchemaGenerationResult,
   ValidationIssue,
@@ -59,6 +60,7 @@ import {
 type GeneratorFn<T extends GeneratableSchemaType> = (
   entity: EntityInputMap[T],
   brand?: SchemaBrandContext,
+  referenceDate?: string,
 ) => GeneratorOutput;
 
 const GENERATORS: { [T in GeneratableSchemaType]: GeneratorFn<T> } = {
@@ -67,7 +69,7 @@ const GENERATORS: { [T in GeneratableSchemaType]: GeneratorFn<T> } = {
   Restaurant: (entity) => generateRestaurant(entity),
   Product: (entity, brand) => generateProduct(entity, brand),
   FAQPage: (entity) => generateFaqPage(entity),
-  Article: (entity, brand) => generateArticle(entity, brand),
+  Article: (entity, brand, referenceDate) => generateArticle(entity, brand, referenceDate),
   Person: (entity) => generatePerson(entity),
   RealEstateAgent: (entity) => generateRealEstateAgent(entity),
   Organization: (entity) => generateOrganization(entity, "Organization"),
@@ -91,10 +93,24 @@ const GENERATORS: { [T in GeneratableSchemaType]: GeneratorFn<T> } = {
  * Serializes to a single `<script type="application/ld+json">` block
  * (SKILL.md rule 3). Every "<" is escaped to its \\u003c JSON form so embedded
  * content can never close the script tag early.
+ *
+ * Module-private on purpose: the only producer of injectable blocks is the
+ * ready path of `generateSchema` below.
  */
-export function serializeToScriptBlock(jsonLd: JsonLdObject): string {
+function serializeJsonLd(jsonLd: JsonLdObject): string {
   const json = JSON.stringify(jsonLd, null, 2).replace(/</g, "\\u003c");
   return `<script type="application/ld+json">\n${json}\n</script>`;
+}
+
+/**
+ * Public re-serializer — defense in depth (0.2 Code Review gate): it accepts
+ * ONLY a ready result, so `serializeToScriptBlock(rejected.draftJsonLd)` (or
+ * passing a rejected result itself) is a compile error. A rejected result can
+ * never be turned into an injectable block through this API. Output is
+ * byte-identical to `ready.scriptBlock`.
+ */
+export function serializeToScriptBlock(ready: SchemaGenerationReady): string {
+  return serializeJsonLd(ready.jsonLd);
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,7 +144,7 @@ export function generateSchema<T extends GeneratableSchemaType>(
     };
   }
 
-  const { node, claims, issues } = generator(request.entity, request.brand);
+  const { node, claims, issues } = generator(request.entity, request.brand, request.referenceDate);
   const jsonLd: JsonLdObject = { "@context": "https://schema.org", ...node };
 
   let correspondence: CorrespondenceEntry[] = [];
@@ -168,7 +184,7 @@ export function generateSchema<T extends GeneratableSchemaType>(
     status: "ready",
     schemaType,
     jsonLd,
-    scriptBlock: serializeToScriptBlock(jsonLd),
+    scriptBlock: serializeJsonLd(jsonLd),
     correspondence,
     warnings,
   };

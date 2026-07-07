@@ -14,7 +14,7 @@ import type {
   VideoObjectInput,
 } from "./types";
 import { aggregateSameAs } from "./same-as";
-import { isHttpUrl, isPositiveInt, isoDateToEpoch, issue } from "./validate";
+import { isHttpUrl, isPositiveInt, isoDateToEpoch, issue, referenceEpoch } from "./validate";
 import {
   type Gen,
   type GeneratorOutput,
@@ -73,6 +73,7 @@ const HEADLINE_MAX = 110;
 export function generateArticle(
   entity: ArticleInput,
   brand?: SchemaBrandContext,
+  referenceDate?: string,
 ): GeneratorOutput {
   const gen = newGen();
   const node: JsonLdObject = { "@type": "Article" };
@@ -118,7 +119,7 @@ export function generateArticle(
       );
     }
   }
-  if (datePublished !== undefined && isoDateToEpoch(datePublished) > Date.now()) {
+  if (datePublished !== undefined && isoDateToEpoch(datePublished) > referenceEpoch(referenceDate)) {
     gen.issues.push(
       issue(
         "FUTURE_DATE",

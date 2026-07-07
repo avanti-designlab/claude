@@ -539,6 +539,14 @@ export interface SchemaGenerationRequest<
   visiblePageText: string;
   /** Client brand context from the locked brand kit (publisher/brand defaults). */
   brand?: SchemaBrandContext;
+  /**
+   * Optional ISO 8601 date/date-time used as "now" by the FUTURE_DATE check —
+   * the library's only wall-clock read. Inject it for deterministic, replayable
+   * results (tests, stored audit runs); when absent (or not a valid ISO date)
+   * the wall clock is used, so default behavior is unchanged. Never emitted
+   * into the JSON-LD.
+   */
+  referenceDate?: string;
 }
 
 export interface SchemaGenerationReady {
