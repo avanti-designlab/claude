@@ -16,6 +16,7 @@ The complete build brief lives in `docs/` (00–07 + README). **Read `docs/00-ma
 6. **Compliance gate per vertical:** nothing ships without passing the loaded vertical's `compliance-ruleset`.
 7. **Escalate, don't improvise:** when docs 00–07 are silent or contradictory, escalate to the human operator. Never invent architecture.
 8. **One owning agent per task.** The Orchestrator sequences; the Documentation agent keeps contracts/docs current; agents read docs before building.
+9. **Local prototype before any live hosting (operator standing rule, 2026-07-07):** nothing is deployed to a live/hosted environment (Vercel preview, staging, or prod) until the operator has first reviewed a local prototype build (`npm run dev`, screenshots, or a local walkthrough). Local first, always; hosting only on explicit operator approval.
 
 ## Agent team (.claude/agents/) & skills (.claude/skills/)
 
