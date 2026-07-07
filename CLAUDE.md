@@ -10,7 +10,7 @@ The complete build brief lives in `docs/` (00–07 + README). **Read `docs/00-ma
 
 1. **Foundation gate:** NO feature work until F1 (data model, doc 03) and F2 (design system, doc 06) are built, reviewed, and FROZEN. Doc 07 marks the 🔒 freeze gates. Post-freeze changes require Orchestrator + Code Review sign-off.
 2. **Tenant isolation is sacred:** every table, query, and API route is tenant-scoped; RLS at the database level. One tenant reading another's data = automatic Code Review rejection.
-3. **Nothing is "done" until it passes its named review gate** (doc 07 names the gate per block): code → `code-review`; product-generated content → `content-quality` AND `compliance-review`; on-page/site writes → diff preview + human approval + rollback verified by `qa-testing`; UI → `lead-ui-ux-designer` design review.
+3. **Nothing is "done" until it passes its named review gate** (doc 07 names the gate per block): code → `code-review`; product-generated content → `content-quality` AND `compliance-review`; on-page/site writes → diff preview + human approval + rollback verified by `qa-testing`; UI → `lead-ui-ux-designer` design review. The F2 design-system freeze additionally requires **operator sign-off** (no foundation gate reviews itself).
 4. **No silent auto-fix:** every client-site write goes through the change-management layer (change-log, diff preview, one-click rollback, auto-rollback). No exceptions.
 5. **AI drafts, humans approve:** fully autonomous publishing is prohibited for content and on-page changes (`automation_level` flag, doc 03 §6).
 6. **Compliance gate per vertical:** nothing ships without passing the loaded vertical's `compliance-ruleset`.
@@ -19,7 +19,7 @@ The complete build brief lives in `docs/` (00–07 + README). **Read `docs/00-ma
 
 ## Agent team (.claude/agents/) & skills (.claude/skills/)
 
-Orchestration: `lead-architect-orchestrator` (sole authority to advance stages). Build: `lead-ui-ux-designer`, `lead-backend-data-architect`, `frontend-engineer`, `integrations-engineer`, `aeo-seo-logic-engineer`. Quality (veto power): `code-review`, `content-quality`, `compliance-review`. Ops: `qa-testing`, `devops-deployment`, `documentation`.
+Orchestration: `lead-architect-orchestrator` (sole authority to advance stages). Build: `lead-ui-ux-designer`, `lead-backend-data-architect`, `frontend-engineer`, `integrations-engineer`, `aeo-seo-logic-engineer`, `content-production-engineer` (generates content, never approves its own output). Quality (veto power): `code-review`, `content-quality`, `compliance-review`. Ops: `qa-testing`, `devops-deployment`, `documentation`.
 
 Skills: `schema-generation`, `brand-kit-design-token`, `compliance-ruleset`, `aeo-audit`. Logic lives in skills, not buried in agents; each is tested in isolation (build step 0.2).
 

@@ -32,7 +32,7 @@
 - [ ] **QA tenant-isolation suite passes: no cross-tenant read/write under ANY role; client_viewer cannot see sibling clients.**
 
 ### 0.4 — Design system + white-label theming ∥ (parallel with 0.3)
-- **Owner:** Lead UI/UX Designer · **Gate:** Design Review
+- **Owner:** Lead UI/UX Designer · **Gate:** Design Review + **operator sign-off** (F2 freeze requires the human operator as independent reviewer — operator resolution 2026-07-07)
 - [ ] Token system (doc 06) — no hardcoded brand values anywhere.
 - [ ] shadcn/ui + Tailwind component library.
 - [ ] Recharts data-viz language.
@@ -40,7 +40,7 @@
 - [ ] The 5 defined animated moments (Aceternity/Magic UI), gated behind `prefers-reduced-motion`.
 
 ### 🔒 FREEZE GATE 0 — Foundation frozen
-**Do not start Phase 1 until:** 0.3 passes security + isolation review AND 0.4 passes design review AND all 4 skills pass isolation tests. The Orchestrator records the freeze. Changes to frozen foundation now require Orchestrator + Code Review sign-off.
+**Do not start Phase 1 until:** 0.3 passes security + isolation review AND 0.4 passes design review **+ operator sign-off** AND all 4 skills pass isolation tests. The Orchestrator records the freeze. Changes to frozen foundation now require Orchestrator + Code Review sign-off.
 
 ---
 
@@ -78,7 +78,7 @@
 - [ ] M6 Content decay / freshness engine.
 
 ### 1.5 — Brand production + the authenticity pipeline
-- **Owner:** content pipeline + Integrations · **Gate:** Content Quality + Compliance Review (hard gates)
+- **Owner:** content-production-engineer + Integrations · **Gate:** Content Quality + Compliance Review (hard gates)
 - [ ] M7 Brand Kit engine (locked kits via `brand-kit-design-token`).
 - [ ] M8 Content Production (blogs/articles/FAQ/pillars, mapped to playbook, in brand voice).
 - [ ] M9 Humanization + AI-detection gate (pilot 2–3 vendors first; pluggable).
@@ -91,7 +91,7 @@
 - [ ] M15 Review management (monitor + draft responses + sentiment + velocity).
 
 ### 1.7 — Social & PR ∥
-- **Owner:** content + Integrations · **Gate:** Content Quality + Compliance
+- **Owner:** content-production-engineer + Integrations · **Gate:** Content Quality + Compliance
 - [ ] M11 Social design (Higgsfield/Motion, brand-forced) + captions + scheduling (via `SocialPostingProvider`).
 - [ ] M12 PR entity-leverage (Press section, Person sameAs, on-page mentions; new-PR outreach human-assisted).
 

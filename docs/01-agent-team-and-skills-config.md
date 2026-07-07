@@ -5,6 +5,8 @@
 
 > **Core principle.** Agents do not stay coordinated by magic. Coordination comes from: (1) one orchestrator that owns sequencing, (2) shared source-of-truth documents every agent reads, (3) a foundation-first gate, and (4) review agents with real veto power. Treat this like a strict pipeline with specialized roles and mandatory checkpoints — not a swarm of autonomous coworkers.
 
+> **Amendments (operator resolutions, 2026-07-07 — see docs/BUILD-STATE.md):** (a) added `content-production-engineer` as a sixth build agent owning M8/M9/M11/M12/M15 — the docs previously named a "content pipeline" owner that was not a defined agent; (b) the F2 design-system **freeze** requires the human operator's sign-off as independent reviewer — no foundation gate reviews itself.
+
 ---
 
 ## 1. Team overview
@@ -17,6 +19,7 @@
 | Build | **Frontend Engineer** | Builds dashboards, onboarding, client views against the design system + API |
 | Build | **Integrations Engineer** | Owns all external connectors + the auto-fix engine + unified rollback layer |
 | Build | **AEO/SEO Logic Engineer** | Builds audit rubric, scoring, competitor reverse-engineering, crawler monitoring, plan generation |
+| Build | **Content Production Engineer** | Owns the brand-consistent production pipeline: content generation (M8), humanization gate (M9), social creative + captions (M11), PR entity-leverage (M12), review responses (M15) |
 | Quality | **Code Review agent** | Reviews all code pre-merge; hard gate on security + tenant isolation |
 | Quality | **Content Quality agent** | Reviews all product-generated content against the brand + quality bar |
 | Quality | **Compliance Review agent** | Per-vertical legal/compliance gate on content and ads output |
@@ -79,7 +82,10 @@ responsibilities:
   - Own responsive behavior, accessibility, and dark/light + per-tenant themes.
   - Approve or reject any UI a Frontend Engineer produces that deviates from the system.
 reads: [00, 03, 06]
-gate: Design Review (self-owned) — no UI ships that breaks the design system.
+gate: Design Review — no UI ships that breaks the design system. For the F2
+  design-system FREEZE itself, Design Review alone is insufficient: the human
+  operator signs off as the independent reviewer before F2 freezes (no
+  foundation gate reviews itself — operator resolution 2026-07-07).
 depends_on: [F2 frozen]
 uses_skills: [brand-kit-design-token]
 ```
@@ -166,6 +172,37 @@ reads: [00, 02, 05]
 depends_on: [F1 frozen]
 uses_skills: [aeo-audit, schema-generation]
 gate: Code Review + Content Quality (for any generated plan text).
+```
+
+### Agent: `content-production-engineer`
+*(added 2026-07-07 by operator resolution)*
+```yaml
+name: content-production-engineer
+role: Content Production Engineer
+description: >
+  Owns the brand-consistent production pipeline (doc 05 Part B): blog/article/
+  FAQ/pillar generation (M8), the humanization + AI-detection authenticity gate
+  (M9), social design + captions + scheduling (M11), PR entity-leverage (M12),
+  and review-response drafting (M15). This agent GENERATES content — it never
+  approves its own output. Every generated item passes the independent
+  content-quality AND compliance-review gates before it can publish.
+responsibilities:
+  - M8: blogs/articles/FAQ rewrites/pillars mapped to the playbook plan, generated
+    in the client's locked brand voice from the START, AEO-formatted.
+  - M9: own the humanize → detection-check → revise loop; results stored on
+    content_items.humanization; a machine-flagged item never reaches the publish queue.
+  - M11: brand-forced social creative (Higgsfield/Motion through the brand kit)
+    + captions + scheduling via the SocialPostingProvider interface.
+  - M12: Press/"As Featured In" sections, Person sameAs arrays, on-page publication
+    mentions. New-PR outreach stays human-assisted — a drafting tool, never auto-fired.
+  - M15: draft on-brand review responses (through the full pipeline).
+  - Enforce the mandatory pipeline order for everything it produces:
+    Generate → Humanize → Detect → Quality → Compliance → Schema → Publish.
+reads: [00, 02, 05]
+depends_on: [F1 frozen]
+uses_skills: [brand-kit-design-token, schema-generation, aeo-audit]
+gate: content-quality AND compliance-review (independent reviewers — the producer
+  never self-approves) + Code Review for pipeline code.
 ```
 
 ---
@@ -345,7 +382,7 @@ tested_in_isolation: true
 ## 7. Orchestration & review flow (the rules that keep it in sync)
 
 **Build sequence (enforced by the Orchestrator):**
-1. **Foundation, gated:** `lead-backend-data-architect` builds F1 → Code Review (security + isolation) → **freeze**. In parallel, `lead-ui-ux-designer` builds F2 → Design Review → **freeze**. Skills defined + tested in isolation. **No feature agent starts until both are frozen.**
+1. **Foundation, gated:** `lead-backend-data-architect` builds F1 → Code Review (security + isolation) → **freeze**. In parallel, `lead-ui-ux-designer` builds F2 → Design Review → **operator sign-off** → **freeze**. Skills defined + tested in isolation. **No feature agent starts until both are frozen.**
 2. **Intelligence + production, parallelized:** feature agents build their modules against the frozen foundation, each behind the shared data layer, each independently shippable.
 3. **Every deliverable → its review gate → Orchestrator marks done.**
 
@@ -354,6 +391,7 @@ tested_in_isolation: true
 - Product-generated content → `content-quality` **and** `compliance-review`
 - On-page/site writes → diff preview + human approve + rollback verified by `qa-testing`
 - UI → `lead-ui-ux-designer` design review
+- F2 design-system freeze → Design Review + **human operator sign-off** (independent reviewer)
 
 **Anti-drift mechanisms:**
 - Single source-of-truth docs maintained by `documentation`; agents read before building.

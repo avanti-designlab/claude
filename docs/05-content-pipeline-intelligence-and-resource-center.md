@@ -1,7 +1,7 @@
 # 05 — Content Pipeline, Intelligence & Resource Center
 ### The AEO logic, the brand-consistent production engine, the humanization/authenticity gate, and the industry resource center
 
-> **Purpose.** Defines the intelligence modules (audit, tracker, competitor reverse-engineering, crawler monitoring, freshness), the production pipeline (blog/content, schema, social, PR entity-leverage), the humanization + authenticity gate, the local/reviews modules, measurement (ROI + alerting), and the Claude-powered industry resource center. Primary agents: `aeo-seo-logic-engineer` (intelligence) and the content pipeline (production), gated by `content-quality` and `compliance-review`.
+> **Purpose.** Defines the intelligence modules (audit, tracker, competitor reverse-engineering, crawler monitoring, freshness), the production pipeline (blog/content, schema, social, PR entity-leverage), the humanization + authenticity gate, the local/reviews modules, measurement (ROI + alerting), and the Claude-powered industry resource center. Primary agents: `aeo-seo-logic-engineer` (intelligence) and `content-production-engineer` (production — added by operator resolution 2026-07-07), gated by `content-quality` and `compliance-review`.
 
 ---
 
@@ -127,14 +127,14 @@ An embedded assistant (Anthropic API + web search enabled) that operators or cli
 | M4 Competitor RE | aeo-seo-logic-engineer | aeo-audit | code-review |
 | M5 Crawler monitor | aeo-seo-logic-engineer | — | code-review |
 | M6 Freshness | aeo-seo-logic-engineer | — | code-review |
-| M7 Brand Kit | lead-ui-ux-designer + content | brand-kit-design-token | design-review |
-| M8 Content | content pipeline | aeo-audit | content-quality + compliance-review |
-| M9 Humanization | integrations + content | — | content-quality (hard gate) |
+| M7 Brand Kit | lead-ui-ux-designer + content-production-engineer | brand-kit-design-token | design-review |
+| M8 Content | content-production-engineer | aeo-audit | content-quality + compliance-review |
+| M9 Humanization | content-production-engineer + integrations | — | content-quality (hard gate) |
 | M10 Schema | aeo-seo-logic-engineer | schema-generation | code-review |
-| M11 Social | content + integrations | brand-kit-design-token | content-quality + compliance-review |
-| M12 PR entity | content | schema-generation | content-quality |
+| M11 Social | content-production-engineer + integrations | brand-kit-design-token | content-quality + compliance-review |
+| M12 PR entity | content-production-engineer | schema-generation | content-quality |
 | M14 Local | aeo-seo-logic-engineer + integrations | schema-generation | code-review |
-| M15 Reviews | content + integrations | — | content-quality + compliance-review |
+| M15 Reviews | content-production-engineer + integrations | — | content-quality + compliance-review |
 | M16 ROI | integrations | — | code-review |
 | M17 Alerts | aeo-seo-logic-engineer + devops | — | code-review |
 | M18 Resource Center | integrations + aeo-seo-logic-engineer | compliance-ruleset | content-quality |
