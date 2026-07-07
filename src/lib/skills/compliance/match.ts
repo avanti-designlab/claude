@@ -5,9 +5,13 @@
  * - Phrases compile with word boundaries — "treats" never matches
  *   "treatsury" or "retreats".
  * - Normalization is strictly 1:1 per character (curly quotes → straight,
- *   en/em dash → hyphen, NBSP → space), so match indices are valid offsets
- *   into the ORIGINAL text and excerpts can be sliced from it verbatim.
+ *   en/em dash → hyphen, NBSP → space, zero-width characters → space), so
+ *   match indices are valid offsets into the ORIGINAL text and excerpts can
+ *   be sliced from it verbatim.
  * - All matching is case-insensitive ("CURES CANCER" is still caught).
+ * - Evasion hardening: invisible separators (zero-width space/non-joiner/
+ *   joiner, word joiner, BOM, soft hyphen) become plain spaces, so
+ *   "guaranteed\u200Bapproval" still matches the phrase "guaranteed approval".
  */
 
 import type { PatternMatcher } from "./types";
@@ -18,13 +22,23 @@ export interface TextSpan {
   excerpt: string;
 }
 
+/**
+ * Invisible characters used to evade phrase matchers ("guaranteed\u200Bapproval"):
+ * zero-width space (U+200B), zero-width non-joiner (U+200C), zero-width
+ * joiner (U+200D), word joiner (U+2060), BOM / zero-width no-break space
+ * (U+FEFF), soft hyphen (U+00AD). Each is a single UTF-16 code unit, so a
+ * 1:1 replacement with a space preserves offsets into the original text.
+ */
+const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/g;
+
 /** 1:1 character normalization — indices into the result map to the original. */
 export function normalizeForMatching(text: string): string {
   return text
     .replace(/[‘’ʼ]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-")
-    .replace(/ /g, " ");
+    .replace(/ /g, " ")
+    .replace(ZERO_WIDTH_CHARS, " ");
 }
 
 function escapeRegExp(s: string): string {
@@ -96,11 +110,12 @@ const US_STATE_CODES: Record<string, string> = {
 };
 
 /**
- * Normalize a jurisdiction string for comparison: lowercased/trimmed; known
- * US state names collapse to their two-letter code. Unknown values compare
- * as lowercase-trimmed strings (non-US markets still work by exact match).
+ * Normalize a jurisdiction string for comparison: lowercased/trimmed with
+ * internal whitespace collapsed ("new  york" === "new york"); known US state
+ * names collapse to their two-letter code. Unknown values compare as
+ * lowercase-trimmed strings (non-US markets still work by exact match).
  */
 export function normalizeJurisdiction(value: string): string {
-  const lower = value.trim().toLowerCase();
+  const lower = value.trim().toLowerCase().replace(/\s+/g, " ");
   return US_STATE_CODES[lower] ?? lower;
 }

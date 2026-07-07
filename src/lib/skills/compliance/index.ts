@@ -20,7 +20,12 @@
  * patterns and flags risk. It supports (never replaces) the
  * compliance-review agent and human legal sign-off; see the `disclaimer`
  * field on every result. Unknown verticals FAIL CLOSED with a
- * "no ruleset loaded" block violation.
+ * "no ruleset loaded" block violation; a check that evaluates zero rules
+ * fails closed with an "engine.empty-ruleset" block violation. The five
+ * seed verticals are LOCKED — registerRuleset() can never overwrite them
+ * (replacing a seed ruleset is an operator-level code change, not an API
+ * call). Vertical names normalize case/whitespace at registration and
+ * lookup ("Cannabis" resolves; genuinely unknown verticals still block).
  */
 
 export {

@@ -12,7 +12,14 @@
  * compliant. Every result carries this statement in its `disclaimer` field.
  *
  * FAIL-CLOSED: a vertical with no registered ruleset never silently passes —
- * it returns a "no ruleset loaded" block violation.
+ * it returns a "no ruleset loaded" block violation. A check that evaluates
+ * ZERO rules (empty ruleset, or none applicable to the content type) also
+ * fails closed with an "engine.empty-ruleset" block violation.
+ *
+ * SEED LOCK: the five seed verticals (SEED_RULESETS) can never be overwritten
+ * through this API — registerRuleset() throws, with no unlock option.
+ * Replacing a seed ruleset (e.g. with an approved M1b-generated one) is an
+ * operator-level decision made in code, not an API call.
  */
 
 import type {
@@ -43,25 +50,55 @@ const DEFAULT_SUBSTANTIATION_WINDOW = 150;
 // Ruleset registry (seed verticals preloaded; M1b playbooks register more)
 // ---------------------------------------------------------------------------
 
+/**
+ * Registry keys are normalized (lowercase, trimmed) so "Cannabis" and
+ * "cannabis" resolve to the same ruleset — while genuinely unknown verticals
+ * still fail closed. Normalization applies at registration AND lookup, so a
+ * case-variant can never shadow (or dodge the lock on) a seed vertical.
+ */
+function normalizeVertical(vertical: string): string {
+  return vertical.trim().toLowerCase();
+}
+
 const registry = new Map<string, VerticalRuleset>();
-for (const ruleset of SEED_RULESETS) registry.set(ruleset.vertical, ruleset);
+for (const ruleset of SEED_RULESETS) registry.set(normalizeVertical(ruleset.vertical), ruleset);
+
+/** Seed verticals are locked: they can never be overwritten via registerRuleset(). */
+const SEED_VERTICAL_KEYS: ReadonlySet<string> = new Set(
+  SEED_RULESETS.map((ruleset) => normalizeVertical(ruleset.vertical)),
+);
 
 /**
  * Register a ruleset for a new vertical (e.g. an approved M1b-generated
  * playbook). Generated rulesets for regulated industries are drafts until a
  * human approves them (SKILL.md) — register only approved rulesets.
+ *
+ * Seed verticals (cannabis, real-estate, restaurants, health-life-insurance,
+ * ecommerce) can NEVER be overwritten here — not even with
+ * `{ overwrite: true }`. There is no unlock mechanism in this library:
+ * replacing a seed ruleset is an operator-level decision made in the seed
+ * modules themselves (with code review), because a runtime overwrite could
+ * neuter the hard legal gate.
  */
 export function registerRuleset(ruleset: VerticalRuleset, options?: { overwrite?: boolean }): void {
-  if (registry.has(ruleset.vertical) && !options?.overwrite) {
+  const key = normalizeVertical(ruleset.vertical);
+  if (SEED_VERTICAL_KEYS.has(key)) {
+    throw new Error(
+      `Refusing to overwrite the seed compliance ruleset for vertical "${ruleset.vertical}". ` +
+        "Seed rulesets are locked — there is no overwrite option. Replacing one is an operator-level " +
+        "change to the seed modules (rulesets/), gated by code review, never a runtime API call.",
+    );
+  }
+  if (registry.has(key) && !options?.overwrite) {
     throw new Error(
       `A compliance ruleset for vertical "${ruleset.vertical}" is already registered; pass { overwrite: true } to replace it.`,
     );
   }
-  registry.set(ruleset.vertical, ruleset);
+  registry.set(key, ruleset);
 }
 
 export function getRuleset(vertical: string): VerticalRuleset | undefined {
-  return registry.get(vertical);
+  return registry.get(normalizeVertical(vertical));
 }
 
 export function registeredVerticals(): string[] {
@@ -73,7 +110,7 @@ export function registeredVerticals(): string[] {
 // ---------------------------------------------------------------------------
 
 export function checkCompliance(input: ComplianceCheckInput): ComplianceResult {
-  const ruleset = registry.get(input.vertical);
+  const ruleset = registry.get(normalizeVertical(input.vertical));
   if (!ruleset) return failClosed(input);
 
   const originalText = input.content.text ?? "";
@@ -105,6 +142,11 @@ export function checkCompliance(input: ComplianceCheckInput): ComplianceResult {
       }
     }
   }
+
+  // Defense-in-depth: a check that evaluated ZERO rules screened nothing —
+  // fail closed, never pass (empty ruleset, however it got there, or no rule
+  // applicable to this content type).
+  if (rulesEvaluated === 0) return failClosedEmpty(input, ruleset);
 
   const violations = findings.filter((f): f is ComplianceViolation => f.severity === "block");
   const warnings = findings.filter((f): f is ComplianceWarning => f.severity === "warn");
@@ -141,6 +183,35 @@ function failClosed(input: ComplianceCheckInput): ComplianceResult {
     disclaimer: COMPLIANCE_DISCLAIMER,
     vertical: input.vertical,
     rulesetVersion: null,
+    rulesEvaluated: 0,
+  };
+}
+
+/** A check that evaluated zero rules screened nothing → block, never pass. */
+function failClosedEmpty(input: ComplianceCheckInput, ruleset: VerticalRuleset): ComplianceResult {
+  const violation: ComplianceViolation = {
+    ruleId: "engine.empty-ruleset",
+    vertical: input.vertical,
+    severity: "block",
+    description:
+      "A compliance check that evaluates zero rules fails closed — an empty ruleset never passes content.",
+    legalReference:
+      "Doc 00 §7.7 / doc 02 (compliance_ruleset_ref is non-negotiable): nothing ships for a vertical without passing its ruleset.",
+    explanation:
+      `The ruleset for vertical "${input.vertical}" (version ${ruleset.version}) evaluated 0 rules for ` +
+      `content type "${input.contentType}" — the content was not screened at all, so the compliance ` +
+      "engine fails closed rather than passing unscreened content.",
+    requiredFix:
+      "Load a reviewed ruleset that contains rules applicable to this content type (M1b-generated " +
+      "rulesets require human legal review before use), then re-run the check.",
+  };
+  return {
+    pass: false,
+    violations: [violation],
+    warnings: [],
+    disclaimer: COMPLIANCE_DISCLAIMER,
+    vertical: input.vertical,
+    rulesetVersion: ruleset.version,
     rulesEvaluated: 0,
   };
 }
@@ -219,10 +290,26 @@ function evaluateRequiredElementRule(
   return makeFinding(rule, { explanation: rule.explanation });
 }
 
+/** Split a platform string into comparable word tokens ("Instagram Stories" → ["instagram", "stories"]). */
+function platformTokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9+]+/).filter(Boolean);
+}
+
+/**
+ * Word-boundary-aware platform matching. An entry matches only as a whole
+ * contiguous token sequence: "google ads" matches "google ads campaign" but
+ * NOT "google adsense" (no substring matching across token boundaries).
+ * Single-token entries match any whole token ("meta" matches "meta ads
+ * manager"). Fail-safe direction preserved: exact equality always matches,
+ * and list entries stay broad ("google" alone still catches "google
+ * adsense" wherever a ruleset prohibits Google entirely).
+ */
 function platformMatches(platform: string, entry: string): boolean {
   if (platform === entry) return true;
-  if (entry.includes(" ")) return platform.includes(entry);
-  return platform.split(/[^a-z0-9+]+/).includes(entry);
+  const haystack = platformTokens(platform);
+  const needle = platformTokens(entry);
+  if (needle.length === 0) return false;
+  return haystack.some((_, i) => needle.every((token, j) => haystack[i + j] === token));
 }
 
 function evaluatePlatformGateRule(rule: PlatformGateRule, content: ComplianceContent): ComplianceFinding | null {
