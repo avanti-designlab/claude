@@ -25,3 +25,33 @@ jobs:
       - run: npm run build
       # The tenant-isolation suite (0.3) needs Postgres and runs in its own
       # job below once migrations exist. Rollback suites arrive at 1.2.
+
+  # F1 tenant-isolation suite (doc 03 §7): fresh Postgres service container,
+  # scratch database per run, migrations + RLS assertions. A missing database
+  # fails loudly — this suite never skips.
+  isolation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: isolation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d isolation_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      ISOLATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/isolation_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:isolation
