@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runAudit } from "./audit";
 import { channelBoost, CHECK_CANONICAL_ORDER, effectiveCheckWeight, LOCAL_CHECK_IDS } from "./weights";
+import type { Playbook } from "@/lib/types/playbook";
 import type { CrawledSite, GbpProfileInput } from "./types";
 import {
   BASE_URL,
@@ -224,6 +225,41 @@ describe("playbook-driven weighting", () => {
     expect(channelBoost("gbp_completeness", ecommercePlaybook)).toBe(1); // "Local" channel has weight 0
     expect(channelBoost("faq_direct_answer", realEstatePlaybook)).toBe(1.3); // on-site resource center @ 30
     expect(channelBoost("review_velocity", restaurantPlaybook)).toBe(1.25); // reviews @ 25
+  });
+
+  it("ignores non-finite channel weights — NaN or Infinity never poisons priority scores (0.2 gate regression)", () => {
+    // NOT deepClone: JSON round-tripping silently converts NaN to null, which
+    // would defeat the point of the regression (real NaN must reach the guard).
+    const nanPlaybook: Playbook = { ...restaurantPlaybook, channel_weighting: { local: NaN } };
+    const infinityPlaybook: Playbook = { ...restaurantPlaybook, channel_weighting: { local: Infinity } };
+
+    // Non-finite weights degrade to "no boost" — NaN must not survive Math.min/Math.max.
+    expect(channelBoost("gbp_completeness", nanPlaybook)).toBe(1);
+    expect(channelBoost("gbp_completeness", infinityPlaybook)).toBe(1);
+
+    // End-to-end: a site with GBP gaps (whose check matches the "local"
+    // channel keyword) still yields finite, deterministically ordered fixes.
+    const weakGbp: GbpProfileInput = {
+      ...completeGbp,
+      primaryCategory: null,
+      hoursComplete: false,
+      photoCount: 0,
+      attributesComplete: false,
+      postsLast30Days: 0,
+    };
+    const site = makeSite({ gbpProfiles: [weakGbp] });
+    for (const playbook of [nanPlaybook, infinityPlaybook]) {
+      const result = runAudit(site, playbook);
+      expect(result.fixes.length).toBeGreaterThan(0);
+      expect(result.fixes.some((fix) => fix.checkId === "gbp_completeness")).toBe(true);
+      expect(result.fixes.every((fix) => Number.isFinite(fix.priorityScore))).toBe(true);
+      // Roadmap ordering holds (a NaN priorityScore would corrupt the sort) …
+      const scores = result.fixes.map((fix) => fix.priorityScore);
+      expect([...scores].sort((x, y) => y - x)).toEqual(scores);
+      // … and re-running on fresh inputs reproduces the exact same roadmap.
+      const rerun = runAudit(deepClone(site), { ...playbook });
+      expect(JSON.stringify(rerun)).toBe(JSON.stringify(result));
+    }
   });
 
   it("prioritizes the same GBP gap far higher under a hyper-local playbook than a semi-local one", () => {

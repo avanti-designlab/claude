@@ -258,6 +258,31 @@ describe("check 12 — freshness / staleness", () => {
     expect(outcome.fixes.some((fix) => fix.id === "freshness/expose-lastmodified-signals")).toBe(true);
   });
 
+  it("never rewards a future-dated lastModified — flagged as suspect data with a correction fix (0.2 gate regression)", () => {
+    const futureUrl = `${BASE_URL}/future`;
+    const site = makeSite({
+      pages: [
+        makePage({ url: `${BASE_URL}/`, lastModified: FRESH_DATE }),
+        // 14 days AFTER crawledAt (2026-07-01) — negative age must not pass `age <= windowDays`.
+        makePage({ url: futureUrl, lastModified: "2026-07-15T00:00:00.000Z" }),
+      ],
+    });
+    const outcome = checkFreshness(ctx(site, realEstatePlaybook, 90));
+    // The future-dated page is NOT counted fresh: 1 of 2 pages fresh.
+    expect(outcome.score).toBe(50);
+    const finding = outcome.evidence.find((e) => e.url === futureUrl && e.field === "lastModified");
+    expect(finding?.message).toContain("future-dated");
+    expect(finding?.found).toContain("14 day(s) after the crawl");
+    const fix = outcome.fixes.find((f) => f.id === "freshness/correct-future-dated-lastmodified");
+    expect(fix).toBeDefined();
+    expect(fix?.targetUrls).toEqual([futureUrl]);
+    expect(fix?.module).toBe("M13");
+    expect(fix?.automationLevel).toBe("ai_draft_human_approve");
+    expect(fix?.detail).toContain("cosmetic date-bumping");
+    // It is a suspect-data finding, not a "past the refresh window" finding.
+    expect(outcome.fixes.some((f) => f.id === "freshness/refresh-stale-pages")).toBe(false);
+  });
+
   it("detects stale dated statistics in visible text", () => {
     const url = `${BASE_URL}/stats`;
     const site = makeSite({

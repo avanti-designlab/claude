@@ -145,7 +145,13 @@ export function channelBoost(checkId: CheckId, playbook: Playbook): number {
   const keywords = CHECK_CHANNEL_KEYWORDS[checkId];
   let maxWeight = 0;
   for (const [channel, weight] of Object.entries(playbook.channel_weighting)) {
-    if (typeof weight !== "number" || weight <= 0) continue;
+    // Number.isFinite rejects non-numbers, NaN, and ±Infinity. NaN in
+    // particular MUST be excluded here: `NaN <= 0` is false, so a plain
+    // `weight <= 0` guard lets NaN through, Math.min/Math.max propagate it,
+    // and the resulting priorityScore: NaN corrupts the roadmap sort
+    // (0.2 gate finding). Bad playbook data degrades to "no boost", never
+    // to a poisoned fix list.
+    if (!Number.isFinite(weight) || weight <= 0) continue;
     if (keywords.some((re) => re.test(channel))) {
       maxWeight = Math.max(maxWeight, Math.min(weight, 100));
     }

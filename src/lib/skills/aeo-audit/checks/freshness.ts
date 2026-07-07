@@ -1,8 +1,9 @@
 /**
  * Check 12 — Freshness / staleness (SKILL.md, doc 05 M6).
  * Pages past the refresh window (relative to `crawledAt`, never wall-clock),
- * pages with no last-modified signal at all, and stale dated statistics in
- * visible text.
+ * pages with no last-modified signal at all, pages with a FUTURE-dated
+ * lastModified (suspect data — flagged, never rewarded as fresh), and stale
+ * dated statistics in visible text.
  *
  * HARD RULE carried on every refresh fix: `dateModified` is updated ONLY
  * where real edits were made — cosmetic date-bumping is prohibited.
@@ -26,6 +27,7 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
 
   const stalePages: string[] = [];
   const noSignalPages: string[] = [];
+  const futureDatedPages: string[] = [];
   const staleStatPages: string[] = [];
   let freshCount = 0;
 
@@ -41,7 +43,23 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
       });
     } else {
       const age = daysBetween(page.lastModified, site.crawledAt);
-      if (age !== null && age <= windowDays) {
+      if (age !== null && age < 0) {
+        // lastModified AFTER crawledAt is impossible as a genuine freshness
+        // signal — it means clock skew, a misconfigured CMS, or cosmetic
+        // date-bumping. DECISION (0.2 gate finding): scored as a FLAGGED
+        // ISSUE, not a mere data-quality warning — the page is NOT counted
+        // fresh and gets its own correction fix. Rewarding a future date
+        // would let date-bumping inflate the freshness score, which this
+        // module explicitly prohibits.
+        futureDatedPages.push(page.url);
+        evidence.push({
+          url: page.url,
+          field: "lastModified",
+          expected: "a modification date at or before the crawl timestamp",
+          found: `"${page.lastModified}" is ${Math.round(-age)} day(s) after the crawl`,
+          message: "lastModified is later than crawledAt — a future-dated signal is suspect data, not freshness.",
+        });
+      } else if (age !== null && age <= windowDays) {
         freshCount += 1;
       } else {
         stalePages.push(page.url);
@@ -93,6 +111,23 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
           ? "High — most of the site reads as stale; freshness is a direct authority/citation signal."
           : "Medium — refreshing stale pages restores freshness signals engines reward.",
       module: "M8",
+      automationLevel: "ai_draft_human_approve",
+    });
+  }
+  if (futureDatedPages.length > 0) {
+    fixes.push({
+      id: "freshness/correct-future-dated-lastmodified",
+      checkId: "freshness",
+      title: `Correct future-dated last-modified signals on ${futureDatedPages.length} page(s)`,
+      detail:
+        "lastModified is later than the crawl timestamp — impossible as a genuine freshness signal (clock skew, CMS " +
+        "misconfiguration, or cosmetic date-bumping). Set dateModified / sitemap lastmod to the REAL last-edit date. " +
+        "dateModified is updated ONLY where real edits were made — cosmetic date-bumping is prohibited (doc 05 M6).",
+      targetUrls: [...futureDatedPages].sort(),
+      impact: "medium",
+      impactEstimate:
+        "Medium — engines discount implausible freshness metadata; a credible real date restores trust in the page's freshness signals.",
+      module: "M13",
       automationLevel: "ai_draft_human_approve",
     });
   }
