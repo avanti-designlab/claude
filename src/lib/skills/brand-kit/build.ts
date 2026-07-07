@@ -155,7 +155,8 @@ function resolveTypography(input?: BrandTypographyInput): TypographyTokens {
 
 function resolveSpacing(input?: Partial<SpacingTokens>): SpacingTokens {
   const unit = input?.unit ?? SIGNAL_SPACING.unit;
-  const steps = deepClone(input?.steps ?? SIGNAL_SPACING.steps);
+  // Spread: a fresh mutable copy of what may be the frozen `readonly` default.
+  const steps = [...(input?.steps ?? SIGNAL_SPACING.steps)];
   if (!Number.isFinite(unit) || unit <= 0) {
     throw new Error(`spacing.unit must be a positive number of px, got ${unit}`);
   }
@@ -182,6 +183,31 @@ function resolveLikeness(input?: Partial<LikenessRefs>): LikenessRefs {
 }
 
 /**
+ * The single resolve/validate pipeline for a full token set: colors are
+ * contrast-validated and auto-corrected, typography and spacing are
+ * structurally validated. EVERY path that produces a kit — `buildBrandKit`
+ * and `reviseKit` — runs through this function, so no mutation path can
+ * smuggle an invalid token set past the gates.
+ *
+ * Internal to the library (exported for `lock.ts`, not from the index).
+ */
+export function resolveAndValidateTokens(
+  colors: ColorTokens,
+  typography: BrandTypographyInput | undefined,
+  spacing: Partial<SpacingTokens> | undefined
+): { tokens: DesignTokenSet; report: AccessibilityReport } {
+  const { colors: accessible, report } = ensureAccessibleColors(colors);
+  return {
+    tokens: {
+      colors: accessible,
+      typography: resolveTypography(typography),
+      spacing: resolveSpacing(spacing),
+    },
+    report,
+  };
+}
+
+/**
  * Build a complete, contrast-validated brand kit from brand assets.
  *
  * The returned kit is unlocked at version 1. Lock it with `lockKit` once
@@ -189,13 +215,11 @@ function resolveLikeness(input?: Partial<LikenessRefs>): LikenessRefs {
  * preserved by the caller).
  */
 export function buildBrandKit(input: BrandKitInput): BrandKitBuildResult {
-  const { colors, report } = ensureAccessibleColors(resolveColors(input.colors));
-
-  const tokens: DesignTokenSet = {
-    colors,
-    typography: resolveTypography(input.typography),
-    spacing: resolveSpacing(input.spacing),
-  };
+  const { tokens, report } = resolveAndValidateTokens(
+    resolveColors(input.colors),
+    input.typography,
+    input.spacing
+  );
 
   const kit: BrandKit = {
     tokens,

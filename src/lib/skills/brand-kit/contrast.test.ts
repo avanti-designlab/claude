@@ -13,20 +13,24 @@ import { SIGNAL_COLORS } from "./defaults";
 describe("validateColorTokens", () => {
   it("passes every required pair on the Signal default palette", () => {
     const checks = validateColorTokens(SIGNAL_COLORS);
-    expect(checks).toHaveLength(6);
+    expect(checks).toHaveLength(10);
     for (const check of checks) {
       expect(check.pass, `${check.id} at ${check.ratio.toFixed(2)}:1`).toBe(true);
     }
   });
 
-  it("applies AA normal-text (4.5:1) to ink and muted, UI-component (3:1) to accent/positive/negative", () => {
+  it("checks every foreground on BOTH surfaces: 4.5:1 for ink/muted, 3:1 for accent/positive/negative (F2 pair-set policy)", () => {
     const byId = new Map(validateColorTokens(SIGNAL_COLORS).map((c) => [c.id, c]));
     expect(byId.get("ink-on-surface")?.required).toBe(4.5);
     expect(byId.get("ink-on-surface-raised")?.required).toBe(4.5);
     expect(byId.get("muted-on-surface")?.required).toBe(4.5);
+    expect(byId.get("muted-on-surface-raised")?.required).toBe(4.5);
     expect(byId.get("accent-on-surface")?.required).toBe(3);
+    expect(byId.get("accent-on-surface-raised")?.required).toBe(3);
     expect(byId.get("positive-on-surface")?.required).toBe(3);
+    expect(byId.get("positive-on-surface-raised")?.required).toBe(3);
     expect(byId.get("negative-on-surface")?.required).toBe(3);
+    expect(byId.get("negative-on-surface-raised")?.required).toBe(3);
   });
 
   it("reports failures with measured ratios", () => {
@@ -184,6 +188,92 @@ describe("ensureAccessibleColors", () => {
     expect(() =>
       ensureAccessibleColors({ ...SIGNAL_COLORS, accent: "not-a-color" })
     ).toThrow(/Invalid hex color/);
+  });
+});
+
+describe("F2 pair-set policy — foregrounds validated on surfaceRaised too", () => {
+  it("catches muted text that passes on surface but fails on a raised card, and corrects it against both", () => {
+    // 5.75:1 on surface (passes), 3.94:1 on the lighter raised card (fails 4.5:1).
+    const palette: ColorTokens = {
+      surface: "#14181f",
+      surfaceRaised: "#2e3642",
+      ink: "#e9ecf1",
+      muted: "#8a93a3",
+      accent: "#e3a94f",
+      positive: "#45c496",
+      negative: "#ef7466",
+    };
+    const byId = new Map(validateColorTokens(palette).map((c) => [c.id, c]));
+    expect(byId.get("muted-on-surface")?.pass).toBe(true);
+    expect(byId.get("muted-on-surface-raised")?.pass).toBe(false);
+
+    const { colors, report } = ensureAccessibleColors(palette);
+    expect(contrastRatio(colors.muted, colors.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(colors.muted, colors.surfaceRaised)).toBeGreaterThanOrEqual(4.5);
+    const adj = report.adjustments.find((a) => a.token === "muted");
+    expect(adj?.reason).toContain("muted-on-surface-raised");
+    expect(adj?.resolved).toBe(true);
+    expect(report.pass).toBe(true);
+  });
+
+  it("catches an accent that passes on surface but fails 3:1 on a raised card", () => {
+    // 3.69:1 on white (passes), 2.86:1 on the raised gray (fails 3:1).
+    const palette: ColorTokens = {
+      surface: "#ffffff",
+      surfaceRaised: "#dfe3e8",
+      ink: "#1b202a",
+      muted: "#525c6b",
+      accent: "#b8763a",
+      positive: "#1c7a5c",
+      negative: "#b53a2e",
+    };
+    const byId = new Map(validateColorTokens(palette).map((c) => [c.id, c]));
+    expect(byId.get("accent-on-surface")?.pass).toBe(true);
+    expect(byId.get("accent-on-surface-raised")?.pass).toBe(false);
+
+    const { colors, report } = ensureAccessibleColors(palette);
+    expect(contrastRatio(colors.accent, colors.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors.accent, colors.surfaceRaised)).toBeGreaterThanOrEqual(3);
+    expect(report.pass).toBe(true);
+  });
+
+  it("auto-correction converges on a tight surface/surfaceRaised pair (every constraint met at once)", () => {
+    // White chrome with a fairly deep raised gray: muted and accent both fail
+    // only against the raised card and must be corrected against BOTH
+    // backgrounds simultaneously.
+    const { colors, report } = ensureAccessibleColors({
+      surface: "#ffffff",
+      surfaceRaised: "#dfe3e8",
+      ink: "#1b202a",
+      muted: "#6d7787", // 4.53:1 on white, 3.51:1 on raised
+      accent: "#b8763a", // 3.69:1 on white, 2.86:1 on raised
+      positive: "#1c7a5c",
+      negative: "#b53a2e",
+    });
+
+    expect(report.pass).toBe(true);
+    for (const check of report.checks) {
+      expect(
+        check.ratio,
+        `${check.id} at ${check.ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(check.required);
+    }
+    expect(report.adjustments.map((a) => a.token).sort()).toEqual(["accent", "muted"]);
+    expect(report.adjustments.every((a) => a.resolved)).toBe(true);
+    expect(report.distinguishability.pass).toBe(true);
+    // Corrections hold on both chrome layers.
+    expect(contrastRatio(colors.muted, "#dfe3e8")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(colors.accent, "#dfe3e8")).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps the separated negative accessible on the raised surface as well", () => {
+    const { colors, report } = ensureAccessibleColors({
+      ...SIGNAL_COLORS,
+      negative: SIGNAL_COLORS.positive, // indistinguishable pair forces separation
+    });
+    expect(report.distinguishability.pass).toBe(true);
+    expect(contrastRatio(colors.negative, colors.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors.negative, colors.surfaceRaised)).toBeGreaterThanOrEqual(3);
   });
 });
 

@@ -6,9 +6,10 @@
  * - `lockKit` returns a deep-frozen, locked copy. Direct mutation of any part
  *   of a locked kit throws (strict-mode TypeError).
  * - `reviseKit` is the only way to change a locked kit: it returns a NEW,
- *   unlocked kit at version+1 with the changes merged in and the palette
- *   re-validated. The input kit is never touched — the caller persists both
- *   rows, so history survives.
+ *   unlocked kit at version+1 with the changes merged in and the merged
+ *   result re-run through `buildBrandKit`'s resolve/validate pipeline. The
+ *   input kit is never touched — the caller persists both rows, so history
+ *   survives.
  */
 
 import type {
@@ -20,7 +21,8 @@ import type {
   TypographyTokens,
   VoiceProfile,
 } from "@/lib/types/brand";
-import { ensureAccessibleColors, type AccessibilityReport } from "./contrast";
+import { resolveAndValidateTokens } from "./build";
+import type { AccessibilityReport } from "./contrast";
 import { deepClone, deepFreeze, deepMerge } from "./structural";
 
 /**
@@ -61,8 +63,10 @@ export function lockKit(kit: BrandKit): Readonly<BrandKit> {
  * Create the next version of a kit. Works on locked and unlocked kits alike;
  * for locked kits it is the ONLY way to make a change. The result is a brand
  * new, mutable kit with `version + 1` and `locked: false` — lock it again
- * once approved. The revised palette goes through the same contrast
- * validation/correction as `buildBrandKit`.
+ * once approved. The merged result goes through the SAME resolve/validate
+ * pipeline as `buildBrandKit` (contrast validation/correction for colors,
+ * structural validation for typography and spacing), so a revision cannot
+ * smuggle an invalid token set into kit history.
  */
 export function reviseKit(
   kit: BrandKit,
@@ -76,9 +80,13 @@ export function reviseKit(
     likeness_refs: changes.likeness_refs,
   };
 
-  const next = deepMerge(deepClone(kit) as unknown as Record<string, unknown>, patch) as unknown as BrandKit;
-  const { colors, report } = ensureAccessibleColors(next.tokens.colors);
-  next.tokens.colors = colors;
+  const next = deepMerge(deepClone(kit), patch);
+  const { tokens, report } = resolveAndValidateTokens(
+    next.tokens.colors,
+    next.tokens.typography,
+    next.tokens.spacing
+  );
+  next.tokens = tokens;
   next.version = kit.version + 1;
   next.locked = false;
 

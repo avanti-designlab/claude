@@ -55,6 +55,8 @@ export {
   SIGNAL_LIGHT_NEUTRALS,
   SIGNAL_SPACING,
   SIGNAL_TYPOGRAPHY,
+  type ReadonlyDesignTokenSet,
+  type ReadonlySpacingTokens,
 } from "./defaults";
 
 // Color math

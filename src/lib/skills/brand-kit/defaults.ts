@@ -25,6 +25,26 @@ import type {
 } from "@/lib/types/brand";
 
 /**
+ * Read-only views of the shared kit shapes, so the frozen constants below are
+ * typed honestly instead of casting `Object.freeze` away. The shared
+ * `SpacingTokens` (src/lib/types/brand.ts) declares `steps` as mutable
+ * `number[]`; ideally it would be `readonly number[]` at the source — that
+ * file is outside this library, so these views carry the honest typing
+ * locally. Mutable token sets are assignable to these views, never the
+ * reverse; consumers needing a mutable copy spread/clone first (see
+ * `resolveSpacing` in build.ts).
+ */
+export interface ReadonlySpacingTokens extends Readonly<Omit<SpacingTokens, "steps">> {
+  readonly steps: readonly number[];
+}
+
+/** `DesignTokenSet` with the frozen spacing typed honestly (see `ReadonlySpacingTokens`). */
+export interface ReadonlyDesignTokenSet
+  extends Readonly<Omit<DesignTokenSet, "spacing">> {
+  readonly spacing: ReadonlySpacingTokens;
+}
+
+/**
  * Default color tokens (dark "Signal" theme).
  *
  * - surface       #14181f  deep graphite with a cool blue-slate cast
@@ -87,13 +107,13 @@ export const SIGNAL_TYPOGRAPHY: TypographyTokens = Object.freeze({
 });
 
 /** 4px base unit; steps are multipliers of the unit (0–128px). */
-export const SIGNAL_SPACING: SpacingTokens = Object.freeze({
+export const SIGNAL_SPACING: ReadonlySpacingTokens = Object.freeze({
   unit: 4,
-  steps: Object.freeze([0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32]) as number[],
+  steps: Object.freeze([0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32]),
 });
 
 /** The complete default token set — the tenant #1 theme. */
-export const SIGNAL_DEFAULT_TOKENS: DesignTokenSet = Object.freeze({
+export const SIGNAL_DEFAULT_TOKENS: ReadonlyDesignTokenSet = Object.freeze({
   colors: SIGNAL_COLORS,
   typography: SIGNAL_TYPOGRAPHY,
   spacing: SIGNAL_SPACING,

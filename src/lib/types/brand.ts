@@ -44,7 +44,7 @@ export interface SpacingTokens {
   /** Base unit in px. */
   unit: number;
   /** Multiplier steps of the base unit. */
-  steps: number[];
+  steps: readonly number[];
 }
 
 export interface DesignTokenSet {

@@ -9,7 +9,8 @@
  *    `{logo_url, colors, font, custom_domain}`) for white-label rendering.
  */
 
-import type { BrandKit, DesignTokenSet } from "@/lib/types/brand";
+import type { BrandKit } from "@/lib/types/brand";
+import type { ReadonlyDesignTokenSet } from "./defaults";
 
 /**
  * Flatten a token set into CSS custom properties.
@@ -24,7 +25,7 @@ import type { BrandKit, DesignTokenSet } from "@/lib/types/brand";
  * - Spacing: `--space-unit` (`{unit}px`) and, per step multiplier `m`,
  *   `--space-{m}` = `{m * unit}px`.
  */
-export function toCssVariables(tokens: DesignTokenSet): Record<string, string> {
+export function toCssVariables(tokens: ReadonlyDesignTokenSet): Record<string, string> {
   const vars: Record<string, string> = {};
 
   const { colors, typography, spacing } = tokens;
@@ -56,7 +57,7 @@ export function toCssVariables(tokens: DesignTokenSet): Record<string, string> {
 }
 
 /** Render the token set as a ready-to-inject CSS rule (default selector `:root`). */
-export function toCssBlock(tokens: DesignTokenSet, selector = ":root"): string {
+export function toCssBlock(tokens: ReadonlyDesignTokenSet, selector = ":root"): string {
   const lines = Object.entries(toCssVariables(tokens)).map(
     ([name, value]) => `  ${name}: ${value};`
   );

@@ -22,7 +22,25 @@ import {
   setLightness,
 } from "./color";
 
-/** Required minimum contrast ratios (WCAG 2.x). */
+/**
+ * Required minimum contrast ratios (WCAG 2.x) + the required pair set.
+ *
+ * F2 DESIGN POLICY (set by the Lead Designer, 2026-07-07; doc 06 §7 names the
+ * ratios but is silent on the pair set, so this constant is normative and
+ * goes into the design-system spec): every foreground token is validated
+ * against BOTH chrome layers — `surface` AND `surfaceRaised` — because raised
+ * cards (KPI tiles, tracker rows, chart panels) carry the same foregrounds as
+ * the base surface. Muted text on a raised card is a standard dashboard
+ * pattern, not an edge case.
+ *
+ * - `ink`, `muted` → `normalText` (4.5:1, WCAG 1.4.3 AA) on both surfaces.
+ * - `accent`, `positive`, `negative` → `uiComponent` (3:1, WCAG 1.4.11) on
+ *   both surfaces. These tokens color UI components, indicators, and large
+ *   data numerals — never body copy; status at body size always pairs the
+ *   color with a glyph (color is never the only signal).
+ *
+ * The concrete pair list lives in `CHECK_SPECS` below.
+ */
 export const CONTRAST_REQUIREMENTS = {
   /** WCAG 1.4.3 AA, normal text. */
   normalText: 4.5,
@@ -92,51 +110,28 @@ interface CheckSpec {
   rule: string;
 }
 
-/** The required contrast pairs (doc 06 §7 + task spec). */
-const CHECK_SPECS: readonly CheckSpec[] = [
+/**
+ * The required contrast pairs — every foreground token on BOTH chrome layers
+ * (F2 design policy; see `CONTRAST_REQUIREMENTS`).
+ */
+const CHECK_SPECS: readonly CheckSpec[] = (
+  [
+    { foreground: "ink", min: CONTRAST_REQUIREMENTS.normalText, rule: "WCAG 1.4.3 AA normal text" },
+    { foreground: "muted", min: CONTRAST_REQUIREMENTS.normalText, rule: "WCAG 1.4.3 AA normal text" },
+    { foreground: "accent", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
+    { foreground: "positive", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
+    { foreground: "negative", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
+  ] as const
+).flatMap(({ foreground, min, rule }): CheckSpec[] => [
+  { id: `${foreground}-on-surface`, foreground, background: "surface", min, rule },
   {
-    id: "ink-on-surface",
-    foreground: "ink",
-    background: "surface",
-    min: CONTRAST_REQUIREMENTS.normalText,
-    rule: "WCAG 1.4.3 AA normal text",
-  },
-  {
-    id: "ink-on-surface-raised",
-    foreground: "ink",
+    id: `${foreground}-on-surface-raised`,
+    foreground,
     background: "surfaceRaised",
-    min: CONTRAST_REQUIREMENTS.normalText,
-    rule: "WCAG 1.4.3 AA normal text",
+    min,
+    rule,
   },
-  {
-    id: "muted-on-surface",
-    foreground: "muted",
-    background: "surface",
-    min: CONTRAST_REQUIREMENTS.normalText,
-    rule: "WCAG 1.4.3 AA normal text",
-  },
-  {
-    id: "accent-on-surface",
-    foreground: "accent",
-    background: "surface",
-    min: CONTRAST_REQUIREMENTS.uiComponent,
-    rule: "WCAG 1.4.11 non-text / large text",
-  },
-  {
-    id: "positive-on-surface",
-    foreground: "positive",
-    background: "surface",
-    min: CONTRAST_REQUIREMENTS.uiComponent,
-    rule: "WCAG 1.4.11 non-text / large text",
-  },
-  {
-    id: "negative-on-surface",
-    foreground: "negative",
-    background: "surface",
-    min: CONTRAST_REQUIREMENTS.uiComponent,
-    rule: "WCAG 1.4.11 non-text / large text",
-  },
-];
+]);
 
 /** Run all required contrast checks against a palette without modifying it. */
 export function validateColorTokens(colors: ColorTokens): ContrastCheck[] {
@@ -274,7 +269,8 @@ export function ensureAccessibleColors(colors: ColorTokens): {
   let distinguishability = checkDistinguishability(palette.positive, palette.negative);
   if (!distinguishability.pass) {
     const from = palette.negative;
-    const separated = separateNegative(palette.positive, from, palette.surface);
+    const surfaces = [palette.surface, palette.surfaceRaised];
+    const separated = separateNegative(palette.positive, from, surfaces);
     if (separated !== null) {
       palette.negative = separated;
       distinguishability = checkDistinguishability(palette.positive, palette.negative);
@@ -290,7 +286,8 @@ export function ensureAccessibleColors(colors: ColorTokens): {
           `${fmt(CONTRAST_REQUIREMENTS.distinguishabilityContrast)}. Negative lightness ` +
           `stepped to ${Math.round(lightnessOf(separated))} so the pair reads as two ` +
           `states (now ${fmt(contrastRatio(palette.positive, separated))} mutual contrast) ` +
-          `while keeping ${fmt(contrastRatio(separated, palette.surface))} on surface.`,
+          `while keeping ${fmt(Math.min(...surfaces.map((bg) => contrastRatio(separated, bg))))} ` +
+          `on both surfaces.`,
         resolved: true,
       });
     }
@@ -311,12 +308,13 @@ export function ensureAccessibleColors(colors: ColorTokens): {
 /**
  * Step the negative token's lightness outward until it is luminance-
  * distinguishable from positive while still meeting the UI-component ratio
- * on surface. Returns null when no lightness satisfies both.
+ * on every chrome surface (both `surface` and `surfaceRaised`, per the F2
+ * pair-set policy). Returns null when no lightness satisfies all constraints.
  */
 function separateNegative(
   positive: string,
   negative: string,
-  surface: string
+  surfaces: readonly string[]
 ): string | null {
   const l0 = lightnessOf(negative);
   for (let delta = 1; delta <= 100; delta++) {
@@ -327,7 +325,9 @@ function separateNegative(
       if (
         contrastRatio(positive, candidate) >=
           CONTRAST_REQUIREMENTS.distinguishabilityContrast &&
-        contrastRatio(candidate, surface) >= CONTRAST_REQUIREMENTS.uiComponent
+        surfaces.every(
+          (bg) => contrastRatio(candidate, bg) >= CONTRAST_REQUIREMENTS.uiComponent
+        )
       ) {
         return candidate;
       }

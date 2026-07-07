@@ -58,7 +58,9 @@ describe("lockKit", () => {
       locked.voice_profile.samples.push("sneaky");
     }).toThrow(TypeError);
     expect(() => {
-      locked.tokens.spacing.steps[0] = 999;
+      // Mutable cast is the point: prove the RUNTIME freeze throws even when
+      // the compile-time readonly on steps is deliberately bypassed.
+      (locked.tokens.spacing.steps as number[])[0] = 999;
     }).toThrow(TypeError);
     expect(() => {
       locked.likeness_refs.higgsfieldElementIds.pop();
@@ -125,6 +127,43 @@ describe("reviseKit", () => {
     const adj = accessibility.adjustments.find((a) => a.token === "accent");
     expect(adj?.from).toBe("#20242c");
     expect(adj?.resolved).toBe(true);
+  });
+
+  it("rejects a revision smuggling a negative spacing unit (same gate as buildBrandKit)", () => {
+    const base = lockKit(freshKit());
+    expect(() => reviseKit(base, { tokens: { spacing: { unit: -4 } } })).toThrow(
+      /spacing\.unit/
+    );
+    // The rejected revision never touches the locked base.
+    expect(base.tokens.spacing.unit).toBe(4);
+  });
+
+  it("rejects a revision smuggling an empty font stack (same gate as buildBrandKit)", () => {
+    const base = lockKit(freshKit());
+    expect(() =>
+      reviseKit(base, { tokens: { typography: { body: "  " } } })
+    ).toThrow(/typography\.body/);
+    expect(base.tokens.typography.body).not.toBe("  ");
+  });
+
+  it("applies a valid spacing + typography revision through the shared pipeline", () => {
+    const base = lockKit(freshKit());
+    const { kit: revised, accessibility } = reviseKit(base, {
+      tokens: { spacing: { unit: 8 }, typography: { body: '"Söhne", sans-serif' } },
+    });
+
+    expect(revised.version).toBe(base.version + 1);
+    expect(revised.locked).toBe(false);
+    expect(revised.tokens.spacing.unit).toBe(8);
+    expect(revised.tokens.spacing.steps).toEqual(base.tokens.spacing.steps); // merged, not dropped
+    expect(revised.tokens.typography.body).toBe('"Söhne", sans-serif');
+    expect(revised.tokens.typography.display).toBe(base.tokens.typography.display);
+    expect(revised.tokens.colors).toEqual(base.tokens.colors);
+    expect(revised.voice_profile).toEqual(base.voice_profile);
+    expect(accessibility.pass).toBe(true);
+    expect(accessibility.adjustments).toEqual([]);
+    // History intact.
+    expect(base.tokens.spacing.unit).toBe(4);
   });
 
   it("ignores attempts to patch locked/version directly", () => {
