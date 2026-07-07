@@ -21,6 +21,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
-      # QA suites (tenant-isolation, rollback) are added from step 0.3/1.2
-      # onward and become required checks — see docs/BUILD-STATE.md.
+      # The tenant-isolation suite (0.3) needs Postgres and runs in its own
+      # job below once migrations exist. Rollback suites arrive at 1.2.
