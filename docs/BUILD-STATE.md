@@ -3,7 +3,9 @@
 
 > The Orchestrator drives from `07-build-sequence-and-execution-checklist.md`. This file records where the build actually is. Do not cross a 🔒 gate marked ⏸ below.
 
-## Current stage: **PHASE 1 OPEN — Freeze Gate 0 passed 2026-07-08 (operator signed off F1 + F2). Foundation frozen.**
+## Current stage: **PHASE 1 OPEN — Freeze Gate 0 passed 2026-07-08 (operator signed off F1 + F2). Foundation frozen. F1 schema APPLIED to the operator's live Supabase project (verified: 13/13 tables, RLS enabled + forced).**
+
+> **Provisioning note (2026-07-08):** the frozen F1 foundation schema (migrations 0001–0006) was applied to the operator's live Supabase project via the SQL Editor (the remote build environment's network policy blocks direct DB access, so the operator ran a combined script). Verified live: all 13 public tables present with `relrowsecurity` AND `relforcerowsecurity` = true. App-runtime connection secrets (`NEXT_PUBLIC_SUPABASE_URL`, anon key, etc.) to be wired when the first data-backed screen is built. Network policy note: this environment blocks outbound to Supabase/Vercel/GitHub API; allowlisting `*.supabase.co` would let the orchestrator manage the DB directly (operator/admin change).
 
 | Step | Item | Owner | Gate | Status |
 |---|---|---|---|---|
