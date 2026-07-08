@@ -54,6 +54,8 @@ describe("check 8 — GBP completeness", () => {
     expect(outcome.evidence.some((e) => e.url === "gbp:Downtown" && e.field === "hours")).toBe(true);
     const fix = outcome.fixes.find((f) => f.id === "gbp_completeness/complete-downtown");
     expect(fix).toMatchObject({ module: "M14", automationLevel: "ai_draft_human_approve", impact: "medium" });
+    expect(fix?.title).toBe('Complete the Google Business Profile for "Downtown" (9 gaps)');
+    expect(fix?.detail).toContain("This vertical treats Google Business Profile as medium priority.");
   });
 
   it("escalates impact under a gbp_priority=critical playbook (restaurants)", () => {
@@ -102,6 +104,7 @@ describe("check 9 — NAP consistency", () => {
     const correctFix = outcome.fixes.find((f) => f.id === "nap_consistency/correct-mismatched-listings");
     expect(createFix).toMatchObject({ module: "M14", automationLevel: "human_only", targetUrls: ["nap:Yelp"] });
     expect(correctFix).toMatchObject({ module: "M14", automationLevel: "ai_draft_human_approve", targetUrls: ["nap:Google"] });
+    expect(correctFix?.detail).toContain("we draft the corrections for your approval on each directory");
   });
 
   it("treats a listing missing a canonical field as inconsistent, with field evidence", () => {

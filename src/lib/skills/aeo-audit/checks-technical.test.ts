@@ -27,6 +27,10 @@ describe("check 5 — AI-crawler access", () => {
       targetUrls: [`${BASE_URL}/robots.txt`],
     });
     expect(fix?.title).toContain("GPTBot, ClaudeBot");
+    // Client-facing copy: no internal doc citations or architecture names.
+    expect(fix?.detail).toContain("you preview the exact diff and can roll it back with one click");
+    expect(fix?.detail).not.toContain("doc 05");
+    expect(fix?.detail).not.toContain("change-management");
   });
 
   it("flags JS-render-invisible pages with a human_only rendering fix", () => {
@@ -38,6 +42,7 @@ describe("check 5 — AI-crawler access", () => {
     expect(outcome.score).toBe(80); // robots 60 + render 40×0.5
     const fix = outcome.fixes.find((f) => f.id === "ai_crawler_access/fix-js-render-visibility");
     expect(fix).toMatchObject({ module: "M13", automationLevel: "human_only", impact: "critical", targetUrls: [invisible] });
+    expect(fix?.title).toBe("Serve 1 page without client-side JS (SSR/prerender)");
   });
 });
 
@@ -62,6 +67,7 @@ describe("check 6 — internal-linking density", () => {
     expect(outcome.score).toBe(63.3);
     const orphanFix = outcome.fixes.find((f) => f.id === "internal_linking/link-orphan-pages");
     expect(orphanFix).toMatchObject({ impact: "high", module: "M13", targetUrls: [orphan] });
+    expect(orphanFix?.title).toBe("Add internal links to 1 orphan page");
   });
 
   it("normalizes URLs (trailing slash, relative hrefs) when matching links", () => {

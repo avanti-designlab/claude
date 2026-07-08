@@ -11,6 +11,7 @@ import {
   collectJsonLdNodes,
   nodeTypes,
   normalizeWhitespace,
+  pluralize,
   rootHasContext,
   round1,
   stringProp,
@@ -127,10 +128,10 @@ export function checkSchemaPresence(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: `schema_presence_validity/add-${slugify(type)}`,
       checkId: "schema_presence_validity",
-      title: `Add ${type} JSON-LD (playbook schema_profile #${index + 1})`,
+      title: `Add ${type} schema`,
       detail:
-        `${type} is priority #${index + 1} in the ${playbook.vertical} playbook's schema_profile but was found on no crawled page. ` +
-        `Generate it via the schema-generation skill; schema must match visible page text exactly.`,
+        `${type} is the #${index + 1} schema priority in your industry playbook but appears on no crawled page. ` +
+        `We draft it for your approval; schema must match the visible page text exactly.`,
       targetUrls: [site.baseUrl],
       impact,
       impactEstimate:
@@ -146,7 +147,7 @@ export function checkSchemaPresence(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "schema_presence_validity/repair-invalid-json-ld",
       checkId: "schema_presence_validity",
-      title: `Repair ${invalidBlocks} invalid JSON-LD block(s)`,
+      title: `Repair ${pluralize(invalidBlocks, "invalid JSON-LD block")}`,
       detail:
         "Blocks failed to parse, declared no @type, or were missing @context. Invalid structured data is ignored by engines and wastes existing markup.",
       targetUrls: [...invalidBlockPages].sort(),
@@ -163,8 +164,8 @@ export function checkSchemaPresence(ctx: CheckContext): CheckOutcome {
       checkId: "schema_presence_validity",
       title: "Align FAQPage schema with visible page text",
       detail:
-        `${mismatchCount} FAQPage question(s) in schema do not appear in the visible page text. ` +
-        "Schema must match visible text exactly — mismatch is a manual-action risk (doc 05 M10).",
+        `${pluralize(mismatchCount, "FAQPage question")} in schema ${mismatchCount === 1 ? "does" : "do"} not appear in the visible page text. ` +
+        "Schema must match visible text exactly — mismatch is a manual-action risk.",
       targetUrls: mismatchPages.sort(),
       impact: "high",
       impactEstimate: "High — schema/text mismatch risks a manual action and undermines FAQ citation eligibility.",

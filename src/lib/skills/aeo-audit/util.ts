@@ -15,6 +15,11 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Count + correctly pluralized noun: pluralize(1, "page") → "1 page"; pluralize(3, "page") → "3 pages". */
+export function pluralize(count: number, noun: string, plural = `${noun}s`): string {
+  return `${count} ${count === 1 ? noun : plural}`;
+}
+
 export function wordCount(s: string): number {
   const trimmed = s.trim();
   return trimmed === "" ? 0 : trimmed.split(/\s+/).length;

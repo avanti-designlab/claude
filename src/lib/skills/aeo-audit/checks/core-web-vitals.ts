@@ -6,7 +6,7 @@
  */
 
 import type { CheckContext, CheckOutcome, CoreWebVitalsSample, EvidenceItem, FixDraft } from "../types";
-import { round1 } from "../util";
+import { pluralize, round1 } from "../util";
 
 interface MetricSpec {
   key: "lcpMs" | "inpMs" | "cls";
@@ -79,7 +79,7 @@ export function checkCoreWebVitals(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "core_web_vitals/fix-failing-metrics",
       checkId: "core_web_vitals",
-      title: `Fix Core Web Vitals on ${failingUrls.length} page(s)`,
+      title: `Fix Core Web Vitals on ${pluralize(failingUrls.length, "page")}`,
       detail:
         "Failing metrics per page are itemized in the check evidence. Performance remediation (image weight, script deferral, layout stability) is developer work on the client's stack.",
       targetUrls: [...failingUrls].sort(),

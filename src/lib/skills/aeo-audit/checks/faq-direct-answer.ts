@@ -6,7 +6,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FaqItem, FixDraft } from "../types";
-import { collectJsonLdNodes, firstSentence, nodeTypes, round1, stringProp, wordCount } from "../util";
+import { collectJsonLdNodes, firstSentence, nodeTypes, pluralize, round1, stringProp, wordCount } from "../util";
 
 const MAX_DIRECT_ANSWER_WORDS = 50;
 
@@ -126,7 +126,7 @@ export function checkFaqDirectAnswer(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "faq_direct_answer/rewrite-openings",
       checkId: "faq_direct_answer",
-      title: `Rewrite ${total - passing} FAQ answer(s) to open with the answer`,
+      title: `Rewrite ${pluralize(total - passing, "FAQ answer")} to open with the answer`,
       detail:
         "Answers must lead with a concise declarative answer (direct-answer AEO format), then elaborate. " +
         "Rewrites go through the full content pipeline (humanize → detection → quality → compliance).",

@@ -5,7 +5,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
-import { collectJsonLdNodes, nodeTypes, round1 } from "../util";
+import { collectJsonLdNodes, nodeTypes, pluralize, round1 } from "../util";
 
 function hasVideoObjectSchema(jsonLdBlocks: string[]): boolean {
   for (const raw of jsonLdBlocks) {
@@ -69,9 +69,10 @@ export function checkVideoTranscript(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "video_transcript_schema/add-transcripts",
       checkId: "video_transcript_schema",
-      title: `Publish indexable transcripts on ${missingTranscript.length} video page(s)`,
+      title: `Publish indexable transcripts on ${pluralize(missingTranscript.length, "video page")}`,
       detail:
-        "The transcript is the indexable text surface of a video page (doc 02 real-estate template: FAQ page = direct answer + full transcript + VideoObject).",
+        "The transcript is the indexable text surface of a video page — without it, engines have nothing to quote. " +
+        "Pair each video with a direct-answer opening, the full transcript, and VideoObject schema.",
       targetUrls: missingTranscript.sort(),
       impact: "high",
       impactEstimate: "High — without a transcript the video contributes zero citable text.",
@@ -83,8 +84,8 @@ export function checkVideoTranscript(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "video_transcript_schema/add-videoobject",
       checkId: "video_transcript_schema",
-      title: `Add VideoObject JSON-LD to ${missingSchema.length} video page(s)`,
-      detail: "Generate VideoObject schema via the schema-generation skill; it must match the on-page video and transcript.",
+      title: `Add VideoObject JSON-LD to ${pluralize(missingSchema.length, "video page")}`,
+      detail: "We draft VideoObject schema to match the on-page video and transcript.",
       targetUrls: missingSchema.sort(),
       impact: "medium",
       impactEstimate: "Medium — VideoObject makes the video machine-readable and eligible for video surfacing.",

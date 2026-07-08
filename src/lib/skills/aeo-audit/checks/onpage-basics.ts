@@ -7,7 +7,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
-import { clamp, normalizeWhitespace, round1 } from "../util";
+import { clamp, normalizeWhitespace, pluralize, round1 } from "../util";
 
 export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
   const { site } = ctx;
@@ -113,7 +113,7 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
           url: page.url,
           field: "alt",
           found: `${covered}/${page.images.length} images with alt`,
-          message: `${page.images.length - covered} image(s) missing alt attributes.`,
+          message: `Missing alt text on ${pluralize(page.images.length - covered, "image")}.`,
         });
       }
     }
@@ -147,7 +147,7 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
 
   pushFix(
     "write-missing-titles",
-    `Write titles for ${missingTitles.length} page(s)`,
+    `Write titles for ${pluralize(missingTitles.length, "page")}`,
     "Pages missing <title> tags. Draft per playbook keyword targets; publish via the auto-fix engine with diff preview.",
     missingTitles,
     "high",
@@ -155,7 +155,7 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
   );
   pushFix(
     "dedupe-titles",
-    `De-duplicate titles on ${new Set(duplicateTitles).size} page(s)`,
+    `De-duplicate titles on ${pluralize(new Set(duplicateTitles).size, "page")}`,
     "Pages share identical titles — engines cannot differentiate them.",
     duplicateTitles,
     "medium",
@@ -163,15 +163,15 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
   );
   pushFix(
     "write-missing-metas",
-    `Write meta descriptions for ${missingMetas.length} page(s)`,
-    "Pages missing meta descriptions.",
+    `Write meta descriptions for ${pluralize(missingMetas.length, "page")}`,
+    "Write a unique description per page, drafted to the playbook's keyword targets and previewed before publish.",
     missingMetas,
     "medium",
     "Medium — descriptions drive snippet quality and click-through.",
   );
   pushFix(
     "dedupe-metas",
-    `De-duplicate meta descriptions on ${new Set(duplicateMetas).size} page(s)`,
+    `De-duplicate meta descriptions on ${pluralize(new Set(duplicateMetas).size, "page")}`,
     "Pages share identical meta descriptions.",
     duplicateMetas,
     "low",
@@ -179,7 +179,7 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
   );
   pushFix(
     "fix-h1-structure",
-    `Fix H1 structure on ${new Set(h1Issues).size} page(s)`,
+    `Fix H1 structure on ${pluralize(new Set(h1Issues).size, "page")}`,
     "Pages have zero or multiple H1s — exactly one is expected.",
     h1Issues,
     "medium",
@@ -188,7 +188,7 @@ export function checkOnpageBasics(ctx: CheckContext): CheckOutcome {
   const totalAltGaps = altGapPages.length;
   pushFix(
     "add-image-alt-text",
-    `Add alt text on ${new Set(altGapPages).size} page(s)`,
+    `Add alt text on ${pluralize(new Set(altGapPages).size, "page")}`,
     "Images missing alt attributes. Draft descriptive alts; decorative images get empty alts.",
     altGapPages,
     totalAltGaps > site.pages.length / 2 ? "medium" : "low",

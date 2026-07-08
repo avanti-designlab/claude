@@ -10,7 +10,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
-import { clamp, daysBetween, round1 } from "../util";
+import { clamp, daysBetween, pluralize, round1 } from "../util";
 
 /** "as of 2023", "data from 2022", "updated 2021" … stale when ≥2 years old. */
 const DATED_STAT = /\b(as of|updated(?: on| in)?|data from|statistics from|figures from|survey from)\s+((?:19|20)\d{2})\b/gi;
@@ -56,7 +56,7 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
           url: page.url,
           field: "lastModified",
           expected: "a modification date at or before the crawl timestamp",
-          found: `"${page.lastModified}" is ${Math.round(-age)} day(s) after the crawl`,
+          found: `"${page.lastModified}" is ${pluralize(Math.round(-age), "day")} after the crawl`,
           message: "lastModified is later than crawledAt — a future-dated signal is suspect data, not freshness.",
         });
       } else if (age !== null && age <= windowDays) {
@@ -99,11 +99,11 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "freshness/refresh-stale-pages",
       checkId: "freshness",
-      title: `Refresh ${refreshTargets.length} stale page(s) with real content updates`,
+      title: `Refresh ${pluralize(refreshTargets.length, "stale page")} with real content updates`,
       detail:
         `Pages are past the ${windowDays}-day refresh window or carry dated statistics. Queue genuine content refreshes ` +
         "(updated facts, stats, examples) through the content pipeline. dateModified is updated ONLY where real edits were " +
-        "made — cosmetic date-bumping is discounted by Google and prohibited (doc 05 M6).",
+        "made — cosmetic date-bumping is discounted by Google and prohibited.",
       targetUrls: refreshTargets,
       impact: staleRatio >= 0.5 ? "high" : "medium",
       impactEstimate:
@@ -118,11 +118,11 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "freshness/correct-future-dated-lastmodified",
       checkId: "freshness",
-      title: `Correct future-dated last-modified signals on ${futureDatedPages.length} page(s)`,
+      title: `Correct future-dated last-modified signals on ${pluralize(futureDatedPages.length, "page")}`,
       detail:
         "lastModified is later than the crawl timestamp — impossible as a genuine freshness signal (clock skew, CMS " +
         "misconfiguration, or cosmetic date-bumping). Set dateModified / sitemap lastmod to the REAL last-edit date. " +
-        "dateModified is updated ONLY where real edits were made — cosmetic date-bumping is prohibited (doc 05 M6).",
+        "dateModified is updated ONLY where real edits were made — cosmetic date-bumping is prohibited.",
       targetUrls: [...futureDatedPages].sort(),
       impact: "medium",
       impactEstimate:
@@ -135,7 +135,7 @@ export function checkFreshness(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "freshness/expose-lastmodified-signals",
       checkId: "freshness",
-      title: `Expose last-modified signals on ${noSignalPages.length} page(s)`,
+      title: `Expose last-modified signals on ${pluralize(noSignalPages.length, "page")}`,
       detail:
         "Add dateModified to page schema and lastmod to the sitemap, reflecting REAL modification dates only — never bumped cosmetically.",
       targetUrls: [...noSignalPages].sort(),

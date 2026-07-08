@@ -9,7 +9,7 @@
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
 import { AI_CRAWLER_BOTS, isBotAllowed } from "../robots";
-import { pathOf, round1 } from "../util";
+import { pathOf, pluralize, round1 } from "../util";
 
 export function checkAiCrawlerAccess(ctx: CheckContext): CheckOutcome {
   const { site } = ctx;
@@ -58,8 +58,8 @@ export function checkAiCrawlerAccess(ctx: CheckContext): CheckOutcome {
       checkId: "ai_crawler_access",
       title: `Unblock ${blockedBots.join(", ")} in robots.txt`,
       detail:
-        "A blocked AI crawler cannot read the site at all — a page uncited past ~37 days usually has exactly this kind of block (doc 05 M5). " +
-        "Remove or scope down the blocking rules; the change ships through the change-management layer with diff preview and rollback.",
+        "A blocked AI crawler cannot read the site at all — a page uncited past ~37 days usually has exactly this kind of block. " +
+        "Remove or scope down the blocking rules — you preview the exact diff and can roll it back with one click.",
       targetUrls: [robotsTxtUrl],
       impact: "critical",
       impactEstimate:
@@ -72,7 +72,7 @@ export function checkAiCrawlerAccess(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "ai_crawler_access/fix-js-render-visibility",
       checkId: "ai_crawler_access",
-      title: `Serve ${invisiblePages.length} page(s) without client-side JS (SSR/prerender)`,
+      title: `Serve ${pluralize(invisiblePages.length, "page")} without client-side JS (SSR/prerender)`,
       detail:
         "Content only present after client-side JS execution is invisible to most AI crawlers. Requires rendering-architecture work (SSR, prerendering, or static fallback) by the site's developers.",
       targetUrls: [...invisiblePages].sort(),

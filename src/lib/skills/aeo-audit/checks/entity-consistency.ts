@@ -20,6 +20,7 @@ import {
   normalizeName,
   normalizePhone,
   normalizeWhitespace,
+  pluralize,
   round1,
   stringProp,
 } from "../util";
@@ -193,7 +194,7 @@ export function checkEntityConsistency(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "entity_consistency/align-onsite-entity",
       checkId: "entity_consistency",
-      title: `Align entity name/phone/address on ${onSiteMismatches.length} page(s)`,
+      title: `Align entity name/phone/address on ${pluralize(onSiteMismatches.length, "page")}`,
       detail: `Canonical entity: "${canonicalName ?? "(unknown)"}". Inconsistent on-site signals fragment the entity for AI engines.`,
       targetUrls: onSiteMismatches.sort(),
       impact: "high",
@@ -206,7 +207,7 @@ export function checkEntityConsistency(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "entity_consistency/align-directory-entity",
       checkId: "entity_consistency",
-      title: `Correct entity data on ${directoryMismatches.length} directory listing(s)`,
+      title: `Correct entity data on ${pluralize(directoryMismatches.length, "directory listing")}`,
       detail: `Directory listings disagree with the canonical entity ("${canonicalName ?? "(unknown)"}").`,
       targetUrls: directoryMismatches.sort(),
       impact: "medium",
@@ -219,7 +220,7 @@ export function checkEntityConsistency(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "entity_consistency/surface-credentials",
       checkId: "entity_consistency",
-      title: `Surface ${missingCredentials.length} missing credential(s) on-site`,
+      title: `Surface ${pluralize(missingCredentials.length, "missing credential")} on-site`,
       detail: `Credentials not found anywhere on-site: ${missingCredentials.join(", ")}. Add to author boxes / bio pages and Person schema sameAs.`,
       targetUrls: [site.baseUrl],
       impact: "medium",

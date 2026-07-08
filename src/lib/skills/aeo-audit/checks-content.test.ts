@@ -54,6 +54,11 @@ describe("check 1 — schema presence + validity", () => {
     expect(outcome.score).toBe(0);
     const missingPerson = outcome.fixes.find((fix) => fix.id === "schema_presence_validity/add-person");
     expect(missingPerson).toBeDefined();
+    expect(missingPerson?.title).toBe("Add Person schema");
+    expect(missingPerson?.detail).toBe(
+      "Person is the #1 schema priority in your industry playbook but appears on no crawled page. " +
+        "We draft it for your approval; schema must match the visible page text exactly.",
+    );
     expect(missingPerson?.impact).toBe("high"); // Person is priority #1 for real estate
     expect(missingPerson?.module).toBe("M10");
     expect(missingPerson?.automationLevel).toBe("ai_draft_human_approve");
@@ -95,7 +100,11 @@ describe("check 1 — schema presence + validity", () => {
     const mismatch = outcome.evidence.find((e) => e.field === "FAQPage question");
     expect(mismatch?.url).toBe(url);
     expect(mismatch?.found).toBe("Is this hidden?");
-    expect(outcome.fixes.some((fix) => fix.id === "schema_presence_validity/fix-schema-text-mismatch")).toBe(true);
+    const mismatchFix = outcome.fixes.find((fix) => fix.id === "schema_presence_validity/fix-schema-text-mismatch");
+    expect(mismatchFix?.detail).toBe(
+      "1 FAQPage question in schema does not appear in the visible page text. " +
+        "Schema must match visible text exactly — mismatch is a manual-action risk.",
+    );
   });
 });
 
@@ -199,7 +208,10 @@ describe("check 3 — transcript + VideoObject on video pages", () => {
     const transcriptFix = outcome.fixes.find((fix) => fix.id === "video_transcript_schema/add-transcripts");
     const schemaFix = outcome.fixes.find((fix) => fix.id === "video_transcript_schema/add-videoobject");
     expect(transcriptFix?.module).toBe("M8");
+    expect(transcriptFix?.title).toBe("Publish indexable transcripts on 1 video page");
+    expect(transcriptFix?.detail).toContain("without it, engines have nothing to quote");
     expect(schemaFix?.module).toBe("M10");
+    expect(schemaFix?.detail).toBe("We draft VideoObject schema to match the on-page video and transcript.");
   });
 });
 
@@ -239,9 +251,11 @@ describe("check 12 — freshness / staleness", () => {
     const finding = outcome.evidence.find((e) => e.url === staleUrl);
     expect(finding?.found).toContain("181 days old");
     const fix = outcome.fixes.find((f) => f.id === "freshness/refresh-stale-pages");
+    expect(fix?.title).toBe("Refresh 1 stale page with real content updates");
     expect(fix?.module).toBe("M8");
     expect(fix?.automationLevel).toBe("ai_draft_human_approve");
-    expect(fix?.detail).toContain("cosmetic date-bumping");
+    expect(fix?.detail).toContain("cosmetic date-bumping is discounted by Google and prohibited.");
+    expect(fix?.detail).not.toContain("doc 05");
   });
 
   it("respects a tighter refreshWindowDays option", () => {
@@ -272,13 +286,15 @@ describe("check 12 — freshness / staleness", () => {
     expect(outcome.score).toBe(50);
     const finding = outcome.evidence.find((e) => e.url === futureUrl && e.field === "lastModified");
     expect(finding?.message).toContain("future-dated");
-    expect(finding?.found).toContain("14 day(s) after the crawl");
+    expect(finding?.found).toContain("14 days after the crawl");
     const fix = outcome.fixes.find((f) => f.id === "freshness/correct-future-dated-lastmodified");
     expect(fix).toBeDefined();
     expect(fix?.targetUrls).toEqual([futureUrl]);
+    expect(fix?.title).toBe("Correct future-dated last-modified signals on 1 page");
     expect(fix?.module).toBe("M13");
     expect(fix?.automationLevel).toBe("ai_draft_human_approve");
-    expect(fix?.detail).toContain("cosmetic date-bumping");
+    expect(fix?.detail).toContain("cosmetic date-bumping is prohibited.");
+    expect(fix?.detail).not.toContain("doc 05");
     // It is a suspect-data finding, not a "past the refresh window" finding.
     expect(outcome.fixes.some((f) => f.id === "freshness/refresh-stale-pages")).toBe(false);
   });
@@ -328,7 +344,22 @@ describe("check 13 — title/meta/H1/alt coverage", () => {
     expect(fixIds).toContain("onpage_basics/dedupe-metas");
     expect(fixIds).toContain("onpage_basics/fix-h1-structure");
     expect(fixIds).toContain("onpage_basics/add-image-alt-text");
+    // Real plurals in client-facing fix titles: 1 page singular, 2 pages plural.
+    expect(outcome.fixes.find((f) => f.id === "onpage_basics/write-missing-titles")?.title).toBe("Write titles for 1 page");
+    expect(outcome.fixes.find((f) => f.id === "onpage_basics/dedupe-metas")?.title).toBe(
+      "De-duplicate meta descriptions on 2 pages",
+    );
     expect(outcome.fixes.every((fix) => fix.module === "M13" && fix.automationLevel === "ai_draft_human_approve")).toBe(true);
+  });
+
+  it("drafts missing meta descriptions per page, previewed before publish", () => {
+    const site = makeSite({ pages: [makePage({ url: `${BASE_URL}/no-meta`, metaDescription: null })] });
+    const outcome = checkOnpageBasics(ctx(site));
+    const fix = outcome.fixes.find((f) => f.id === "onpage_basics/write-missing-metas");
+    expect(fix?.title).toBe("Write meta descriptions for 1 page");
+    expect(fix?.detail).toBe(
+      "Write a unique description per page, drafted to the playbook's keyword targets and previewed before publish.",
+    );
   });
 
   it("counts empty alt (decorative) as covered but missing alt as a gap", () => {

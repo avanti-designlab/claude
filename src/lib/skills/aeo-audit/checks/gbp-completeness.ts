@@ -6,7 +6,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft, GbpProfileInput, ImpactLevel } from "../types";
-import { round1 } from "../util";
+import { pluralize, round1 } from "../util";
 
 const MIN_PHOTOS = 5;
 
@@ -114,8 +114,8 @@ export function checkGbpCompleteness(ctx: CheckContext): CheckOutcome {
       fixes.push({
         id: `gbp_completeness/complete-${profile.locationName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`,
         checkId: "gbp_completeness",
-        title: `Complete the GBP profile for "${profile.locationName}" (${gaps.length} gap(s))`,
-        detail: `Missing/weak fields: ${gaps.map((g) => g.field).join(", ")}. GBP priority for this vertical: ${priority}.`,
+        title: `Complete the Google Business Profile for "${profile.locationName}" (${pluralize(gaps.length, "gap")})`,
+        detail: `Missing/weak fields: ${gaps.map((g) => g.field).join(", ")}. This vertical treats Google Business Profile as ${priority} priority.`,
         targetUrls: [`gbp:${profile.locationName}`],
         impact,
         impactEstimate:

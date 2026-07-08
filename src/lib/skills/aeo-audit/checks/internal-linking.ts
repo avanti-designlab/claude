@@ -6,7 +6,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
-import { clamp, normalizeUrlForIdentity, round1 } from "../util";
+import { clamp, normalizeUrlForIdentity, pluralize, round1 } from "../util";
 
 const HUB_MIN_SITE_SIZE = 5; // hub structure only expected on sites larger than this
 const HUB_LINK_SHARE = 0.3;
@@ -99,7 +99,7 @@ export function checkInternalLinking(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "internal_linking/link-orphan-pages",
       checkId: "internal_linking",
-      title: `Add internal links to ${orphans.length} orphan page(s)`,
+      title: `Add internal links to ${pluralize(orphans.length, "orphan page")}`,
       detail: "Link each orphan from relevant hub/pillar and sibling pages so crawlers and engines can discover it.",
       targetUrls: [...orphans].sort(),
       impact: "high",
@@ -112,7 +112,7 @@ export function checkInternalLinking(ctx: CheckContext): CheckOutcome {
     fixes.push({
       id: "internal_linking/fix-dead-ends",
       checkId: "internal_linking",
-      title: `Add outbound internal links to ${deadEnds.length} dead-end page(s)`,
+      title: `Add outbound internal links to ${pluralize(deadEnds.length, "dead-end page")}`,
       detail: "Dead-end pages should link onward to related pillar/sibling content.",
       targetUrls: [...deadEnds].sort(),
       impact: "low",

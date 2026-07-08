@@ -9,7 +9,7 @@
  */
 
 import type { CheckContext, CheckOutcome, EvidenceItem, FixDraft } from "../types";
-import { clamp, daysBetween, parseIsoMs, round1 } from "../util";
+import { clamp, daysBetween, parseIsoMs, pluralize, round1 } from "../util";
 
 const EXPECTATIONS = {
   "hyper-local": { perMonth: 4, recencyDays: 30 },
@@ -93,7 +93,7 @@ export function checkReviewVelocity(ctx: CheckContext): CheckOutcome {
       checkId: "review_velocity",
       title: "Increase genuine review velocity",
       detail:
-        `Observed ${last30Count} review(s) in the last 30 days vs an expectation of ${expectation.perMonth} for a ` +
+        `Observed ${pluralize(last30Count, "review")} in the last 30 days vs an expectation of ${expectation.perMonth} for a ` +
         `${playbook.local_intensity} vertical. Reviews must come from real customer flows (post-visit/post-purchase asks) — ` +
         "automated or incentivized review generation violates platform terms and is prohibited.",
       targetUrls: snapshots.map((snapshot) => `reviews:${snapshot.source}`),

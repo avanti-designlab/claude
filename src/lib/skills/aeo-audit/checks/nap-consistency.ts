@@ -124,7 +124,7 @@ export function checkNapConsistency(ctx: CheckContext): CheckOutcome {
       id: "nap_consistency/correct-mismatched-listings",
       checkId: "nap_consistency",
       title: `Correct NAP data on ${mismatchedDirectories.join(", ")}`,
-      detail: `Listings disagree with the canonical NAP for "${canonical.name}". Draft corrections and push via the directory connectors.`,
+      detail: `Listings disagree with the canonical NAP for "${canonical.name}" — we draft the corrections for your approval on each directory.`,
       targetUrls: mismatchedDirectories.map((directory) => `nap:${directory}`),
       impact: "high",
       impactEstimate: "High — inconsistent NAP erodes local rankings and entity confidence across engines.",
