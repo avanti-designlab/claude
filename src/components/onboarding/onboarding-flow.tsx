@@ -1,0 +1,208 @@
+"use client";
+
+/**
+ * Phase 1.1 onboarding flow (doc 06 §5). A client-side stepper — no backend,
+ * no DB — that drives the real playbook engine in-browser:
+ *
+ *   select industry → add location(s) → connect properties →
+ *   plan assembling (moment #1) → custom plan (real GeneratedRoadmap)
+ *
+ * The plan is generated from `generatePlan(getPlaybook(vertical), { now })`.
+ * `now` is captured in the click handler (not at render) so the pure generator
+ * stays replayable and nothing hydration-sensitive runs on the server.
+ */
+
+import * as React from "react";
+import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ACTIVE_VERTICALS, getPlaybook } from "@/lib/playbooks";
+import { generatePlan } from "@/lib/plan";
+import type { LocalIntensity, SeedVertical } from "@/lib/types/playbook";
+import type { PropertyPlatform } from "@/lib/types/db";
+import type { GeneratedRoadmap } from "@/lib/types/roadmap";
+import { OnboardingStepper, type OnboardingStepMeta } from "./onboarding-stepper";
+import { StepIndustry } from "./step-industry";
+import { StepLocations, type LocationDraft } from "./step-locations";
+import { StepProperties, type PropertyDraft } from "./step-properties";
+import { StepAssembling } from "./step-assembling";
+import { StepPlan } from "./step-plan";
+import { VERTICAL_META } from "./onboarding-copy";
+
+const STEPS: OnboardingStepMeta[] = [
+  { id: 1, label: "Industry" },
+  { id: 2, label: "Locations" },
+  { id: 3, label: "Properties" },
+  { id: 4, label: "Assembling" },
+  { id: 5, label: "Your plan" },
+];
+
+let draftSeq = 0;
+const nextDraftId = (prefix: string) => `${prefix}-${(draftSeq += 1)}`;
+
+function isDormant(vertical: SeedVertical): boolean {
+  return !ACTIVE_VERTICALS.includes(vertical);
+}
+
+function verticalLabel(vertical: SeedVertical | null): string {
+  return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "Your";
+}
+
+export function OnboardingFlow() {
+  const [step, setStep] = React.useState(1);
+  const [vertical, setVertical] = React.useState<SeedVertical | null>(null);
+  const [locations, setLocations] = React.useState<LocationDraft[]>([
+    { id: "loc-0", value: "" },
+  ]);
+  const [properties, setProperties] = React.useState<PropertyDraft[]>([
+    { id: "prop-0", url: "", platform: "" },
+  ]);
+  const [roadmap, setRoadmap] = React.useState<GeneratedRoadmap | null>(null);
+
+  const localIntensity: LocalIntensity | null = React.useMemo(
+    () => (vertical ? (getPlaybook(vertical)?.local_intensity ?? null) : null),
+    [vertical]
+  );
+
+  const canAdvance = React.useMemo(() => {
+    if (step === 1) return vertical !== null;
+    if (step === 2) return locations.some((l) => l.value.trim().length > 0);
+    if (step === 3) return properties.some((p) => p.url.trim().length > 0);
+    return true;
+  }, [step, vertical, locations, properties]);
+
+  // Locations ----------------------------------------------------------
+  const updateLocation = (id: string, value: string) =>
+    setLocations((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, value } : l))
+    );
+  const addLocation = () =>
+    setLocations((prev) => [...prev, { id: nextDraftId("loc"), value: "" }]);
+  const removeLocation = (id: string) =>
+    setLocations((prev) => prev.filter((l) => l.id !== id));
+
+  // Properties ---------------------------------------------------------
+  const updatePropertyUrl = (id: string, url: string) =>
+    setProperties((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, url } : p))
+    );
+  const updatePropertyPlatform = (id: string, platform: PropertyPlatform) =>
+    setProperties((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, platform } : p))
+    );
+  const addProperty = () =>
+    setProperties((prev) => [
+      ...prev,
+      { id: nextDraftId("prop"), url: "", platform: "" },
+    ]);
+  const removeProperty = (id: string) =>
+    setProperties((prev) => prev.filter((p) => p.id !== id));
+
+  // Navigation ---------------------------------------------------------
+  const goBack = () => setStep((s) => Math.max(1, s - 1));
+
+  const goNext = () => {
+    if (!canAdvance) return;
+    // Leaving step 3 → generate the real plan. `now` captured here, not at
+    // render, so the pure generator stays deterministic and hydration-safe.
+    if (step === 3 && vertical) {
+      const playbook = getPlaybook(vertical);
+      setRoadmap(
+        playbook
+          ? generatePlan({ playbook, now: new Date().toISOString() })
+          : null
+      );
+    }
+    setStep((s) => Math.min(STEPS.length, s + 1));
+  };
+
+  const restart = () => {
+    setStep(1);
+    setVertical(null);
+    setLocations([{ id: "loc-0", value: "" }]);
+    setProperties([{ id: "prop-0", url: "", platform: "" }]);
+    setRoadmap(null);
+  };
+
+  return (
+    <TooltipProvider>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-10">
+        <header className="flex flex-col gap-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-display text-lg leading-6 text-ink">Signal</p>
+              <p className="font-mono text-[10px] tracking-[0.18em] text-muted uppercase">
+                Client onboarding
+              </p>
+            </div>
+            <span className="font-mono text-xs text-muted">
+              Step {step} of {STEPS.length}
+            </span>
+          </div>
+          <OnboardingStepper steps={STEPS} current={step} />
+        </header>
+
+        <main aria-live="polite">
+          {step === 1 ? (
+            <StepIndustry value={vertical} onChange={setVertical} />
+          ) : null}
+
+          {step === 2 ? (
+            <StepLocations
+              locations={locations}
+              localIntensity={localIntensity}
+              onUpdate={updateLocation}
+              onAdd={addLocation}
+              onRemove={removeLocation}
+            />
+          ) : null}
+
+          {step === 3 ? (
+            <StepProperties
+              properties={properties}
+              onUpdateUrl={updatePropertyUrl}
+              onUpdatePlatform={updatePropertyPlatform}
+              onAdd={addProperty}
+              onRemove={removeProperty}
+            />
+          ) : null}
+
+          {step === 4 ? (
+            <StepAssembling
+              roadmap={roadmap}
+              isDormantVertical={vertical ? isDormant(vertical) : true}
+              onContinue={() => setStep(5)}
+            />
+          ) : null}
+
+          {step === 5 ? (
+            <StepPlan roadmap={roadmap} verticalLabel={verticalLabel(vertical)} />
+          ) : null}
+        </main>
+
+        <footer className="flex items-center justify-between gap-3 border-t pt-6">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={goBack}
+            disabled={step === 1}
+          >
+            <ArrowLeftIcon aria-hidden /> Back
+          </Button>
+
+          {step <= 3 ? (
+            <Button type="button" onClick={goNext} disabled={!canAdvance}>
+              Continue <ArrowRightIcon aria-hidden />
+            </Button>
+          ) : null}
+
+          {step === 5 ? (
+            <Button type="button" variant="outline" onClick={restart}>
+              Start over
+            </Button>
+          ) : null}
+        </footer>
+      </div>
+    </TooltipProvider>
+  );
+}
