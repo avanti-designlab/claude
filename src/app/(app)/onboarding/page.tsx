@@ -8,9 +8,11 @@ export const metadata: Metadata = {
 };
 
 /**
- * Phase 1.1 onboarding route. The flow is fully client-side (React stepper)
- * and runs the pure playbook engine in-browser — no backend needed. See
- * `@/components/onboarding/onboarding-flow`.
+ * Phase 1.1 onboarding route — now inside the authenticated app shell
+ * (src/app/(app)/layout.tsx gates it). The flow is client-side (React stepper)
+ * and runs the pure playbook engine in-browser; on completion for the active
+ * vertical it persists a real `clients` row via a tenant-scoped server action
+ * (see the flow's SaveClientPanel). See `@/components/onboarding/onboarding-flow`.
  */
 export default function OnboardingPage() {
   return (

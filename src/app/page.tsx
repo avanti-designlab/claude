@@ -8,6 +8,7 @@ import {
   FileTextIcon,
   GaugeIcon,
   LayoutDashboardIcon,
+  LogInIcon,
   MapPinnedIcon,
   PenLineIcon,
   ShieldCheckIcon,
@@ -49,6 +50,13 @@ interface LiveEntry {
 }
 
 const LIVE: LiveEntry[] = [
+  {
+    href: "/login",
+    title: "Sign in",
+    description:
+      "Enter your agency workspace — clients, onboarding, and the intelligence behind them. Access is provisioned by your agency admin.",
+    icon: LogInIcon,
+  },
   {
     href: "/onboarding",
     title: "Client onboarding",

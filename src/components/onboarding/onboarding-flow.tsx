@@ -29,6 +29,7 @@ import { StepLocations, type LocationDraft } from "./step-locations";
 import { StepProperties, type PropertyDraft } from "./step-properties";
 import { StepAssembling } from "./step-assembling";
 import { StepPlan } from "./step-plan";
+import { SaveClientPanel } from "@/components/clients/save-client-panel";
 import { VERTICAL_META } from "./onboarding-copy";
 
 const STEPS: OnboardingStepMeta[] = [
@@ -213,11 +214,24 @@ export function OnboardingFlow() {
           ) : null}
 
           {step === 5 ? (
-            <StepPlan
-              roadmap={roadmap}
-              verticalLabel={verticalLabel(vertical)}
-              isDormantVertical={vertical ? isDormant(vertical) : true}
-            />
+            <div className="flex flex-col gap-6">
+              <StepPlan
+                roadmap={roadmap}
+                verticalLabel={verticalLabel(vertical)}
+                isDormantVertical={vertical ? isDormant(vertical) : true}
+              />
+              {/* Persist the CLIENT record (the real write). Only offered for an
+                  active vertical — dormant verticals serve no client yet
+                  (Gate 1a). Plan/task persistence is the next slice. */}
+              {vertical && !isDormant(vertical) ? (
+                <SaveClientPanel
+                  vertical={vertical}
+                  verticalLabel={verticalLabel(vertical)}
+                  locations={locations}
+                  properties={properties}
+                />
+              ) : null}
+            </div>
           ) : null}
         </Entrance>
 
