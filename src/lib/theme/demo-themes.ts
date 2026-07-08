@@ -21,13 +21,14 @@ import {
   toTenantTheme,
   type TenantTheme,
 } from "@/lib/skills/brand-kit";
+import { operatorTheme } from "./operator-theme";
 
 export interface DemoTenant {
   id: string;
   name: string;
   /** One-line description shown in the showcase switcher. */
   description: string;
-  /** null = the Signal default theme (tenant #1) straight from globals.css. */
+  /** null = the neutral Signal framework theme straight from globals.css. */
   theme: TenantTheme | null;
 }
 
@@ -91,9 +92,17 @@ const midgreyHoldings: TenantTheme = {
 
 export const DEMO_TENANTS: DemoTenant[] = [
   {
+    id: "operator",
+    name: "Our agency (tenant #1)",
+    description:
+      "The active brand: high-end SaaS, light-first, Webflow-grounded — Sora display, electric-blue accent, white ground. Authored through buildBrandKit.",
+    theme: operatorTheme,
+  },
+  {
     id: "signal",
-    name: "Signal (default)",
-    description: "Tenant #1 — our agency. The neutral-premium instrument chrome.",
+    name: "Signal (framework default)",
+    description:
+      "The neutral-premium instrument chrome shipped as the built-in fallback — dark by default, with the light adaptation. Not brand-shaped.",
     theme: null,
   },
   {

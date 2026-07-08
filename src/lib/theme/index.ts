@@ -18,4 +18,12 @@ export { TenantThemeScope, type TenantThemeScopeProps } from "./scope";
 
 export { DEMO_TENANTS, type DemoTenant } from "./demo-themes";
 
+export {
+  operatorTheme,
+  operatorBuild,
+  OPERATOR_TENANT_ID,
+  OPERATOR_BRAND_INPUT,
+  OPERATOR_TYPOGRAPHY,
+} from "./operator-theme";
+
 export { cn } from "./utils";

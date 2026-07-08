@@ -17,6 +17,7 @@ const ALLOWED = new Set([
   "app/globals.css", // the token definitions themselves (parity-tested)
   "lib/theme/demo-themes.ts", // demo tenants.theme rows — pipeline INPUTS
   "lib/theme/light-surface.ts", // the Signal light-surface token definition
+  "lib/theme/operator-theme.ts", // tenant #1's brand INPUT (a tenants.theme row)
 ]);
 
 /** Directories under src/ owned by F2 and subject to the rule. */

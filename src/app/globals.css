@@ -31,6 +31,18 @@
   font-style: normal;
   font-display: swap;
 }
+/* Sora — geometric grotesque (self-hosted from @fontsource-variable/sora
+   5.2.8; woff2 committed to public/fonts). The display face for tenant #1's
+   operator brand theme, standing in for Webflow's proprietary WF Visual Sans.
+   A tenant theme references it by family name in `tenants.theme.font`, so the
+   real name (not a build hash) is required. */
+@font-face {
+  font-family: "Sora";
+  src: url("/fonts/sora-var.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: "Inter";
   src: url("/fonts/inter-var.woff2") format("woff2");

@@ -40,7 +40,7 @@ import { TokensSection } from "./sections/tokens";
 type Mode = "auto" | "dark" | "light";
 
 export function DesignSystemShowcase() {
-  const [tenantId, setTenantId] = React.useState("signal");
+  const [tenantId, setTenantId] = React.useState("operator");
   const [mode, setMode] = React.useState<Mode>("auto");
   const [forceReduced, setForceReduced] = React.useState(false);
 
