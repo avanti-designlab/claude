@@ -127,6 +127,8 @@ describe("deriveOnColorForegrounds", () => {
   test("picks the higher-contrast side per fill (dark Signal → surface everywhere)", () => {
     expect(deriveOnColorForegrounds(SIGNAL_COLORS)).toEqual({
       accent: "surface",
+      accentSecondary: "surface",
+      accentWarm: "surface",
       positive: "surface",
       negative: "surface",
     });
@@ -139,10 +141,18 @@ describe("deriveOnColorForegrounds", () => {
       ink: "#1b202a",
       muted: "#5c6677",
       accent: "#b4791d",
+      accentSecondary: "#2392ad",
+      accentWarm: "#b9791d",
       positive: "#309772",
       negative: "#eb5241",
     });
-    expect(choices).toEqual({ accent: "ink", positive: "ink", negative: "ink" });
+    expect(choices).toEqual({
+      accent: "ink",
+      accentSecondary: "ink",
+      accentWarm: "ink",
+      positive: "ink",
+      negative: "ink",
+    });
   });
 });
 

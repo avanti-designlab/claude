@@ -40,6 +40,18 @@ function declarations(cssText: string): Record<string, string> {
   return decls;
 }
 
+/**
+ * The on-color foreground tokens: the `deriveOnColorForegrounds` choice key
+ * (camelCase) paired with the emitted CSS variable name (kebab).
+ */
+const FOREGROUND_TOKENS = [
+  ["accent", "--accent-foreground"],
+  ["accentSecondary", "--accent-secondary-foreground"],
+  ["accentWarm", "--accent-warm-foreground"],
+  ["positive", "--positive-foreground"],
+  ["negative", "--negative-foreground"],
+] as const;
+
 /** The light-adapted Signal palette, recomputed through the pipeline. */
 function lightSignal() {
   return buildBrandKit({
@@ -69,12 +81,14 @@ describe("globals.css ↔ token-pipeline parity", () => {
       "--ink": colors.ink,
       "--muted": colors.muted,
       "--accent": colors.accent,
+      "--accent-secondary": colors.accentSecondary,
+      "--accent-warm": colors.accentWarm,
       "--positive": colors.positive,
       "--negative": colors.negative,
     };
     const choices = deriveOnColorForegrounds(colors);
-    for (const token of ["accent", "positive", "negative"] as const) {
-      expected[`--${token}-foreground`] = `var(--${choices[token]=== "surface" ? "surface" : "ink"})`;
+    for (const [key, cssName] of FOREGROUND_TOKENS) {
+      expected[cssName] = `var(--${choices[key] === "surface" ? "surface" : "ink"})`;
     }
 
     // The media block and the [data-theme="light"] block must be identical
@@ -91,9 +105,9 @@ describe("globals.css ↔ token-pipeline parity", () => {
   test("the dark derived foregrounds follow the deriveOnColorForegrounds rule", () => {
     const derived = declarations(markedBlock("signal-derived:dark"));
     const choices = deriveOnColorForegrounds(SIGNAL_COLORS);
-    for (const token of ["accent", "positive", "negative"] as const) {
-      expect(derived[`--${token}-foreground`]).toBe(
-        `var(--${choices[token] === "surface" ? "surface" : "ink"})`
+    for (const [key, cssName] of FOREGROUND_TOKENS) {
+      expect(derived[cssName]).toBe(
+        `var(--${choices[key] === "surface" ? "surface" : "ink"})`
       );
     }
   });

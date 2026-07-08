@@ -18,6 +18,18 @@ export interface ColorTokens {
   muted: string;
   /** Tenant/client brand color — the one that does the talking. */
   accent: string;
+  /**
+   * Secondary brand accent — the tenant's "energy" color (gradient moments,
+   * secondary highlights, illustrative pops; used sparingly). Additive to the
+   * frozen 7; gated like `accent` (UI-component 3:1 on both surfaces). A
+   * single-accent tenant sets it equal to `accent` (or leaves it to default).
+   */
+  accentSecondary: string;
+  /**
+   * Warm tertiary accent — badges, warm detail pops. Additive to the frozen 7;
+   * gated like `accent` (UI-component 3:1 on both surfaces).
+   */
+  accentWarm: string;
   /** Citation up / rank up. */
   positive: string;
   /** Citation down / rank down. */

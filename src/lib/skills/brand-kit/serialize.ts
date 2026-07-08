@@ -17,7 +17,8 @@ import type { ReadonlyDesignTokenSet } from "./defaults";
  *
  * Naming (exact):
  * - Colors (doc 06 §2): `--surface`, `--surface-raised`, `--ink`, `--muted`,
- *   `--accent`, `--positive`, `--negative`.
+ *   `--accent`, `--positive`, `--negative`. Plus the additive two-accent brand
+ *   extension: `--accent-secondary`, `--accent-warm`.
  * - Fonts: `--font-display`, `--font-body`, `--font-mono`.
  * - Type scale, per step `k`: `--text-{k}` (size),
  *   `--text-{k}--line-height`, and `--text-{k}--font-weight` when the step
@@ -34,6 +35,8 @@ export function toCssVariables(tokens: ReadonlyDesignTokenSet): Record<string, s
   vars["--ink"] = colors.ink;
   vars["--muted"] = colors.muted;
   vars["--accent"] = colors.accent;
+  vars["--accent-secondary"] = colors.accentSecondary;
+  vars["--accent-warm"] = colors.accentWarm;
   vars["--positive"] = colors.positive;
   vars["--negative"] = colors.negative;
 
@@ -73,6 +76,13 @@ export interface TenantTheme {
     ink: string;
     muted: string;
     accent: string;
+    /**
+     * Two-accent brand extension. Optional so hand-authored rows written
+     * before the extension still resolve (the engine defaults them to the
+     * neutral Signal accents). `toTenantTheme` always writes them.
+     */
+    accent_secondary?: string;
+    accent_warm?: string;
     positive: string;
     negative: string;
   };
@@ -107,6 +117,8 @@ export function toTenantTheme(
       ink: colors.ink,
       muted: colors.muted,
       accent: colors.accent,
+      accent_secondary: colors.accentSecondary,
+      accent_warm: colors.accentWarm,
       positive: colors.positive,
       negative: colors.negative,
     },

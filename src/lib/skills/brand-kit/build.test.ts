@@ -17,6 +17,8 @@ describe("buildBrandKit — token completeness from minimal input", () => {
       "ink",
       "muted",
       "accent",
+      "accentSecondary",
+      "accentWarm",
       "positive",
       "negative",
     ] as const) {

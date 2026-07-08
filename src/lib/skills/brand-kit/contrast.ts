@@ -56,7 +56,14 @@ export const CONTRAST_REQUIREMENTS = {
   distinguishabilityHueDeg: 30,
 } as const;
 
-type ForegroundToken = "ink" | "muted" | "accent" | "positive" | "negative";
+type ForegroundToken =
+  | "ink"
+  | "muted"
+  | "accent"
+  | "accentSecondary"
+  | "accentWarm"
+  | "positive"
+  | "negative";
 type BackgroundToken = "surface" | "surfaceRaised";
 
 export interface ContrastCheck {
@@ -119,6 +126,8 @@ const CHECK_SPECS: readonly CheckSpec[] = (
     { foreground: "ink", min: CONTRAST_REQUIREMENTS.normalText, rule: "WCAG 1.4.3 AA normal text" },
     { foreground: "muted", min: CONTRAST_REQUIREMENTS.normalText, rule: "WCAG 1.4.3 AA normal text" },
     { foreground: "accent", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
+    { foreground: "accentSecondary", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
+    { foreground: "accentWarm", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
     { foreground: "positive", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
     { foreground: "negative", min: CONTRAST_REQUIREMENTS.uiComponent, rule: "WCAG 1.4.11 non-text / large text" },
   ] as const
@@ -221,6 +230,8 @@ export function ensureAccessibleColors(colors: ColorTokens): {
     ink: normalizeHex(colors.ink),
     muted: normalizeHex(colors.muted),
     accent: normalizeHex(colors.accent),
+    accentSecondary: normalizeHex(colors.accentSecondary),
+    accentWarm: normalizeHex(colors.accentWarm),
     positive: normalizeHex(colors.positive),
     negative: normalizeHex(colors.negative),
   };
@@ -228,7 +239,15 @@ export function ensureAccessibleColors(colors: ColorTokens): {
 
   // Group specs by foreground token so a token constrained by several
   // backgrounds (ink) is corrected against all of them at once.
-  const tokens: ForegroundToken[] = ["ink", "muted", "accent", "positive", "negative"];
+  const tokens: ForegroundToken[] = [
+    "ink",
+    "muted",
+    "accent",
+    "accentSecondary",
+    "accentWarm",
+    "positive",
+    "negative",
+  ];
   for (const token of tokens) {
     const specs = CHECK_SPECS.filter((s) => s.foreground === token);
     const backgrounds = specs.map((s) => palette[s.background]);

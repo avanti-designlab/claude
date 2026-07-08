@@ -13,6 +13,7 @@
  */
 
 import * as React from "react";
+import { ArrowUpRightIcon } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -165,6 +166,17 @@ export function DesignSystemShowcase() {
               page is the review surface for the F2 freeze: switch tenants,
               flip modes, force reduced motion — everything below must hold.
             </p>
+            <div>
+              <a
+                href="/dashboard-preview"
+                className="group inline-flex items-center gap-2 rounded-full border bg-surface-raised px-4 py-2 text-sm font-medium text-ink outline-none transition-colors hover:border-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                See the sample dashboard preview
+                <span className="flex size-6 items-center justify-center rounded-full bg-ink text-surface transition-transform group-hover:-translate-y-0.5">
+                  <ArrowUpRightIcon className="size-3.5" strokeWidth={2.25} />
+                </span>
+              </a>
+            </div>
           </section>
 
           <TokensSection refreshKey={`${tenantId}:${mode}`} />

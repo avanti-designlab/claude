@@ -38,13 +38,18 @@ export type OnColorChoice = "surface" | "ink";
  */
 export function deriveOnColorForegrounds(
   colors: ColorTokens
-): Record<"accent" | "positive" | "negative", OnColorChoice> {
+): Record<
+  "accent" | "accentSecondary" | "accentWarm" | "positive" | "negative",
+  OnColorChoice
+> {
   const pick = (fill: string): OnColorChoice =>
     contrastRatio(fill, colors.surface) >= contrastRatio(fill, colors.ink)
       ? "surface"
       : "ink";
   return {
     accent: pick(colors.accent),
+    accentSecondary: pick(colors.accentSecondary),
+    accentWarm: pick(colors.accentWarm),
     positive: pick(colors.positive),
     negative: pick(colors.negative),
   };
@@ -53,16 +58,21 @@ export function deriveOnColorForegrounds(
 /** The derived variables the engine adds on top of the pipeline set. */
 export const DERIVED_VARIABLE_NAMES = [
   "--accent-foreground",
+  "--accent-secondary-foreground",
+  "--accent-warm-foreground",
   "--positive-foreground",
   "--negative-foreground",
 ] as const;
 
 function derivedVariables(colors: ColorTokens): Record<string, string> {
   const choices = deriveOnColorForegrounds(colors);
+  const onColor = (choice: OnColorChoice) => `var(--${choice === "surface" ? "surface" : "ink"})`;
   return {
-    "--accent-foreground": `var(--${choices.accent === "surface" ? "surface" : "ink"})`,
-    "--positive-foreground": `var(--${choices.positive === "surface" ? "surface" : "ink"})`,
-    "--negative-foreground": `var(--${choices.negative === "surface" ? "surface" : "ink"})`,
+    "--accent-foreground": onColor(choices.accent),
+    "--accent-secondary-foreground": onColor(choices.accentSecondary),
+    "--accent-warm-foreground": onColor(choices.accentWarm),
+    "--positive-foreground": onColor(choices.positive),
+    "--negative-foreground": onColor(choices.negative),
   };
 }
 
@@ -98,6 +108,10 @@ function tenantThemeToKitInput(theme: TenantTheme) {
   return {
     colors: {
       accent: theme.colors.accent,
+      // Optional in stored rows (backward compatible); undefined → the build
+      // step fills the neutral Signal default.
+      accentSecondary: theme.colors.accent_secondary,
+      accentWarm: theme.colors.accent_warm,
       surface: theme.colors.surface,
       surfaceRaised: theme.colors.surface_raised,
       ink: theme.colors.ink,

@@ -31,6 +31,12 @@ import { deepClone } from "./structural";
 export interface BrandColorInput {
   /** The brand color. Drives the `accent` token. Required. */
   accent: string;
+  /**
+   * Optional secondary/warm brand accents (the two-accent brand extension).
+   * Unspecified → the neutral Signal defaults. Gated like `accent`.
+   */
+  accentSecondary?: string;
+  accentWarm?: string;
   /** Optional brand neutrals. Unspecified neutrals fall back to the Signal defaults (adapted to the surface when one is given). */
   surface?: string;
   surfaceRaised?: string;
@@ -125,6 +131,14 @@ function resolveColors(input: BrandColorInput): ColorTokens {
     ink,
     muted,
     accent: normalizeInputHex(input.accent, "accent"),
+    accentSecondary:
+      input.accentSecondary !== undefined
+        ? normalizeInputHex(input.accentSecondary, "accentSecondary")
+        : SIGNAL_COLORS.accentSecondary,
+    accentWarm:
+      input.accentWarm !== undefined
+        ? normalizeInputHex(input.accentWarm, "accentWarm")
+        : SIGNAL_COLORS.accentWarm,
     positive:
       input.positive !== undefined
         ? normalizeInputHex(input.positive, "positive")

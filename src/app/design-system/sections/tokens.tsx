@@ -16,6 +16,8 @@ const COLOR_TOKENS = [
   { name: "--ink", role: "High-contrast foreground" },
   { name: "--muted", role: "Secondary text" },
   { name: "--accent", role: "Tenant brand — does the talking" },
+  { name: "--accent-secondary", role: "Secondary/energy accent" },
+  { name: "--accent-warm", role: "Warm tertiary accent" },
   { name: "--positive", role: "Citation up, rank up" },
   { name: "--negative", role: "Citation down, rank down" },
 ] as const;
@@ -75,7 +77,7 @@ export function TokensSection({ refreshKey }: { refreshKey: string }) {
       id="tokens"
       overline="01 · Tokens"
       title="The token system"
-      description="Seven named colors, three faces, one scale. Nothing below is a literal value — every swatch, size, and face reads a CSS custom property that the theming engine can override per tenant."
+      description="Seven core named colors plus two additive brand accents (secondary + warm), three faces, one scale. Nothing below is a literal value — every swatch, size, and face reads a CSS custom property that the theming engine can override per tenant."
     >
       <div className="grid gap-6 lg:grid-cols-2">
         <SpecimenPanel label="Color tokens (live values)">

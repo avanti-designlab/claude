@@ -95,7 +95,7 @@ export const DEMO_TENANTS: DemoTenant[] = [
     id: "operator",
     name: "Our agency (tenant #1)",
     description:
-      "The active brand: high-end SaaS, light-first, Webflow-grounded — Sora display, electric-blue accent, white ground. Authored through buildBrandKit.",
+      "The active brand: the operator's real palette — Core Blue primary, Core Orange energy, Alachua warm — on a Spendex-airy light-grey canvas with white cards. Sora display. Authored through buildBrandKit.",
     theme: operatorTheme,
   },
   {

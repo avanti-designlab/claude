@@ -13,7 +13,8 @@ import { SIGNAL_COLORS } from "./defaults";
 describe("validateColorTokens", () => {
   it("passes every required pair on the Signal default palette", () => {
     const checks = validateColorTokens(SIGNAL_COLORS);
-    expect(checks).toHaveLength(10);
+    // 7 foreground tokens × 2 chrome layers.
+    expect(checks).toHaveLength(14);
     for (const check of checks) {
       expect(check.pass, `${check.id} at ${check.ratio.toFixed(2)}:1`).toBe(true);
     }
@@ -27,6 +28,10 @@ describe("validateColorTokens", () => {
     expect(byId.get("muted-on-surface-raised")?.required).toBe(4.5);
     expect(byId.get("accent-on-surface")?.required).toBe(3);
     expect(byId.get("accent-on-surface-raised")?.required).toBe(3);
+    expect(byId.get("accentSecondary-on-surface")?.required).toBe(3);
+    expect(byId.get("accentSecondary-on-surface-raised")?.required).toBe(3);
+    expect(byId.get("accentWarm-on-surface")?.required).toBe(3);
+    expect(byId.get("accentWarm-on-surface-raised")?.required).toBe(3);
     expect(byId.get("positive-on-surface")?.required).toBe(3);
     expect(byId.get("positive-on-surface-raised")?.required).toBe(3);
     expect(byId.get("negative-on-surface")?.required).toBe(3);
@@ -122,6 +127,8 @@ describe("ensureAccessibleColors", () => {
       ink: "#1b202a",
       muted: "#5c6677",
       accent: "#ffe066", // pale yellow, ~1.3:1 on white
+      accentSecondary: "#155e6b", // dark teal — passes on both light surfaces
+      accentWarm: "#6b5416", // dark amber — passes on both light surfaces
       positive: "#1c7a5c",
       negative: "#b53a2e",
     };
@@ -175,6 +182,8 @@ describe("ensureAccessibleColors", () => {
       ink: "#e9ecf1",
       muted: "#98a2b3",
       accent: "#e3a94f",
+      accentSecondary: "#59c3dd",
+      accentWarm: "#e9b872",
       positive: "#45c496",
       negative: "#ef7466",
     });
@@ -200,6 +209,8 @@ describe("F2 pair-set policy — foregrounds validated on surfaceRaised too", ()
       ink: "#e9ecf1",
       muted: "#8a93a3",
       accent: "#e3a94f",
+      accentSecondary: "#59c3dd",
+      accentWarm: "#e9b872",
       positive: "#45c496",
       negative: "#ef7466",
     };
@@ -224,6 +235,8 @@ describe("F2 pair-set policy — foregrounds validated on surfaceRaised too", ()
       ink: "#1b202a",
       muted: "#525c6b",
       accent: "#b8763a",
+      accentSecondary: "#155e6b",
+      accentWarm: "#6b5416",
       positive: "#1c7a5c",
       negative: "#b53a2e",
     };
@@ -247,6 +260,8 @@ describe("F2 pair-set policy — foregrounds validated on surfaceRaised too", ()
       ink: "#1b202a",
       muted: "#6d7787", // 4.53:1 on white, 3.51:1 on raised
       accent: "#b8763a", // 3.69:1 on white, 2.86:1 on raised
+      accentSecondary: "#155e6b", // dark — passes both, no correction expected
+      accentWarm: "#6b5416", // dark — passes both, no correction expected
       positive: "#1c7a5c",
       negative: "#b53a2e",
     });
@@ -274,6 +289,46 @@ describe("F2 pair-set policy — foregrounds validated on surfaceRaised too", ()
     expect(report.distinguishability.pass).toBe(true);
     expect(contrastRatio(colors.negative, colors.surface)).toBeGreaterThanOrEqual(3);
     expect(contrastRatio(colors.negative, colors.surfaceRaised)).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("two-accent extension — accentSecondary / accentWarm are gated like accent", () => {
+  it("validates both new accents on BOTH chrome layers at the 3:1 UI-component floor", () => {
+    const byId = new Map(validateColorTokens(SIGNAL_COLORS).map((c) => [c.id, c]));
+    for (const id of [
+      "accentSecondary-on-surface",
+      "accentSecondary-on-surface-raised",
+      "accentWarm-on-surface",
+      "accentWarm-on-surface-raised",
+    ]) {
+      expect(byId.get(id)?.required).toBe(3);
+      expect(byId.get(id)?.pass).toBe(true);
+    }
+  });
+
+  it("darkens a too-light secondary and warm accent on a light surface and reports each fix", () => {
+    const { colors, report } = ensureAccessibleColors({
+      surface: "#ffffff",
+      surfaceRaised: "#f4f6fa",
+      ink: "#0b152b",
+      muted: "#5b6577",
+      accent: "#1b2fce", // dark blue — passes verbatim
+      accentSecondary: "#7fd8ef", // pale cyan — fails 3:1 on white
+      accentWarm: "#f4a200", // Alachua amber — ~1.9:1 on white, fails
+      positive: "#16a34a",
+      negative: "#e11d48",
+    });
+
+    expect(contrastRatio(colors.accentSecondary, "#ffffff")).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors.accentWarm, "#ffffff")).toBeGreaterThanOrEqual(3);
+    expect(lightnessOf(colors.accentSecondary)).toBeLessThan(lightnessOf("#7fd8ef"));
+    expect(lightnessOf(colors.accentWarm)).toBeLessThan(lightnessOf("#f4a200"));
+
+    const tokens = report.adjustments.map((a) => a.token);
+    expect(tokens).toContain("accentSecondary");
+    expect(tokens).toContain("accentWarm");
+    expect(colors.accent).toBe("#1b2fce"); // brand blue untouched
+    expect(report.pass).toBe(true);
   });
 });
 

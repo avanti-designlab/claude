@@ -46,6 +46,13 @@ const LIVE: LiveEntry[] = [
       "The frozen F2 “Signal” system: tokens, white-label theming, components, charts, and the five animated moments.",
     icon: SwatchBookIcon,
   },
+  {
+    href: "/dashboard-preview",
+    title: "Dashboard preview",
+    description:
+      "A visual target for the operator dashboard in the real agency brand — gauge, share-of-voice, stat tiles. Sample data, not the live module.",
+    icon: LayoutDashboardIcon,
+  },
 ];
 
 interface ComingEntry {

@@ -13,6 +13,8 @@ describe("toCssVariables", () => {
     expect(vars["--ink"]).toBe("#e9ecf1");
     expect(vars["--muted"]).toBe("#98a2b3");
     expect(vars["--accent"]).toBe("#e3a94f");
+    expect(vars["--accent-secondary"]).toBe("#59c3dd");
+    expect(vars["--accent-warm"]).toBe("#e9b872");
     expect(vars["--positive"]).toBe("#45c496");
     expect(vars["--negative"]).toBe("#ef7466");
     // The camelCase token name must NOT leak into CSS.
@@ -87,6 +89,8 @@ describe("toTenantTheme", () => {
         ink: "#e9ecf1",
         muted: "#98a2b3",
         accent: "#e3a94f",
+        accent_secondary: "#59c3dd",
+        accent_warm: "#e9b872",
         positive: "#45c496",
         negative: "#ef7466",
       },

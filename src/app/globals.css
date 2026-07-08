@@ -90,6 +90,8 @@
   --ink: #e9ecf1;
   --muted: #98a2b3;
   --accent: #e3a94f;
+  --accent-secondary: #59c3dd;
+  --accent-warm: #e9b872;
   --positive: #45c496;
   --negative: #ef7466;
 
@@ -149,6 +151,8 @@
 /* @signal-derived:dark:start */
 :root {
   --accent-foreground: var(--surface);
+  --accent-secondary-foreground: var(--surface);
+  --accent-warm-foreground: var(--surface);
   --positive-foreground: var(--surface);
   --negative-foreground: var(--surface);
   --overlay: color-mix(in oklab, var(--ink) 8%, transparent);
@@ -174,9 +178,13 @@
     --ink: #1b202a;
     --muted: #5c6677;
     --accent: #b4791d;
+    --accent-secondary: #2392ad;
+    --accent-warm: #b9791d;
     --positive: #309772;
     --negative: #eb5241;
     --accent-foreground: var(--ink);
+    --accent-secondary-foreground: var(--ink);
+    --accent-warm-foreground: var(--ink);
     --positive-foreground: var(--ink);
     --negative-foreground: var(--ink);
   }
@@ -187,9 +195,13 @@
   --ink: #1b202a;
   --muted: #5c6677;
   --accent: #b4791d;
+  --accent-secondary: #2392ad;
+  --accent-warm: #b9791d;
   --positive: #309772;
   --negative: #eb5241;
   --accent-foreground: var(--ink);
+  --accent-secondary-foreground: var(--ink);
+  --accent-warm-foreground: var(--ink);
   --positive-foreground: var(--ink);
   --negative-foreground: var(--ink);
 }
@@ -213,9 +225,13 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-accent-secondary: var(--accent-secondary);
+  --color-accent-warm: var(--accent-warm);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-secondary-foreground: var(--accent-secondary-foreground);
+  --color-accent-warm-foreground: var(--accent-warm-foreground);
   --color-positive-foreground: var(--positive-foreground);
   --color-negative-foreground: var(--negative-foreground);
 

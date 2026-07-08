@@ -53,12 +53,17 @@ export interface ReadonlyDesignTokenSet
  * - muted         #98a2b3  slate secondary text (6.9:1 on surface)
  * - accent        #e3a94f  instrument brass — the default tenant accent;
  *                          every real tenant overrides this (8.5:1 on surface)
+ * - accentSecondary #59c3dd cool cyan "readout" — the neutral secondary accent;
+ *                          every real tenant overrides it (passes 3:1 on both)
+ * - accentWarm    #e9b872  warm sand — the neutral warm accent; overridden by
+ *                          real tenants (passes 3:1 on both)
  * - positive      #45c496  teal-leaning green (8.1:1 on surface)
  * - negative      #ef7466  coral, orange-leaning red (6.2:1 on surface)
  *
  * positive/negative are hue-opposed by ~152° and separated by ~1.3:1 mutual
  * luminance contrast, so citation-up/down reads under red–green color
- * vision deficiency too.
+ * vision deficiency too. accentSecondary/accentWarm are neutral-premium
+ * defaults only — the brand does the talking through them per tenant.
  */
 export const SIGNAL_COLORS: ColorTokens = Object.freeze({
   surface: "#14181f",
@@ -66,6 +71,8 @@ export const SIGNAL_COLORS: ColorTokens = Object.freeze({
   ink: "#e9ecf1",
   muted: "#98a2b3",
   accent: "#e3a94f",
+  accentSecondary: "#59c3dd",
+  accentWarm: "#e9b872",
   positive: "#45c496",
   negative: "#ef7466",
 });
