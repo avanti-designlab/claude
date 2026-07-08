@@ -31,10 +31,16 @@ export async function signIn(credentials: {
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    // Return the message rather than throwing so the form can render it. Note:
-    // this does NOT reveal whether the email exists — supabase returns a
-    // generic "Invalid login credentials" for bad email or password.
-    return { ok: false, error: error.message };
+    // Return a SINGLE generic message rather than the raw Supabase
+    // error.message: no vendor string or account-state detail ("email not
+    // confirmed", rate-limit text, etc.) should travel to the browser — that is
+    // a mild account-enumeration surface. Distinct handling for the
+    // validation/"required" case stays above; every auth failure collapses to
+    // this one indistinguishable message.
+    return {
+      ok: false,
+      error: "That email and password don't match. Check them and try again.",
+    };
   }
   return { ok: true };
 }

@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { getPublicSupabaseConfig } from "@/lib/env";
+import { tryGetPublicSupabaseConfig } from "@/lib/env";
 
 /**
  * Supabase session refresh for Next middleware (the @supabase/ssr middleware
@@ -21,7 +21,13 @@ export async function updateSession(
 ): Promise<NextResponse> {
   let response = NextResponse.next({ request });
 
-  const { url, anonKey } = getPublicSupabaseConfig();
+  // Fail CLOSED, not 500: middleware runs on every matched request. If the
+  // public Supabase config isn't provisioned there is no session to refresh, so
+  // pass the request through untouched rather than throwing and crashing it
+  // before any page can render. (Env-set behavior below is unchanged.)
+  const config = tryGetPublicSupabaseConfig();
+  if (!config) return response;
+  const { url, anonKey } = config;
   const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {

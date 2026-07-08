@@ -1,5 +1,6 @@
 import "server-only";
 
+import { tryGetPublicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { parseSessionClaims, type SessionClaims } from "./parse-claims";
 
@@ -35,6 +36,11 @@ export interface AppSession {
 
 /** Read + verify the raw JWT claims, or null if there is no valid session. */
 async function verifiedClaims(): Promise<Record<string, unknown> | null> {
+  // Fail CLOSED when Supabase env is unset: no env → no client can be built →
+  // no verified session → the caller is UNAUTHENTICATED (null), never a 500.
+  // This guards ONLY the unset-env path; when env is set the behavior below is
+  // unchanged, so the isolation suite is unaffected.
+  if (!tryGetPublicSupabaseConfig()) return null;
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
   if (error || !data?.claims) return null;
