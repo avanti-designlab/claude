@@ -31,6 +31,7 @@ export type ArrowButtonTone =
   | "accent"
   | "onColor"
   | "onBright"
+  | "onGlow"
   | "surface"
   | "negative";
 export type ArrowButtonSize = "sm" | "md" | "lg";
@@ -44,6 +45,15 @@ const TONE: Record<ArrowButtonTone, string> = {
   /** Frosted dark circle for BRIGHT fills (the pass-3 cyan bubble on the dark chrome). */
   onBright:
     "border border-transparent bg-surface/20 text-surface hover:bg-surface hover:text-ink hover:shadow-md",
+  /**
+   * MODE-AWARE tone for the glow bubble (working brand v1): the bubble is a
+   * vivid-blue fill in light mode (frosted light circle) and the bright
+   * cyan→blue fill in dark mode (frosted dark circle). Rides the standard
+   * mode mechanism (`dark:` variant) — no JS mode prop.
+   */
+  onGlow:
+    "border border-transparent bg-surface-raised/18 text-surface-raised hover:bg-surface-raised hover:text-ink hover:shadow-md " +
+    "dark:bg-surface/20 dark:text-surface dark:hover:bg-surface dark:hover:text-ink",
   surface:
     "border border-transparent bg-surface-raised text-ink hover:bg-ink hover:text-surface-raised hover:shadow-lg",
   /** Urgency (pass-3 "needs fixing" zone) — semantic negative, never orange. */
@@ -79,7 +89,7 @@ export function ArrowButton({
         "transition-[transform,box-shadow,background-color,color,border-color] duration-200",
         "motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-105 motion-safe:active:scale-95",
         "focus-visible:ring-[3px] focus-visible:ring-ring/50",
-        (tone === "onColor" || tone === "surface") &&
+        (tone === "onColor" || tone === "surface" || tone === "onGlow") &&
           "focus-visible:ring-surface-raised/60",
         TONE[tone],
         SIZE[size].button,

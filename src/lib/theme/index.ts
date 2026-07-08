@@ -14,21 +14,24 @@ export {
   type TenantThemeResolution,
 } from "./engine";
 
+export { dualModeTenantCss } from "./operator-mode-css";
+
 export { TenantThemeScope, type TenantThemeScopeProps } from "./scope";
 
 export { DEMO_TENANTS, type DemoTenant } from "./demo-themes";
 
 export {
-  operatorTheme,
   operatorBuild,
-  OPERATOR_TENANT_ID,
+  operatorModeBuild,
+  operatorModeTheme,
+  operatorTheme,
+  OPERATOR_ACCENT_LIBRARY,
   OPERATOR_BRAND_INPUT,
+  OPERATOR_DARK_SURFACE,
+  OPERATOR_MODE_INPUTS,
+  OPERATOR_TENANT_ID,
   OPERATOR_TYPOGRAPHY,
-  BLUE_DEPTH_INPUTS,
-  BLUE_DEPTH_SCOPE_ID,
-  blueDepthBuild,
-  blueDepthTheme,
-  type BlueDepthVariant,
+  type OperatorMode,
 } from "./operator-theme";
 
 export { cn } from "./utils";

@@ -21,7 +21,7 @@ import {
   toTenantTheme,
   type TenantTheme,
 } from "@/lib/skills/brand-kit";
-import { operatorTheme } from "./operator-theme";
+import { operatorModeTheme, type OperatorMode } from "./operator-theme";
 
 export interface DemoTenant {
   id: string;
@@ -30,6 +30,15 @@ export interface DemoTenant {
   description: string;
   /** null = the neutral Signal framework theme straight from globals.css. */
   theme: TenantTheme | null;
+  /**
+   * Dual-palette tenant (the operator): light + dark themes applied by the
+   * root layout under the standard mode mechanism. When set, the showcase
+   * injects NO extra CSS (the boot emission already carries both modes) and
+   * the mode control stays live. (Phase-1 flag: DB-driven tenants need a
+   * `tenants.theme` schema extension for this shape — owned by the backend
+   * architect at M7 time.)
+   */
+  modes?: Record<OperatorMode, TenantTheme>;
 }
 
 /** Light, editorial, serif display — proves accent + font + surface swap. */
@@ -95,8 +104,9 @@ export const DEMO_TENANTS: DemoTenant[] = [
     id: "operator",
     name: "Our agency (tenant #1)",
     description:
-      "The active brand: the operator's real palette — Core Blue primary, Core Orange energy, Alachua warm — on a Spendex-airy light-grey canvas with white cards. Sora display. Authored through buildBrandKit.",
-    theme: operatorTheme,
+      "The active brand (working v1): the dual-palette blue-depth theme — light boots, dark glow under the standard mode mechanism. Primary vivid blue, highlight cyan, deep navy anchor, red urgency, Geist. Both palettes authored through buildBrandKit.",
+    theme: null,
+    modes: operatorModeTheme,
   },
   {
     id: "signal",

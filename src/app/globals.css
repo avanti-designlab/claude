@@ -1,6 +1,27 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* --------------------------------------------------------------------------
+   ADDITIVE (operator consolidation, 2026-07-08): the `dark:` variant is bound
+   to the app's STANDARD mode mechanism — the OS preference plus the existing
+   `data-theme` override (`data-theme="dark"` forces dark; `data-theme="light"`
+   forces light even under an OS dark preference). This is the same mechanism
+   the Signal light/dark token blocks below already use; it lets components
+   express mode-polarity-dependent derivations (e.g. on-fill foregrounds that
+   flip with the palette) without hardcoding either palette. Frozen token
+   blocks are untouched.
+   -------------------------------------------------------------------------- */
+@custom-variant dark {
+  &:where(:root[data-theme="dark"], :root[data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
 /* ==========================================================================
    F2 — "Signal" design system (doc 06 §2–3)
    --------------------------------------------------------------------------
@@ -32,10 +53,10 @@
   font-display: swap;
 }
 /* Sora — geometric grotesque (self-hosted from @fontsource-variable/sora
-   5.2.8; woff2 committed to public/fonts). The display face for tenant #1's
-   operator brand theme, standing in for Webflow's proprietary WF Visual Sans.
-   A tenant theme references it by family name in `tenants.theme.font`, so the
-   real name (not a build hash) is required. */
+   5.2.8; woff2 committed to public/fonts). Formerly the pass-2 operator
+   display face; the operator theme now uses Geist everywhere (pass 3). Kept
+   as an AVAILABLE face for tenant themes (a `tenants.theme.font` stack can
+   reference it by family name); it loads only if referenced. */
 @font-face {
   font-family: "Sora";
   src: url("/fonts/sora-var.woff2") format("woff2");
@@ -362,4 +383,53 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+}
+
+/* --------------------------------------------------------------------------
+   ADDITIVE (operator direction, 2026-07-08): entrance choreography — the
+   brand's motion signature for page load / route entry, applied through the
+   <Entrance> wrapper (src/components/moments/entrance.tsx). Pure CSS:
+   identical SSR/client markup (no hydration mismatch), plays without JS,
+   transforms/opacity only (zero layout shift), and `backwards` fill releases
+   every property after the run so hover transitions/shadows behave normally.
+
+   Signature: rise 14px + fade, 520ms, cubic-bezier(0.22, 1, 0.36, 1)
+   ("premium ease-out" — decisive, then settling; never bouncy), 90ms sibling
+   stagger via --entrance-delay. The glow bloom (box-shadow ramp on GlowCard)
+   starts 420ms after its card's rise begins — the card lands, then lights.
+
+   Reduced motion: BOTH gates disable it to the instant final state — the OS
+   preference (media query below) and the design-system force-toggle, which
+   mirrors the frozen useReducedMotion override onto :root[data-motion].
+   No color values here — the bloom animates to each element's own
+   token-derived shadow.
+   -------------------------------------------------------------------------- */
+@keyframes entrance-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes entrance-bloom {
+  from {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.entrance-item {
+  animation: entrance-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: var(--entrance-delay, 0ms);
+}
+.entrance-bloom {
+  animation: entrance-bloom 800ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--entrance-delay, 0ms) + 420ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .entrance-item,
+  .entrance-bloom {
+    animation: none;
+  }
+}
+:root[data-motion="reduced"] .entrance-item,
+:root[data-motion="reduced"] .entrance-bloom {
+  animation: none;
 }

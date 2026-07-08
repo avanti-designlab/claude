@@ -2,25 +2,24 @@
  * DESIGN PREVIEW — an insight/stat tile. BIG + BOLD: the number uses the
  * display face at full bold on the frozen `--text-display` step and counts up
  * on load (reduced-motion renders the final value instantly — same contract
- * as the Visibility resolve).
+ * as the Visibility resolve). Pass `countDelay` (ms) to sequence the count-up
+ * after the tile's entrance (`counterDelayMs`).
  *
- * Pass-3 tones (operator direction, 2026-07-08 — the BLUE-DEPTH system;
- * Core Orange/Alachua are OFF this page):
+ * Tones (working brand v1 — the BLUE-DEPTH system):
  *  - "plain" — quiet raised tile (kept calm so the showcase pops).
  *  - "sky"   — a soft highlight-cyan wash over the raised surface.
- *  - "glow"  — THE showcase: the illuminated bubble (GlowCard). On the light
- *              chrome it is a vivid-blue→navy gradient with the derived
- *              on-accent foreground; on the dark chrome it is the reference
- *              light-cyan→blue bubble with near-black (surface-token) text.
+ *  - "glow"  — THE showcase: the illuminated bubble (GlowCard). MODE-AWARE
+ *              via the standard `dark:` mechanism: in light mode a vivid
+ *              blue→navy gradient with the derived on-accent foreground; in
+ *              dark mode the reference light-cyan→blue bubble with
+ *              near-black (surface-token) text. No JS mode prop.
  *
  * Text on filled tiles uses DERIVED foregrounds or the opposing surface
- * tokens — never a raw white/black assumption. Tone specs are authored per
- * variant because token polarity flips between chromes; every value is still
- * a token derivation.
+ * tokens — never a raw white/black assumption; every value is a token
+ * derivation, so the tile re-skins per tenant.
  */
 
 import { cn } from "@/lib/theme/utils";
-import type { BlueDepthVariant } from "@/lib/theme/operator-theme";
 import { ArrowButton, type ArrowButtonTone } from "./arrow-button";
 import { CountUpValue } from "./count-up";
 import { Delta, type DeltaGround } from "./delta";
@@ -40,14 +39,16 @@ export interface StatCardProps {
    */
   sparkline?: number[];
   tone?: StatTone;
-  /** Which pass-3 chrome the tile sits on (fills/foregrounds flip with it). */
-  variant: BlueDepthVariant;
+  /** Count-up start delay in ms (entrance sequencing). */
+  countDelay?: number;
+  /** Let the glow tile's bloom join the entrance choreography. */
+  bloom?: boolean;
   className?: string;
 }
 
 interface ToneSpec {
-  /** Inline background (token wash) applied via style — non-glow tones only. */
-  background?: string;
+  /** Non-glow tones: token-wash background classes on the tile. */
+  surface?: string;
   /** Container text/border classes. */
   card: string;
   label: string;
@@ -56,82 +57,55 @@ interface ToneSpec {
   /** Muted context text on this tone (delta context). */
   context: string;
   arrow: ArrowButtonTone;
-  /** A small accent chip color that gives the tone a meaning cue. */
+  /** A small accent chip that gives the tone a meaning cue (classes). */
   chip: string;
-  /** Sparkline bar colors (CSS color strings over tokens). */
+  /** Sparkline bar classes. */
   spark: { bar: string; last: string };
   /** Which ground the delta pill sits on. */
   delta: DeltaGround;
 }
 
-function toneSpec(tone: StatTone, variant: BlueDepthVariant): ToneSpec {
-  if (tone === "plain") {
-    return {
-      card: "border border-border bg-surface-raised text-ink shadow-sm",
-      label: "text-muted",
-      value: "text-ink",
-      unit: "text-muted",
-      context: "text-muted",
-      arrow: "ink",
-      chip: "var(--muted)",
-      spark: {
-        bar: "color-mix(in oklab, var(--accent) 30%, transparent)",
-        last: "var(--accent)",
-      },
-      delta: "chrome",
-    };
-  }
-  if (tone === "sky") {
-    return {
-      background:
-        "linear-gradient(135deg, color-mix(in oklab, var(--accent-secondary) 14%, var(--surface-raised)), var(--surface-raised) 70%)",
-      card: "border border-transparent text-ink shadow-sm",
-      label: "text-muted",
-      value: "text-ink",
-      unit: "text-muted",
-      context: "text-muted",
-      arrow: "ink",
-      chip: "var(--accent-secondary)",
-      spark: {
-        bar: "color-mix(in oklab, var(--accent-secondary) 45%, transparent)",
-        last: "var(--accent-secondary)",
-      },
-      delta: "chrome",
-    };
-  }
-  // "glow" — the illuminated showcase bubble.
-  return variant === "dark"
-    ? {
-        // Bright cyan→blue fill: near-black surface-token foregrounds.
-        card: "text-surface",
-        label: "text-surface/75",
-        value: "text-surface",
-        unit: "text-surface/75",
-        context: "text-surface/70",
-        arrow: "onBright",
-        chip: "color-mix(in oklab, var(--surface) 75%, transparent)",
-        spark: {
-          bar: "color-mix(in oklab, var(--surface) 45%, transparent)",
-          last: "var(--surface)",
-        },
-        delta: "brightFill",
-      }
-    : {
-        // Vivid blue→navy fill: derived on-accent foregrounds.
-        card: "text-accent-foreground",
-        label: "text-accent-foreground/75",
-        value: "text-accent-foreground",
-        unit: "text-accent-foreground/75",
-        context: "text-accent-foreground/70",
-        arrow: "onColor",
-        chip: "color-mix(in oklab, var(--accent-foreground) 80%, transparent)",
-        spark: {
-          bar: "color-mix(in oklab, var(--accent-foreground) 40%, transparent)",
-          last: "var(--accent-foreground)",
-        },
-        delta: "deepFill",
-      };
-}
+const TONES: Record<StatTone, ToneSpec> = {
+  plain: {
+    card: "border border-border bg-surface-raised text-ink shadow-sm",
+    label: "text-muted",
+    value: "text-ink",
+    unit: "text-muted",
+    context: "text-muted",
+    arrow: "ink",
+    chip: "bg-muted",
+    spark: { bar: "bg-accent/30", last: "bg-accent" },
+    delta: "chrome",
+  },
+  sky: {
+    surface:
+      "[background:linear-gradient(135deg,color-mix(in_oklab,var(--accent-secondary)_14%,var(--surface-raised)),var(--surface-raised)_70%)]",
+    card: "border border-transparent text-ink shadow-sm",
+    label: "text-muted",
+    value: "text-ink",
+    unit: "text-muted",
+    context: "text-muted",
+    arrow: "ink",
+    chip: "bg-accent-secondary",
+    spark: { bar: "bg-accent-secondary/45", last: "bg-accent-secondary" },
+    delta: "chrome",
+  },
+  // "glow" — the illuminated showcase bubble; foregrounds flip with the mode.
+  glow: {
+    card: "text-accent-foreground dark:text-surface",
+    label: "text-accent-foreground/75 dark:text-surface/75",
+    value: "text-accent-foreground dark:text-surface",
+    unit: "text-accent-foreground/75 dark:text-surface/75",
+    context: "text-accent-foreground/70 dark:text-surface/70",
+    arrow: "onGlow",
+    chip: "bg-accent-foreground/80 dark:bg-surface/75",
+    spark: {
+      bar: "bg-accent-foreground/40 dark:bg-surface/45",
+      last: "bg-accent-foreground dark:bg-surface",
+    },
+    delta: "glow",
+  },
+};
 
 /** Decorative rounded bar sparkline (ref: the filled stat tile's bars). */
 function Sparkline({ values, spec }: { values: number[]; spec: ToneSpec }) {
@@ -141,11 +115,11 @@ function Sparkline({ values, spec }: { values: number[]; spec: ToneSpec }) {
       {values.map((v, i) => (
         <span
           key={i}
-          className="w-1.5 rounded-full"
-          style={{
-            height: `${Math.max(12, (v / max) * 100)}%`,
-            background: i === values.length - 1 ? spec.spark.last : spec.spark.bar,
-          }}
+          className={cn(
+            "w-1.5 rounded-full",
+            i === values.length - 1 ? spec.spark.last : spec.spark.bar
+          )}
+          style={{ height: `${Math.max(12, (v / max) * 100)}%` }}
         />
       ))}
     </div>
@@ -159,10 +133,11 @@ export function StatCard({
   delta,
   sparkline,
   tone = "plain",
-  variant,
+  countDelay = 0,
+  bloom = false,
   className,
 }: StatCardProps) {
-  const spec = toneSpec(tone, variant);
+  const spec = TONES[tone];
 
   const inner = (
     <>
@@ -173,11 +148,7 @@ export function StatCard({
             spec.label
           )}
         >
-          <span
-            aria-hidden
-            className="size-1.5 rounded-full"
-            style={{ background: spec.chip }}
-          />
+          <span aria-hidden className={cn("size-1.5 rounded-full", spec.chip)} />
           {label}
         </p>
         <ArrowButton label={`View ${label}`} size="sm" tone={spec.arrow} />
@@ -187,6 +158,7 @@ export function StatCard({
         <span className="flex items-baseline gap-1.5">
           <CountUpValue
             value={value}
+            delay={countDelay}
             className={cn(
               "font-display text-display leading-none font-bold tracking-tight tabular-nums",
               spec.value
@@ -218,8 +190,8 @@ export function StatCard({
   if (tone === "glow") {
     return (
       <GlowCard
-        variant={variant}
         surface="bubble"
+        bloom={bloom}
         className={cn(layout, motionCls, spec.card, className)}
       >
         {inner}
@@ -234,9 +206,9 @@ export function StatCard({
         layout,
         "transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1",
         spec.card,
+        spec.surface,
         className
       )}
-      style={spec.background ? { background: spec.background } : undefined}
     >
       {inner}
     </div>

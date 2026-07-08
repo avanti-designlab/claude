@@ -1,9 +1,11 @@
 /**
  * The 5 animated moments (doc 06 §4) — the ONLY places high-impact motion
- * exists in the product. Everything else (tables, forms, settings, review
+ * exists in the product — plus the route-entry entrance choreography
+ * (./entrance, operator direction 2026-07-08; filed under moment #5 "key
+ * state transitions"). Everything else (tables, forms, settings, review
  * queues, bulk-change previews) stays quiet. Every moment renders its final
  * state instantly under reduced motion via the shared gate in
- * ./reduced-motion.
+ * ./reduced-motion (the entrance uses the same policy in CSS).
  */
 
 export {
@@ -41,3 +43,15 @@ export {
 } from "./inviting-empty-state";
 
 export { StateTransition, type StateTransitionProps } from "./state-transition";
+
+export {
+  Entrance,
+  counterDelayMs,
+  entranceDelayMs,
+  ENTRANCE_BLOOM_DELAY_MS,
+  ENTRANCE_DURATION_MS,
+  ENTRANCE_EASE,
+  ENTRANCE_SETTLE_MS,
+  ENTRANCE_STAGGER_MS,
+  type EntranceProps,
+} from "./entrance";

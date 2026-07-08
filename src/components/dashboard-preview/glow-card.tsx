@@ -1,8 +1,9 @@
 /**
- * DESIGN PREVIEW primitive — the pass-3 "illuminated" card (operator
- * reference, 2026-07-08: backlit-glass cards on a near-black canvas — a thin
- * neon cyan-blue edge, a soft outer bloom, and a subtle radial glow rising
- * inside the fill).
+ * The pass-3 "illuminated" card — working brand v1's glow language (operator
+ * reference, 2026-07-08: backlit-glass cards — a thin neon cyan-blue edge, a
+ * soft outer bloom, and a subtle radial glow rising inside the fill). Used
+ * app-wide since the consolidation, SPARINGLY: the hero bubble plus one or
+ * two earned moments per page; dense tables/forms stay quiet.
  *
  * Recipe (all layers are color-mix derivations over TOKENS — no literals):
  *  - EDGE  — a 1px transparent border painted by a `border-box` gradient
@@ -12,20 +13,23 @@
  *  - BLOOM — layered box-shadows in token-derived blue (or red for the
  *            urgency panel): a tight halo plus a wide soft pool.
  *
- * The glow is STATIC — no animation, nothing to gate — and box-shadows never
- * affect layout, so mobile keeps zero overflow. Recipes are authored PER
- * VARIANT because token polarity flips between the light and dark chrome
- * (e.g. `--ink` is near-black on light, near-white on dark); each recipe is
- * still a pure token derivation, so either variant re-skins per tenant.
+ * MODE-AWARE: recipes are authored per polarity because token meaning flips
+ * between the light and dark palettes (`--ink` is near-black on light,
+ * near-white on dark). The card carries BOTH recipes as inline custom
+ * properties and the app's standard mode mechanism picks one in CSS (the
+ * `dark:` variant bound in globals.css to `prefers-color-scheme` + the
+ * `data-theme` override) — no JS mode prop, no hydration dependence. Each
+ * recipe is still a pure token derivation, so the card re-skins per tenant.
  *
- * Used at exactly the sanctioned "moment" surfaces on this page: the hero
- * card, the blue stat bubble, the momentum depth tile, and (red, subtle) the
- * needs-fixing panel. Not a frozen component-library primitive.
+ * The glow itself is STATIC. The optional `bloom` flag joins the entrance
+ * choreography: the box-shadow ramps in 420ms after the card's rise begins
+ * (`.entrance-bloom` in globals.css) — disabled to the instant final state
+ * under both reduced-motion gates. Box-shadows never affect layout, so
+ * mobile keeps zero overflow.
  */
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/theme/utils";
-import type { BlueDepthVariant } from "@/lib/theme/operator-theme";
 
 export type GlowSurface = "hero" | "bubble" | "deep" | "alert";
 
@@ -38,13 +42,19 @@ interface GlowRecipe {
   bloom: string;
 }
 
-const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
+interface ModeRecipes {
+  light: GlowRecipe;
+  dark: GlowRecipe;
+}
+
+const RECIPES: Record<GlowSurface, ModeRecipes> = {
   /* ------------------------------------------------------------------ */
-  /* LIGHT — floating cards on the airy canvas; the glow is a soft blue  */
-  /* halo + a pale cyan rim (backlit glass in daylight).                 */
+  /* HERO — the floating rounded bubble. Light: vivid blue→navy fill     */
+  /* with a soft blue halo (backlit glass in daylight). Dark: the        */
+  /* reference — navy-to-black fill, neon cyan edge, blue bloom.         */
   /* ------------------------------------------------------------------ */
-  light: {
-    hero: {
+  hero: {
+    light: {
       fill:
         // sheen top-right, cyan rim-light top-center, blue→navy base (depth downward)
         "radial-gradient(130% 150% at 84% -20%, color-mix(in oklab, var(--surface-raised) 18%, transparent), transparent 55%) padding-box, " +
@@ -57,46 +67,7 @@ const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
         "0 12px 32px color-mix(in oklab, var(--accent) 22%, transparent), " +
         "0 32px 80px -24px color-mix(in oklab, var(--accent) 45%, transparent)",
     },
-    bubble: {
-      fill:
-        "radial-gradient(120% 140% at 100% 0%, color-mix(in oklab, var(--accent-secondary) 35%, transparent), transparent 55%) padding-box, " +
-        "linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 55%, var(--ink))) padding-box",
-      edge:
-        "linear-gradient(135deg, color-mix(in oklab, var(--accent-secondary) 50%, var(--surface-raised)), color-mix(in oklab, var(--accent) 30%, var(--surface-raised)))",
-      bloom:
-        "0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent), " +
-        "0 10px 28px color-mix(in oklab, var(--accent) 20%, transparent), " +
-        "0 22px 56px -18px color-mix(in oklab, var(--accent) 40%, transparent)",
-    },
-    deep: {
-      fill:
-        "radial-gradient(130% 140% at 100% 0%, color-mix(in oklab, var(--accent) 42%, transparent), transparent 60%) padding-box, " +
-        "linear-gradient(140deg, var(--ink), color-mix(in oklab, var(--ink) 78%, var(--accent))) padding-box",
-      edge:
-        "linear-gradient(135deg, color-mix(in oklab, var(--accent-secondary) 45%, var(--surface-raised)), color-mix(in oklab, var(--accent) 40%, var(--ink)) 60%, color-mix(in oklab, var(--accent-secondary) 25%, var(--ink)))",
-      bloom:
-        "0 1px 2px color-mix(in oklab, var(--ink) 10%, transparent), " +
-        "0 10px 28px color-mix(in oklab, var(--accent) 18%, transparent), " +
-        "0 24px 60px -18px color-mix(in oklab, var(--ink) 45%, transparent)",
-    },
-    alert: {
-      // Urgency: a soft NEGATIVE wash + red rim — never orange (pass-3 note).
-      fill:
-        "linear-gradient(120deg, color-mix(in oklab, var(--negative) 10%, var(--surface-raised)), var(--surface-raised) 55%) padding-box",
-      edge:
-        "linear-gradient(135deg, color-mix(in oklab, var(--negative) 38%, var(--surface-raised)), color-mix(in oklab, var(--negative) 12%, var(--surface-raised)))",
-      bloom:
-        "0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent), " +
-        "0 16px 44px -18px color-mix(in oklab, var(--negative) 30%, transparent)",
-    },
-  },
-
-  /* ------------------------------------------------------------------ */
-  /* DARK — the reference: near-black canvas, neon cyan edge, blue bloom, */
-  /* a radial blue glow rising inside a navy-to-black fill.               */
-  /* ------------------------------------------------------------------ */
-  dark: {
-    hero: {
+    dark: {
       fill:
         "radial-gradient(110% 140% at 12% -12%, color-mix(in oklab, var(--accent) 42%, transparent), transparent 56%) padding-box, " +
         "linear-gradient(178deg, color-mix(in oklab, var(--accent) 16%, var(--surface-raised)), var(--surface) 84%) padding-box",
@@ -107,8 +78,25 @@ const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
         "0 0 90px color-mix(in oklab, var(--accent) 20%, transparent), " +
         "0 34px 90px -30px color-mix(in oklab, var(--accent) 45%, transparent)",
     },
-    bubble: {
-      // The reference chat bubble: light-cyan → vivid blue.
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* BUBBLE — the showcase stat tile. Light: vivid blue with cyan glow.  */
+  /* Dark: the reference chat bubble — light-cyan → vivid blue.          */
+  /* ------------------------------------------------------------------ */
+  bubble: {
+    light: {
+      fill:
+        "radial-gradient(120% 140% at 100% 0%, color-mix(in oklab, var(--accent-secondary) 35%, transparent), transparent 55%) padding-box, " +
+        "linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 55%, var(--ink))) padding-box",
+      edge:
+        "linear-gradient(135deg, color-mix(in oklab, var(--accent-secondary) 50%, var(--surface-raised)), color-mix(in oklab, var(--accent) 30%, var(--surface-raised)))",
+      bloom:
+        "0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent), " +
+        "0 10px 28px color-mix(in oklab, var(--accent) 20%, transparent), " +
+        "0 22px 56px -18px color-mix(in oklab, var(--accent) 40%, transparent)",
+    },
+    dark: {
       fill:
         "linear-gradient(135deg, var(--accent-secondary), color-mix(in oklab, var(--accent-secondary) 35%, var(--accent)) 52%, var(--accent)) padding-box",
       edge:
@@ -118,7 +106,25 @@ const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
         "0 0 60px color-mix(in oklab, var(--accent) 25%, transparent), " +
         "0 22px 60px -20px color-mix(in oklab, var(--accent) 50%, transparent)",
     },
-    deep: {
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* DEEP — the momentum depth tile. Light: illuminated navy (ink) fill  */
+  /* with blue glow rising. Dark: navy-to-black with the lit edge.       */
+  /* ------------------------------------------------------------------ */
+  deep: {
+    light: {
+      fill:
+        "radial-gradient(130% 140% at 100% 0%, color-mix(in oklab, var(--accent) 42%, transparent), transparent 60%) padding-box, " +
+        "linear-gradient(140deg, var(--ink), color-mix(in oklab, var(--ink) 78%, var(--accent))) padding-box",
+      edge:
+        "linear-gradient(135deg, color-mix(in oklab, var(--accent-secondary) 45%, var(--surface-raised)), color-mix(in oklab, var(--accent) 40%, var(--ink)) 60%, color-mix(in oklab, var(--accent-secondary) 25%, var(--ink)))",
+      bloom:
+        "0 1px 2px color-mix(in oklab, var(--ink) 10%, transparent), " +
+        "0 10px 28px color-mix(in oklab, var(--accent) 18%, transparent), " +
+        "0 24px 60px -18px color-mix(in oklab, var(--ink) 45%, transparent)",
+    },
+    dark: {
       fill:
         "radial-gradient(120% 140% at 88% -10%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 58%) padding-box, " +
         "linear-gradient(180deg, color-mix(in oklab, var(--accent) 13%, var(--surface-raised)), var(--surface)) padding-box",
@@ -129,7 +135,23 @@ const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
         "0 0 60px color-mix(in oklab, var(--accent) 16%, transparent), " +
         "0 24px 70px -26px color-mix(in oklab, var(--accent) 40%, transparent)",
     },
-    alert: {
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* ALERT — urgency wears the semantic NEGATIVE red (wash + red rim),   */
+  /* never orange, never the brand accent (pass-3 rule).                 */
+  /* ------------------------------------------------------------------ */
+  alert: {
+    light: {
+      fill:
+        "linear-gradient(120deg, color-mix(in oklab, var(--negative) 10%, var(--surface-raised)), var(--surface-raised) 55%) padding-box",
+      edge:
+        "linear-gradient(135deg, color-mix(in oklab, var(--negative) 38%, var(--surface-raised)), color-mix(in oklab, var(--negative) 12%, var(--surface-raised)))",
+      bloom:
+        "0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent), " +
+        "0 16px 44px -18px color-mix(in oklab, var(--negative) 30%, transparent)",
+    },
+    dark: {
       fill:
         "radial-gradient(130% 120% at 100% 0%, color-mix(in oklab, var(--negative) 20%, transparent), transparent 55%) padding-box, " +
         "linear-gradient(180deg, color-mix(in oklab, var(--negative) 6%, var(--surface-raised)), var(--surface-raised)) padding-box",
@@ -143,36 +165,51 @@ const RECIPES: Record<BlueDepthVariant, Record<GlowSurface, GlowRecipe>> = {
 };
 
 export interface GlowCardProps {
-  variant: BlueDepthVariant;
   surface: GlowSurface;
   /** "hero" gets the most generous radius; "tile" matches the tile grid. */
   scale?: "hero" | "tile";
+  /**
+   * Join the entrance choreography: the glow's box-shadow blooms in after
+   * the card lands (wrap the card in <Entrance> for the rise; the bloom
+   * inherits the same --entrance-delay). Reduced motion renders the final
+   * glow instantly. Use for the hero + at most one showcase tile per page.
+   */
+  bloom?: boolean;
   className?: string;
   children: ReactNode;
 }
 
 export function GlowCard({
-  variant,
   surface,
   scale = "tile",
+  bloom = false,
   className,
   children,
 }: GlowCardProps) {
-  const recipe = RECIPES[variant][surface];
+  const { light, dark } = RECIPES[surface];
   return (
     <div
       className={cn(
         "relative overflow-hidden border border-transparent",
+        // Both recipes ride inline custom properties; the standard mode
+        // mechanism (dark: variant) picks one — no JS mode switch.
+        "[background:var(--glow-bg-light)] [box-shadow:var(--glow-bloom-light)]",
+        "dark:[background:var(--glow-bg-dark)] dark:[box-shadow:var(--glow-bloom-dark)]",
+        bloom && "entrance-bloom",
         // Generous "bubble/popup" rounding, derived from the radius token.
         scale === "hero"
           ? "rounded-[calc(var(--radius)*4)]"
           : "rounded-[calc(var(--radius)*3)]",
         className
       )}
-      style={{
-        background: `${recipe.fill}, ${recipe.edge} border-box`,
-        boxShadow: recipe.bloom,
-      }}
+      style={
+        {
+          "--glow-bg-light": `${light.fill}, ${light.edge} border-box`,
+          "--glow-bloom-light": light.bloom,
+          "--glow-bg-dark": `${dark.fill}, ${dark.edge} border-box`,
+          "--glow-bloom-dark": dark.bloom,
+        } as CSSProperties
+      }
     >
       {children}
     </div>

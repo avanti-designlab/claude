@@ -17,11 +17,28 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Entrance } from "@/components/moments";
+import { GlowCard } from "@/components/dashboard-preview";
 
 export const metadata: Metadata = {
   title: "AEO/GEO + Brand Production OS",
   description:
     "AI-native agency operating system — AEO/GEO intelligence with brand-consistent production. One page to watch what's built and what's coming.",
+};
+
+/**
+ * Home — swept to the working-brand-v1 language (consolidation, 2026-07-08):
+ * a floating rounded bubble hero (GlowCard — the one glow moment on this
+ * page), quiet token-driven cards below, entrance choreography on load
+ * (headers lead their grids; reduced motion renders instantly). Light/dark
+ * ride the app-wide operator theme via the standard mode mechanism.
+ */
+
+/** Mode-aware on-hero foregrounds (vivid blue fill / navy glow fill). */
+const HERO = {
+  base: "text-accent-foreground dark:text-ink",
+  soft: "text-accent-foreground/85 dark:text-ink/85",
+  dim: "text-accent-foreground/70 dark:text-muted",
 };
 
 interface LiveEntry {
@@ -115,94 +132,103 @@ const COMING: ComingEntry[] = [
 
 export default function Home() {
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-14 px-6 py-16">
-      <section className="flex flex-col gap-4">
-        <p className="font-mono text-xs tracking-[0.2em] text-muted uppercase">
-          AEO/GEO + Brand Production OS
-        </p>
-        <h1 className="max-w-3xl font-display text-display text-ink">
-          The intelligence instrument for an AI-native agency
-        </h1>
-        <p className="max-w-2xl text-base text-muted">
-          AEO/GEO intelligence and brand-consistent production, driven by
-          industry playbooks. Multi-tenant and white-label from commit one. This
-          page tracks what&apos;s live and what&apos;s coming in Phase 1.
-        </p>
-      </section>
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-14 px-4 py-10 sm:px-6 sm:py-14">
+      {/* HERO — the floating rounded bubble (the page's one glow moment);
+          entrance step 0, glow blooms after the card lands */}
+      <Entrance step={0}>
+        <GlowCard surface="hero" scale="hero" bloom>
+          <section className={"flex flex-col gap-4 p-7 sm:p-10 lg:p-12 " + HERO.base}>
+            <p className={"font-mono text-xs tracking-[0.2em] uppercase " + HERO.dim}>
+              AEO/GEO + Brand Production OS
+            </p>
+            <h1 className="max-w-3xl font-display text-display leading-[1.05] font-bold tracking-[-0.02em]">
+              The intelligence instrument for an AI-native agency
+            </h1>
+            <p className={"max-w-2xl text-base " + HERO.soft}>
+              AEO/GEO intelligence and brand-consistent production, driven by
+              industry playbooks. Multi-tenant and white-label from commit one.
+              This page tracks what&apos;s live and what&apos;s coming in Phase 1.
+            </p>
+          </section>
+        </GlowCard>
+      </Entrance>
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
+        <Entrance step={1} className="flex items-center gap-2">
           <span className="size-1.5 rounded-full bg-positive" />
           <h2 className="font-mono text-xs tracking-[0.18em] text-muted uppercase">
             Live now
           </h2>
-        </div>
+        </Entrance>
         <div className="grid gap-4 sm:grid-cols-2">
-          {LIVE.map((entry) => {
+          {LIVE.map((entry, index) => {
             const Icon = entry.icon;
             return (
-              <Link
-                key={entry.href}
-                href={entry.href}
-                className="group rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <Card className="h-full gap-4 py-5 transition-colors group-hover:border-accent">
-                  <div className="flex flex-col gap-3 px-6">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex size-9 items-center justify-center rounded-lg bg-overlay">
-                        <Icon aria-hidden className="size-5 text-accent" />
-                      </span>
-                      <Badge variant="secondary">Live</Badge>
+              <Entrance key={entry.href} step={2 + index}>
+                <Link
+                  href={entry.href}
+                  className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  <Card className="h-full gap-4 py-5 transition-colors group-hover:border-accent">
+                    <div className="flex flex-col gap-3 px-6">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex size-9 items-center justify-center rounded-lg bg-overlay">
+                          <Icon aria-hidden className="size-5 text-accent" />
+                        </span>
+                        <Badge variant="secondary">Live</Badge>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="flex items-center gap-1.5 font-medium text-ink">
+                          {entry.title}
+                          <ArrowRightIcon
+                            aria-hidden
+                            className="size-4 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-accent"
+                          />
+                        </span>
+                        <span className="text-sm text-muted">
+                          {entry.description}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="flex items-center gap-1.5 font-medium text-ink">
-                        {entry.title}
-                        <ArrowRightIcon
-                          aria-hidden
-                          className="size-4 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-accent"
-                        />
-                      </span>
-                      <span className="text-sm text-muted">
-                        {entry.description}
-                      </span>
-                    </div>
-                  </div>
-                </Card>
-              </Link>
+                  </Card>
+                </Link>
+              </Entrance>
             );
           })}
         </div>
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
+        <Entrance step={5} className="flex items-center gap-2">
           <ShieldCheckIcon aria-hidden className="size-4 text-muted" />
           <h2 className="font-mono text-xs tracking-[0.18em] text-muted uppercase">
             Coming in Phase 1
           </h2>
-        </div>
+        </Entrance>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {COMING.map((entry) => {
+          {COMING.map((entry, index) => {
             const Icon = entry.icon;
             return (
-              <Card key={entry.code} className="gap-3 py-5">
-                <div className="flex flex-col gap-3 px-6">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex size-9 items-center justify-center rounded-lg bg-overlay">
-                      <Icon aria-hidden className="size-5 text-muted" />
-                    </span>
-                    <Badge variant="outline" className="font-mono text-[10px] uppercase">
-                      {entry.code} · soon
-                    </Badge>
+              <Entrance key={entry.code} step={6 + index}>
+                <Card className="h-full gap-3 py-5">
+                  <div className="flex flex-col gap-3 px-6">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex size-9 items-center justify-center rounded-lg bg-overlay">
+                        <Icon aria-hidden className="size-5 text-muted" />
+                      </span>
+                      <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                        {entry.code} · soon
+                      </Badge>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium text-ink">{entry.title}</span>
+                      <span className="text-sm text-muted">
+                        {entry.description}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="font-medium text-ink">{entry.title}</span>
-                    <span className="text-sm text-muted">
-                      {entry.description}
-                    </span>
-                  </div>
-                </div>
-              </Card>
+                </Card>
+              </Entrance>
             );
           })}
         </div>
@@ -212,7 +238,8 @@ export default function Home() {
         <p className="max-w-2xl text-xs leading-5 text-muted">
           Foundations are frozen (F1 data model · F2 design system). Feature UI
           builds only on the frozen system — no hardcoded brand values, every
-          surface themeable per tenant.
+          surface themeable per tenant, light and dark modes from one token
+          pipeline.
         </p>
       </footer>
     </main>

@@ -16,6 +16,8 @@ import * as React from "react";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Entrance } from "@/components/moments";
+import { GlowCard } from "@/components/dashboard-preview";
 import { ACTIVE_VERTICALS, getPlaybook } from "@/lib/playbooks";
 import { generatePlan } from "@/lib/plan";
 import type { LocalIntensity, SeedVertical } from "@/lib/types/playbook";
@@ -48,10 +50,15 @@ function verticalLabel(vertical: SeedVertical | null): string {
   return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "Your";
 }
 
-/** Core Blue hero band (90° per the brand guide), token-derived — no literal. */
-const ONBOARDING_HERO_BG: React.CSSProperties = {
-  background:
-    "radial-gradient(130% 160% at 88% -30%, color-mix(in oklab, var(--surface-raised) 15%, transparent), transparent 55%), linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 56%, var(--ink)))",
+/**
+ * Mode-aware on-hero foregrounds (working brand v1): the hero bubble is a
+ * vivid-blue fill in light mode (derived --accent-foreground) and a
+ * navy-glow fill in dark mode (light ink/muted tokens). Pure token choices.
+ */
+const HERO = {
+  base: "text-accent-foreground dark:text-ink",
+  soft: "text-accent-foreground/85 dark:text-ink/85",
+  dim: "text-accent-foreground/75 dark:text-muted",
 };
 
 export function OnboardingFlow() {
@@ -137,33 +144,38 @@ export function OnboardingFlow() {
 
   return (
     <TooltipProvider>
-      {/* Core Blue hero band (90° gradient over tokens) — cohesive with the
-          dashboard hero. Text rides the DERIVED --accent-foreground, never a
-          raw white assumption. */}
-      <section className="w-full text-accent-foreground" style={ONBOARDING_HERO_BG}>
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pt-10 pb-8">
-          <div className="flex items-center justify-between gap-4">
-            <p className="font-display text-lg leading-6 font-bold">Signal</p>
-            <span className="font-mono text-xs text-accent-foreground/75">
-              Step {step} of {STEPS.length}
-            </span>
+      {/* HERO — the floating rounded bubble (working brand v1; converted from
+          the pass-2 full-width band). The page's one glow moment; entrance
+          step 0 with the bloom after the card lands. Text rides mode-aware
+          token foregrounds, never a raw white assumption. */}
+      <Entrance step={0} className="mx-auto w-full max-w-3xl px-4 pt-6 sm:px-6">
+        <GlowCard surface="hero" scale="hero" bloom>
+          <div className={"flex flex-col gap-2 p-7 sm:p-9 " + HERO.base}>
+            <div className="flex items-center justify-between gap-4">
+              <p className="font-display text-lg leading-6 font-bold">Signal</p>
+              <span className={"font-mono text-xs " + HERO.dim}>
+                Step {step} of {STEPS.length}
+              </span>
+            </div>
+            <h1 className="font-display text-3xl leading-[1.05] font-bold tracking-[-0.02em] sm:text-display lg:text-hero">
+              {heroTitle}
+            </h1>
+            <p className={"max-w-md " + HERO.soft}>
+              A real, playbook-driven AEO/GEO and local plan — assembled from your
+              industry, locations, and properties.
+            </p>
           </div>
-          <h1 className="font-display text-3xl leading-[1.05] font-bold sm:text-display lg:text-hero">
-            {heroTitle}
-          </h1>
-          <p className="max-w-md text-accent-foreground/85">
-            A real, playbook-driven AEO/GEO and local plan — assembled from your
-            industry, locations, and properties.
-          </p>
-        </div>
-      </section>
+        </GlowCard>
+      </Entrance>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-10">
-        <header className="flex flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-10 sm:px-6">
+        <Entrance as="header" step={1} className="flex flex-col gap-6">
           <OnboardingStepper steps={STEPS} current={step} />
-        </header>
+        </Entrance>
 
-        <main aria-live="polite">
+        {/* One entrance on the panel CONTAINER at load only — step changes
+            swap children inside (no remount), so forms stay instant. */}
+        <Entrance as="main" step={2} aria-live="polite">
           {step === 1 ? (
             <StepIndustry value={vertical} onChange={setVertical} />
           ) : null}
@@ -199,9 +211,13 @@ export function OnboardingFlow() {
           {step === 5 ? (
             <StepPlan roadmap={roadmap} verticalLabel={verticalLabel(vertical)} />
           ) : null}
-        </main>
+        </Entrance>
 
-        <footer className="flex items-center justify-between gap-3 border-t pt-6">
+        <Entrance
+          as="footer"
+          step={3}
+          className="flex items-center justify-between gap-3 border-t pt-6"
+        >
           <Button
             type="button"
             variant="ghost"
@@ -222,7 +238,7 @@ export function OnboardingFlow() {
               Start over
             </Button>
           ) : null}
-        </footer>
+        </Entrance>
       </div>
     </TooltipProvider>
   );

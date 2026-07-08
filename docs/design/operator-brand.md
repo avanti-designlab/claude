@@ -1,65 +1,113 @@
-# Operator brand (tenant #1) — the agency's own brand theme
+# Operator brand (tenant #1) — WORKING BRAND v1
 
-Source: operator's brand guide (provided 2026-07-08). This is the brand the app
-renders in by default (tenant #1), applied through the frozen theming engine —
-NOT a change to the frozen token *system*, only its values.
+**Status (2026-07-08, operator decision): pass 3 is the working brand v1, applied
+APP-WIDE as a dual-palette light/dark theme.** The operator kept BOTH pass-3
+variants: the blue-depth light palette boots the app; the dark-glow palette is
+the app's dark mode under the standard mode mechanism. A "main" mode may be
+picked later.
 
-> **Hex values below are approximations read from the brand-guide screenshot.**
-> Replace with the exact brand-guide values when supplied.
+**Structure is LOCKED as v1; VALUES float.** The operator may still swap the
+font and add/swap colors — those are value changes inside the locked roles, on
+the additive path below. Do NOT treat the hex values as frozen; do NOT change
+the roles without operator direction. This brand is NOT part of the F2 freeze —
+F2 (tokens/engine/components) is frozen; the operator brand riding it is a
+working version awaiting a future re-freeze on operator sign-off.
 
-## Brand colors
+Source files: `src/lib/theme/operator-theme.ts` (palettes, both gate-validated
+through `buildBrandKit`), `src/lib/theme/operator-mode-css.ts` (dual-mode
+emission), `src/app/layout.tsx` (boot wiring),
+`src/components/dashboard-preview/glow-card.tsx` (glow language).
 
-| Name | Approx hex | Role in the product |
+## Locked roles (v1 structure)
+
+| Role | Light mode value | Dark mode value | Product use |
+|---|---|---|---|
+| **Primary blue** → `--accent` | `#2456f0` | `#3f7cff` | Buttons, links, focus ring, the Visibility-Score resolve, glow fills |
+| **Highlight cyan** → `--accent-secondary` | `#8fd4ff` (gate-corrected to `#0091eb` on white — reported) | `#8fd4ff` (verbatim) | The illuminated edge, rim-light, sky washes, the reference bubble gradient |
+| **Deep navy anchor** | gradient ends mix `--accent` toward the navy ink `#0b152b` | the SURFACES: `#050815` canvas / `#0b1430` cards (Dark Blue `#0a1c46` lineage) | Depth — gradients always travel light → dark |
+| **Red = urgency** → `--negative` | `#e11d48` | `#f43f5e` | EVERY "needs action" surface (washes, rims, arrows). Never orange, never the brand accent. Green/red up/down semantics stay universal; color is never the only signal |
+| **Face: Geist** | variable 100–900, OFL-1.1, self-hosted `public/fonts/geist-var.woff2` | same | Display AND body — hierarchy from weight + size + tight tracking (Apple/Webflow pattern). Inter fallback; IBM Plex Mono unchanged |
+| **Hero = floating rounded bubble** | GlowCard `surface="hero"`, radius `calc(var(--radius)*4)` | same | Every page hero: a floating card with margin from the viewport — never a full-width band |
+| **Glow language** | soft blue halo + pale cyan rim (backlit glass in daylight) | neon cyan 1px gradient edge + blue bloom + inner radial glow | SPARINGLY: hero + one or two earned moments per page. Dense tables/forms stay quiet |
+
+All glow recipes are pure `color-mix` derivations over tokens — no literals —
+so every surface re-skins per tenant. Mode-dependent foregrounds ride the
+`dark:` variant (bound in `globals.css` to the standard mechanism) or derived
+`--accent-foreground`-family tokens — never a raw white/black assumption.
+
+## The mode mechanism (app-wide)
+
+- The app **boots light** (the light palette is the unconditional base for
+  `:root[data-tenant-theme="operator"]`).
+- **Dark applies** under `@media (prefers-color-scheme: dark)` (unless
+  `data-theme="light"` forces light) and under `data-theme="dark"` (explicit
+  override) — the SAME `data-theme` contract the frozen Signal defaults use.
+- Both palettes pass the frozen engine's accessibility gate independently;
+  corrections are reported (light: cyan → `#0091eb`, the only one; dark: zero).
+  Derived on-color foregrounds are emitted per palette; `color-scheme`
+  follows polarity so UA chrome matches.
+- `/dashboard-preview`'s Light / Dark-glow toggle simply sets `data-theme` —
+  it IS the standard mechanism, with preview-page naming.
+- The frozen engine is unchanged: `operator-mode-css.ts` only formats two
+  gate-validated resolutions into mode-conditional CSS.
+
+## Motion signature (operator direction, 2026-07-08 — "immersive and live")
+
+Entrance choreography, one orchestrated run per page load / route entry
+(`src/components/moments/entrance.tsx` + the `.entrance-*` CSS in
+`globals.css`; filed under moment #5, key state transitions):
+
+- **Rise:** 14px translate + fade, **520ms**, ease `cubic-bezier(0.22, 1, 0.36, 1)`
+  (premium ease-out — Apple-calm, never bouncy).
+- **Stagger:** **90ms** between sibling steps; section headers take the step
+  before their card grid.
+- **Bloom:** a hero/showcase GlowCard's box-shadow ramps in over **800ms**,
+  starting **420ms** after its rise begins — the card lands, then lights.
+- **Counters:** count-ups and the gauge resolve start **400ms** after their
+  own tile's rise begins (`counterDelayMs`) — sequenced, never simultaneous.
+- **Discipline:** transforms/opacity only (zero layout shift); SSR markup is
+  final-state-identical (no hydration mismatch; plays without JS); no
+  scroll-jacking; dense tables/forms appear instantly. Reduced motion renders
+  the final state instantly via BOTH gates: `prefers-reduced-motion` (CSS)
+  and the design-system force-toggle (`:root[data-motion="reduced"]`,
+  mirroring the frozen `useReducedMotion` policy).
+
+## Available accents (superseded, NOT deleted — the additive path)
+
+The pass-2 brand-guide palette remains in the system
+(`OPERATOR_ACCENT_LIBRARY` + `OPERATOR_BRAND_INPUT`, still gate-validated):
+
+| Name | Hex | Status |
 |---|---|---|
-| **Core Blue** | `#1B2FCE` (vivid royal/cobalt) | PRIMARY accent — buttons, links, focus ring, primary CTAs, the signature "Signal resolves" moment |
-| **Core Orange** | `#FC4C14` (vivid orange-red) | SECONDARY / energy accent — gradient moments, secondary highlights, illustrative pops (used sparingly) |
-| **Dark Blue** | `#0A1C46` (deep navy) | Deep surfaces + branded ink (dark sections, headings-on-light option) |
-| **Alachua** | `#F4A200` (amber gold) | Warm highlight accent — tertiary pops, badges, accent details |
+| Core Blue | `#1B2FCE` | Superseded as primary by the blue-depth blues; available |
+| Core Orange | `#FC4C14` | **Available** — not leading; if re-added it must stay hue-separated from urgency red (energy ≠ error) |
+| Alachua | `#F4A200` | **Available** — carried in the working palettes' `--accent-warm` slot (light: post-gate `#c18000`; dark: verbatim) |
+| Dark Blue | `#0A1C46` | Alive as the dark-surface lineage |
 
-## Gradient rules (from the brand guide — honored in "moments" only)
-- **Blue gradients run at 90°.**
-- **Orange gradients run at 45°.**
+**Re-adding a color is additive:** author it into the mode INPUTS (or a new
+`--accent-*` slot via the sanctioned two-accent extension pattern), let the
+gate validate/correct it, and update this table. Same for a font swap: change
+`OPERATOR_TYPOGRAPHY` + self-host the face in `globals.css`/`public/fonts`
+(the font-stack grammar gate applies). Nothing requires touching the frozen
+engine or components.
 
-## Token mapping (into our 7 named tokens + brand extras)
-- `--accent` = Core Blue (primary).
-- Brand extras layered by the operator theme (additive, not a change to the frozen 7): `--accent-secondary` = Core Orange, `--accent-warm` = Alachua, plus Dark Blue for dark surfaces.
-- `--positive` = green, `--negative` = red — **kept visually distinct from Core Orange** so "brand energy" never reads as "something's wrong." (Citation-up / rank-down semantics stay universal green/red.)
-- `--surface` = light off-white / light-grey canvas; `--surface-raised` = white cards (the Spendex-style airy product surface).
-- `--ink` = near-black or Dark-Blue-tinted for a branded, premium feel.
+## Phase-1 flag — dual-palette `tenants.theme` schema (owner: lead-backend-data-architect, at M7)
 
-## Craft (from the operator's reference set: Webflow /solutions/aeo + Spendex credit-SaaS)
-- Light-first, airy, generous whitespace; white cards floating on a light-grey canvas; soft pastel gradient washes for moments.
-- **Thin, elegant big numbers** (Visibility Score, share-of-voice) vs. **bold section headings** — the weight contrast is a signature.
-- Signature UI details: **black circular arrow buttons (↗)**, **pill-shaped chart bars**, speech-bubble chart labels, generous rounding, outlined line-icons.
-- Type: geometric grotesque display (Sora, WF-Visual-Sans-adjacent) + clean body + mono.
-- Data viz: purposeful color — green up / red down with ▲▼ deltas; Core Blue / Core Orange / Alachua to distinguish categories.
+Today's `tenants.theme` jsonb shape carries ONE palette. The operator brand's
+dual palette lives in code (two `tenants.theme`-shaped inputs). When DB-driven
+tenant themes arrive (M7 Brand Kit engine), the schema needs an extension for
+an optional second (dark) palette — e.g. `theme.modes.{light,dark}` or a
+sibling `theme_dark` — resolved through the same gate per palette and emitted
+via `dualModeTenantCss`. Single-palette tenants stay valid unchanged
+(backward compatible). The backend architect owns the schema call at M7 time;
+the theming side is already shaped for it (`DemoTenant.modes`,
+`dualModeTenantCss`).
 
 ## Accessibility
-All brand colors pass through the brand-kit accessibility gate. Core Blue on white is high-contrast (safe for text). Core Orange on white is borderline for small text — the gate will correct where needed and the adjustment is reported, never silent.
 
-## Pass 3 — "illuminated" blue-depth exploration (2026-07-08, /dashboard-preview only)
-
-Operator direction + reference image (backlit-glass cards, Apple-grade dark premium,
-layered light↔dark blues). Status: **exploration for operator reaction — not the
-final palette call.** Core Orange + Alachua remain in the theme system but are OFF
-this page.
-
-- **Face:** Geist (variable 100–900, OFL-1.1, self-hosted `public/fonts/geist-var.woff2`)
-  replaces Sora/Inter as the operator theme's display AND body — hierarchy via
-  weight + tight tracking. Signal defaults keep Space Grotesk/Inter (frozen).
-- **Blue-depth system** (two gated variant themes in `operator-theme.ts`,
-  applied via `TenantThemeScope`; scope ids `operator-p3-light` / `operator-p3-dark`):
-  - highlight cyan `#8fd4ff` (reference bubble tone) → `--accent-secondary`.
-    Passes VERBATIM on the dark chrome; gate-corrected to `#0091eb` (3.11:1) on light — reported.
-  - primary vivid blue → `--accent`: `#2456f0` (light chrome) / `#3f7cff` (dark chrome);
-    both pass 3:1 verbatim, derived on-accent text ≥ 5.2:1.
-  - deep navy anchor: dark surfaces `#050815` / `#0b1430` (Dark Blue #0a1c46 lineage);
-    on light, gradient ends mix `--accent` toward the navy ink. Gradients travel light→dark.
-  - dark-chrome semantics brightened: positive `#22c55e`, negative `#f43f5e` (zero gate corrections).
-- **Urgency = semantic red** (operator: "red is smart for action items") — the
-  needs-fixing zone wears negative washes/accents, never orange.
-- **Glow language** (`GlowCard`, tokens/color-mix only, STATIC): 1px transparent
-  border painted by a border-box cyan→blue gradient (the lit edge) + layered
-  box-shadow bloom in token blue (red for urgency) + inner radial glow over a
-  light→dark fill. Hero is a floating rounded card (radius `calc(var(--radius)*4)`),
-  not a full-width band.
+Both palettes pass the full contrast gate (3:1 UI marks on both chrome
+layers, 4.5:1+ derived text-on-fill, positive/negative distinguishability);
+every auto-correction is surfaced on `/design-system` (Engine decision panel
+shows BOTH modes for the operator). Contrast gates hold in both modes with
+derived foregrounds everywhere; the entrance choreography and all count-ups
+render final states instantly under reduced motion.
