@@ -29,6 +29,12 @@ Reason: the operator's real brand (tenant #1, `docs/design/operator-brand.md`) h
 
 ## Gate records
 
+**2026-07-08 · Operator brand v1 consolidated app-wide (dual-palette) + motion signature · post-freeze additions logged**
+Operator decisions: pass-3 blue-depth look adopted; BOTH palettes kept as the app's light/dark modes; structure locked (roles: primary blue, highlight cyan, red = urgency, glow language, Geist, hero bubble), VALUES float (font/color changes remain cheap; additive-color path proven). Implemented via additive `dualModeTenantCss` formatter — frozen engine/token contract byte-untouched; Signal fallback preserved both modes. Pass-2 Core Orange/Alachua retained as available accents, not leading.
+**Post-freeze motion addition (operator-directed):** entrance choreography as the brand motion signature, framed inside frozen moment #5 — rise 14px + fade 520ms cubic-bezier(0.22,1,0.36,1), 90ms sibling stagger, hero glow bloom 800ms @ +420ms, counters/gauge +400ms after tile entry; pure CSS, SSR-identical markup, transforms/opacity only, dual reduced-motion gates (verified: instant final states). Logged against the freeze record per governance; code-review coverage folds into the 1.1 gate.
+Phase-1 flag (standing): dual-palette `tenants.theme` schema extension owned by lead-backend-data-architect at M7.
+
+
 **2026-07-07 · 0.4 F2 design system · Code Review (code quality/security, per CLAUDE.md rule 3) → REJECT (1 blocker, 4 minors) → remediated → re-review CLEARED**
 Design Review (self-owned) passed; re-skin/token-parity/reduced-motion all verified genuine. Hostile-input probing found **[B1 BLOCKER] stored CSS injection via tenant font stacks** — font strings reached the emitted `<style>` verbatim on the white-label production path; a `}` breaks out of the rule and injects app-wide CSS for every viewer of that tenant. Confirmed with three live payloads.
 **Remediation:** font-grammar whitelist gate (`src/lib/skills/brand-kit/font-stack.ts`) in the shared `resolveAndValidateTokens` pipeline — hostile stacks throw → Signal fallback (matches malformed-color behavior), covering both the `<style>` string sink and the inline-style path, and both `buildBrandKit` + `reviseKit`. 17 regression tests + doc correction.
