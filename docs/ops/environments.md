@@ -44,3 +44,114 @@ Phase 1 keys (added when their modules build; per-tenant where the tenant suppli
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push/PR: install → lint → typecheck → build. Test suites (QA agent) are added from build step 0.2 onward and become required. Deploys are owned by Vercel Git integration, not CI.
+
+---
+
+## Authentication: enable the claim-minting hook + create tenant #1
+
+### Owner: lead-backend-data-architect · added with the auth-claims layer (migration 0007)
+
+The RLS that isolates every tenant reads three claims from each user's JWT —
+`tenant_id`, `user_role`, `client_id`. Those claims are **not** in a Supabase
+token by default; they are injected by the **Custom Access Token hook**
+(`auth_hooks.custom_access_token_hook`, migration 0007), which looks the user up
+in `tenant_users` and mints the claims **server-side, from the database only**.
+The app role travels in the **non-reserved `user_role` claim** (migration 0008);
+the standard `role` claim stays GoTrue's reserved DB-role claim (`authenticated`)
+— see the RESOLVED note below.
+
+**Migration 0007 creates the hook function but CANNOT enable it** — enabling a
+hook is a project setting, not SQL. Until you do the two steps below, every
+logged-in user is treated as having no tenant and sees nothing (fail closed).
+
+> All SQL below runs in **Supabase Dashboard → SQL Editor** (pick the right
+> project: staging vs prod). Copy a block, replace the `<...>` placeholders, Run.
+
+### Step 1 — enable the hook (one click, per project)
+
+1. Supabase Dashboard → **Authentication** → **Hooks** (also labelled *Auth
+   Hooks*).
+2. Under **Custom Access Token**, click **Add hook** / **Enable**.
+3. Choose **Postgres** as the hook type, schema **`auth_hooks`**, function
+   **`custom_access_token_hook`**.
+4. Save. New logins now carry `tenant_id` / `user_role` / `client_id`. (Existing
+   sessions pick them up on their next token refresh — within the hour, or
+   immediately after a fresh sign-in.)
+
+Do this on **both** the staging and prod Supabase projects.
+
+### Step 2 — create your agency (tenant #1) and make yourself its admin
+
+**Prerequisite — your auth user must exist first.** The hook links by
+`auth.users.id`, so you need a login before you can be made an admin. Either:
+sign in once through the app (once the login screen ships), **or** create the
+user now in Dashboard → **Authentication** → **Users** → **Add user** (set an
+email + password).
+
+```sql
+-- 2a) Create your agency as tenant #1. Replace the name; copy the returned id.
+insert into public.tenants (name)
+values ('<YOUR AGENCY NAME>')
+returning id;
+
+-- 2b) Look up your auth user id by the email you signed up / created with.
+select id, email from auth.users where email = '<YOUR LOGIN EMAIL>';
+
+-- 2c) Make yourself an agency_admin of that tenant. Paste the two ids above.
+insert into public.tenant_users (tenant_id, auth_user_id, role)
+values ('<TENANT_ID_FROM_2A>', '<AUTH_USER_ID_FROM_2B>', 'agency_admin');
+```
+
+That is it — sign in (or refresh) and your token carries
+`user_role = agency_admin` + your `tenant_id`. You can now create clients and add
+users (operators, client-viewers) from inside the app.
+
+- **Add an operator:** create their auth user (step-2 prerequisite), then
+  `insert into public.tenant_users (tenant_id, auth_user_id, role) values
+  ('<TENANT_ID>', '<THEIR_AUTH_USER_ID>', 'operator');`
+- **Add a client-viewer** (scoped to ONE client — never sees siblings):
+  `insert into public.tenant_users (tenant_id, auth_user_id, role, client_id)
+  values ('<TENANT_ID>', '<THEIR_AUTH_USER_ID>', 'client_viewer',
+  '<THE_ONE_CLIENT_ID>');` — `client_id` is **required** for a viewer and the
+  hook mints it into the token; the viewer can never influence it.
+
+`platform_owner` is intentionally **not** a `tenant_users` role — it is internal
+cross-tenant tooling that runs server-side under the service-role key, never a
+per-tenant membership.
+
+### Verifying it worked
+
+After enabling + provisioning, decode a fresh access token (jwt.io, or log
+`getClaims()` server-side) — it must contain `tenant_id` and your `user_role`
+(the app role). The standard `role` claim will read `authenticated` — that is
+PostgREST's DB-role claim, not the app role, and is expected. If `tenant_id` /
+`user_role` are missing, the hook is not enabled (Step 1) or you have no
+`tenant_users` row (Step 2c).
+
+> ✅ **RESOLVED — reserved `role` claim vs. PostgREST (Orchestrator +
+> Code Review, 2026-07-08).** Original problem: the frozen RLS read the *app*
+> role from the JWT `role` claim, which is also PostgREST's *database-role*
+> claim — so the moment a logged-in user ran a supabase-js data query, PostgREST
+> would `SET ROLE <app role>` and fail (the app roles are not grantable Postgres
+> roles). **Chosen resolution — Option 2:** the app role now travels in the
+> **non-reserved `user_role` claim**. Migration 0008 re-points `app.user_role()`
+> at `user_role`; the hook (migration 0007) mints the app role into `user_role`
+> and **leaves GoTrue's `role = authenticated` untouched**. PostgREST therefore
+> keeps `SET ROLE authenticated` — the request role every RLS policy targets and
+> the full 399-test isolation suite exercises. **Rationale:** keeping the
+> production request role as `authenticated` preserves exact test fidelity (no
+> untested grantable app-role context in production) — the deciding factor over
+> introducing member-of-`authenticated` app roles. No per-project role
+> provisioning is required; the first logged-in data-querying slice is
+> unblocked. See the migration-0007/0008 headers and
+> `docs/contracts/data-model.md` §12.
+
+### If claims are empty for EVERYONE after enabling the hook
+
+The hook is `SECURITY DEFINER` and reads `tenant_users` as its owner
+(`postgres`), which bypasses RLS in Supabase. If a self-hosted / non-standard
+deployment runs migrations as a role **without** `BYPASSRLS`, the hook reads
+nothing and mints no claims for anyone (a loud, safe failure — never a leak).
+Fix by running migration 0007 as a `BYPASSRLS` role (e.g. `postgres`), or grant
+the hook's owner `BYPASSRLS`. Do **not** "fix" it by adding an RLS policy that
+exposes `tenant_users` to other roles.

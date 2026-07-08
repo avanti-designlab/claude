@@ -84,6 +84,13 @@ function withDatabase(url: string, dbName: string): string {
  * Cluster roles Supabase provides. Created idempotently (roles are
  * cluster-wide, so a previous run may have created them already).
  * MUST run before migrations — the migration grants reference these roles.
+ *
+ * `supabase_auth_admin` is the role GoTrue uses to invoke the Custom Access
+ * Token hook (migration 0007). Like `authenticated` / `anon`, it is
+ * Supabase-provided in real projects; the harness pre-creates it so 0007's
+ * grants resolve. NOLOGIN — the hook is SECURITY DEFINER, so the table read
+ * happens as the definer, not as this role (it only needs EXECUTE + schema
+ * usage, granted by the migration).
  */
 export async function ensureDbRoles(client: Client): Promise<void> {
   await client.query(`
@@ -94,6 +101,9 @@ export async function ensureDbRoles(client: Client): Promise<void> {
       end if;
       if not exists (select from pg_roles where rolname = 'anon') then
         create role anon nologin;
+      end if;
+      if not exists (select from pg_roles where rolname = 'supabase_auth_admin') then
+        create role supabase_auth_admin nologin noinherit;
       end if;
     end
     $$;
@@ -286,13 +296,59 @@ export async function queryAs<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
-/** Convenience claims builder for the standard shape RLS keys off. */
+/**
+ * Invoke the Custom Access Token hook (migration 0007) exactly as GoTrue does:
+ * as `supabase_auth_admin` (the default), or as another role to prove the
+ * EXECUTE grant is locked down. Returns the hook's full return value; read the
+ * minted claims off `.claims`. Runs in its own transaction and resets the role.
+ *
+ * `event` is the GoTrue hook payload: { user_id, claims?, ... }. The hook is
+ * SECURITY DEFINER, so the tenant_users read runs as the definer regardless of
+ * the calling `as` role.
+ */
+export async function callAccessTokenHook(
+  client: Client,
+  event: Record<string, unknown>,
+  opts: { as?: "supabase_auth_admin" | DbRole } = {}
+): Promise<{ claims: Record<string, unknown>; [key: string]: unknown }> {
+  const as = opts.as ?? "supabase_auth_admin";
+  await client.query("begin");
+  try {
+    await client.query(`set local role ${as}`);
+    const res = await client.query<{ out: Record<string, unknown> }>(
+      `select auth_hooks.custom_access_token_hook($1::jsonb) as out`,
+      [JSON.stringify(event)]
+    );
+    await client.query("commit");
+    return res.rows[0].out as {
+      claims: Record<string, unknown>;
+      [key: string]: unknown;
+    };
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  }
+}
+
+/**
+ * Convenience claims builder for the REAL production token shape RLS keys off.
+ * The APP role travels in the NON-reserved `user_role` claim (app.user_role()
+ * reads it — migration 0008), exactly as the Custom Access Token hook mints it.
+ * `role` stays GoTrue's reserved DB-role claim ('authenticated') — PostgREST's
+ * `SET ROLE` target, which queryAs()'s `set local role authenticated` mirrors.
+ * Emitting both makes the isolation suite exercise the production claim shape
+ * and proves RLS reads `user_role`, never the reserved `role`.
+ */
 export function claimsFor(
   role: JwtRole,
   tenantId: string,
   opts: { clientId?: string; sub?: string } = {}
 ): JwtClaims {
-  const claims: JwtClaims = { tenant_id: tenantId, role };
+  const claims: JwtClaims = {
+    tenant_id: tenantId,
+    role: "authenticated",
+    user_role: role,
+  };
   if (opts.clientId !== undefined) claims.client_id = opts.clientId;
   if (opts.sub !== undefined) claims.sub = opts.sub;
   return claims;

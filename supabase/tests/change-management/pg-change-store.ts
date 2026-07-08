@@ -71,9 +71,15 @@ function mapPgError(err: unknown): never {
 export class PgChangeStore implements ChangeStore {
   constructor(private readonly db: Client) {}
 
-  /** PostgREST-exact claims for the operating context (RLS keys off these). */
+  /** PostgREST-exact claims for the operating context (RLS keys off these).
+   *  The app role travels in `user_role` (app.user_role() reads it — migration
+   *  0008); `role` stays GoTrue's reserved DB-role claim ('authenticated'). */
   private claims(ctx: TenantContext): JwtClaims {
-    return { tenant_id: ctx.tenantId, role: ctx.actor.role };
+    return {
+      tenant_id: ctx.tenantId,
+      role: "authenticated",
+      user_role: ctx.actor.role,
+    };
   }
 
   async insertPreviewed(

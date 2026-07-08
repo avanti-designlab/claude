@@ -62,13 +62,29 @@ export const TENANT_USER_ROLES = [
 export type TenantUserRole = (typeof TENANT_USER_ROLES)[number];
 
 /**
- * The claims RLS keys off (read via `auth.jwt()`; set at auth time).
- * A missing/empty `tenant_id` yields zero rows everywhere — fail closed.
+ * The claims RLS keys off (read via `auth.jwt()`; minted server-side by the
+ * Custom Access Token hook, migration 0007). A missing/empty `tenant_id` yields
+ * zero rows everywhere — fail closed.
+ *
+ * IMPORTANT — two distinct role claims:
+ *  - `user_role` carries the APP role (doc 03 §2). RLS reads it via
+ *    `app.user_role()` (migration 0008). This is the tenant-authorization role.
+ *  - `role` is PostgREST's RESERVED DB-role claim — GoTrue sets it to
+ *    `authenticated` and PostgREST does `SET ROLE <role>` off it. It is NEVER
+ *    the app role; the hook leaves it untouched. Do not read authorization from
+ *    it.
  */
 export interface JwtClaims {
   tenant_id: string;
-  role: JwtRole;
-  /** Present iff role === "client_viewer". */
+  /** APP role — the tenant-authorization role RLS reads (`app.user_role()`). */
+  user_role: JwtRole;
+  /**
+   * PostgREST's reserved DB-role claim (`authenticated` for signed-in tenant
+   * users). Present in every real token; not the app role. Optional here
+   * because degenerate/forged test claims may omit it.
+   */
+  role?: string;
+  /** Present iff user_role === "client_viewer". */
   client_id?: string;
   /** Supabase auth user id (auth.users.id). */
   sub?: string;

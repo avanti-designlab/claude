@@ -36,23 +36,27 @@ audits, content_items, site_changes, visibility_results, metrics, alerts`.
 
 Claims are set at auth time and read in policies via `auth.jwt()` (Supabase-
 provided; the test harness installs an exact local shim — migrations never
-create the `auth` schema). Helpers live in the `app` schema (migration 0001).
+create the `auth` schema). Helpers live in the `app` schema (migration 0001;
+`app.user_role()` re-pointed to the `user_role` claim by migration 0008 — §12).
 
 | Claim | Type | Semantics |
 |---|---|---|
 | `tenant_id` | uuid-as-text | Caller's tenant. Missing/empty ⇒ every policy is not-true ⇒ zero rows / no writes. **Fail closed.** |
-| `role` | text | `platform_owner` \| `agency_admin` \| `operator` \| `client_viewer`. Unknown/missing ⇒ fail closed. |
-| `client_id` | uuid-as-text | Present **iff** `role = client_viewer`. |
+| `user_role` | text | **The app role** — read by `app.user_role()`: `platform_owner` \| `agency_admin` \| `operator` \| `client_viewer`. Unknown/missing ⇒ fail closed. Carried in **`user_role`, not `role`**, because `role` is reserved (next row + §12). |
+| `client_id` | uuid-as-text | Present **iff** `user_role = client_viewer`. |
+| `role` | text | **PostgREST's RESERVED DB-role claim** — GoTrue sets it to `authenticated` and PostgREST does `SET ROLE <role>` off it. **Not** the app role; RLS never reads it for authorization. The auth hook leaves it untouched. |
 | `sub` | uuid-as-text | Supabase auth user id (`auth.users.id`). |
 
-TS shape: `JwtClaims` in `src/lib/types/db.ts`.
+TS shape: `JwtClaims` in `src/lib/types/db.ts` (app role in `user_role`; `role`
+documented as the reserved DB-role claim).
 
 ## 3. Role model & RLS behavior
 
 Postgres request roles are Supabase's `authenticated` / `anon`; the app role
-travels in the JWT. **`anon` has zero grants on tenant data.** Policies exist
-per command (SELECT/INSERT/UPDATE/DELETE) — write policies are explicit, never
-implied.
+travels in the JWT's `user_role` claim (never the reserved `role` claim — §2,
+§12). Every signed-in tenant user hits the DB as the `authenticated` request
+role. **`anon` has zero grants on tenant data.** Policies exist per command
+(SELECT/INSERT/UPDATE/DELETE) — write policies are explicit, never implied.
 
 | App role | Read | Write |
 |---|---|---|
@@ -388,8 +392,104 @@ ratification with the freeze; none contradict docs 00–07)
   `helpers/harness.ts` + `helpers/seed.ts` — every role × every table ×
   read/write, incl. sibling-client blindness for `client_viewer`.
 
+## 12. Claim-minting layer (auth hook) — migrations 0007 + 0008
+
+The upstream claim-minting obligation flagged in §3 is now **implemented** by
+the Supabase Custom Access Token hook,
+`auth_hooks.custom_access_token_hook(event jsonb) returns jsonb`
+(`supabase/migrations/0007_custom_access_token_hook.sql`), with the app role
+carried in the non-reserved `user_role` claim (migration 0008 — see the RESOLVED
+note below). This is an authorized change to the frozen foundation (0001–0006
+untouched), subject to the Code Review security + tenant-isolation gate.
+
+**Contract.** On every token mint, GoTrue calls the hook with
+`{ user_id, claims, ... }`. The hook:
+
+- keys off `event->>'user_id'` (the authenticated user id — the ONLY trusted
+  input) and looks up `public.tenant_users` by `auth_user_id`;
+- **discards** any incoming `tenant_id` / `user_role` / `client_id` before
+  deriving — so a forged/replayed/stale token can carry no app claim through
+  (proven by test); it **never touches** the reserved `role` claim;
+- membership found ⇒ injects `tenant_id` + `user_role` (uuid/text as JSON
+  strings so the `app.*` readers' casts work), plus `client_id` **iff**
+  `user_role = client_viewer` (sourced from `tenant_users.client_id`);
+- **no membership ⇒ mints NO app claims** (no `user_role`/`tenant_id`/
+  `client_id`) and leaves GoTrue's `role = authenticated` in place — authenticate,
+  but see nothing (fail closed). A `client_viewer` therefore cannot influence its
+  own tenant_id / user_role / client_id (the §3 obligation, now structural).
+
+Multiple memberships for one user are resolved **deterministically** (oldest
+`created_at`, then lowest `id`); true multi-tenant membership / tenant-switching
+(a token that selects an active tenant) is a **future capability**, not yet
+supported.
+
+**Security posture.** `SECURITY DEFINER`, `search_path = ''`, in the locked-down
+`auth_hooks` schema; `EXECUTE` granted to `supabase_auth_admin` only (revoked
+from `authenticated` / `anon` / `public`). It reads `tenant_users` as its owner
+(bypassing FORCE-RLS during minting, when there is no JWT context) — so **no**
+`tenant_users` RLS policy for `supabase_auth_admin` is added, preserving the
+"every policy targets `authenticated` only" invariant. **Operator action:** the
+hook must be enabled in Dashboard → Authentication → Hooks; it is not
+auto-enabled. See `docs/ops/environments.md`.
+
+**App-side reading.** The verified claims are read server-side via
+`src/lib/auth` (`getClaims()` / `getSession()` over supabase `getClaims()` —
+verified, never `auth.getSession()`), shaped by the pure `parseSessionClaims`
+into `SessionClaims { tenantId, role, clientId?, sub }` — where `role` is the
+app role read from the `user_role` claim (the reserved `role` claim is ignored),
+re-applying the same fail-closed rules (viewer without `client_id` ⇒ null).
+Guards (`requireAuth` / `requireRole` / `requireOperator`) and `src/middleware.ts`
+(refresh-only) are convenience layers **above** RLS, never a substitute for it.
+
+> ✅ **RESOLVED — reserved `role` claim vs. PostgREST (Orchestrator +
+> Code Review, 2026-07-08).** The frozen RLS originally read the app role from
+> the JWT `role` claim (`app.user_role()`), which is **also PostgREST's reserved
+> database-role claim** — so a logged-in supabase-js data query would
+> `SET ROLE <app role>` and fail (the app roles are not grantable Postgres
+> roles). **Chosen resolution — Option 2:** move the app role to the
+> **non-reserved `user_role` claim**. Migration 0008 does a full
+> `CREATE OR REPLACE` of `app.user_role()` to read `user_role` (no fallback to
+> `role` — one source of truth); the hook (migration 0007) mints the app role
+> into `user_role` and **leaves GoTrue's `role = authenticated` untouched**.
+> PostgREST keeps `SET ROLE authenticated` — the request role every RLS policy
+> targets and the full **399-test isolation suite** (385 frozen + 14 hook)
+> exercises. **Rationale:** production stays in the `authenticated` role the
+> suite proves — test fidelity was the deciding factor over introducing
+> untested grantable app roles. `app.tenant_id()` / `app.client_id()` are
+> unchanged. This unblocks the first logged-in data-querying UI slice. Also
+> recorded in `docs/ops/environments.md` and the migration-0007/0008 headers.
+
 ## Changelog
 
+- **1.2.0 — 2026-07-08 — Reserved-`role`-claim collision RESOLVED (Option 2),
+  pending Code Review gate.** The app role now travels in the **non-reserved
+  `user_role` claim** instead of PostgREST's reserved `role` claim. Migration
+  **0008** re-points `app.user_role()` to read `user_role` (full switch, no
+  `role` fallback — one source of truth); migration **0007** (same in-flight
+  auth layer, edited in lockstep) mints the app role into `user_role`, strips any
+  incoming `user_role`/`tenant_id`/`client_id`, and leaves GoTrue's
+  `role = authenticated` untouched; no-membership mints no app claims (fail
+  closed). PostgREST keeps `SET ROLE authenticated` — the request role every RLS
+  policy targets and the whole isolation suite exercises; no grantable app
+  Postgres roles introduced (test fidelity was the deciding factor). Updated §2
+  (claim table now distinguishes `user_role` from the reserved `role`), §3, §12
+  (⚠️ OPEN item → ✅ RESOLVED). Coordinated rename across `app.user_role()`, the
+  hook, the harness `claimsFor`, `PgChangeStore`, `JwtClaims`, `parse-claims`,
+  and their tests; **all 399 isolation tests (385 frozen + 14 hook) pass on the
+  new claim**, `npm test` green. Authored by `lead-backend-data-architect` per
+  the Orchestrator's escalation resolution; to be synced/ratified by the
+  `documentation` agent on Code Review sign-off. `app.tenant_id()` /
+  `app.client_id()` and migrations 0001–0006 unchanged.
+- **1.1.0 — 2026-07-08 — Auth claim-minting layer (migration 0007), pending
+  Code Review gate.** Added §12 documenting
+  `auth_hooks.custom_access_token_hook` — the server-side implementation of the
+  §3 claim-minting obligation: tenant claims are minted from `tenant_users`
+  keyed off the authenticated user id, forged input is discarded/re-derived,
+  no-membership fails closed. Authored by `lead-backend-data-architect` as an
+  authorized additive change (0001–0006 unchanged); the existing 385 isolation
+  tests stay green, +14 hook security tests added. Carries one OPEN item
+  escalated to Orchestrator + Code Review (reserved `role` claim vs. PostgREST).
+  To be synced/ratified by the `documentation` agent on Code Review sign-off.
 - **1.0.0 — 2026-07-07 — Published (F1 freeze candidate)** by the
   `documentation` agent per doc 03 §7 freeze criterion 4, after a line-by-line
   contract ↔ SQL sync verification against `supabase/migrations/0001–0006`

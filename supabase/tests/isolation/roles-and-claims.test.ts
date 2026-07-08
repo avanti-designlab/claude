@@ -223,12 +223,14 @@ describe("forged / degenerate claims — all fail closed, never leak", () => {
     name: string;
     build: () => Record<string, unknown> | null;
   }[] = [
-    { name: "missing tenant_id", build: () => ({ role: "operator", sub: b.operatorSub }) },
+    // The app role lives in `user_role` (migration 0008); RLS ignores the
+    // reserved `role` claim. Forge `user_role` — that is the escalation vector.
+    { name: "missing tenant_id", build: () => ({ user_role: "operator", sub: b.operatorSub }) },
     { name: "empty claims object", build: () => ({}) },
-    { name: "null role", build: () => ({ tenant_id: b.tenantId, role: null }) },
+    { name: "null user_role", build: () => ({ tenant_id: b.tenantId, user_role: null }) },
     {
-      name: "unknown role string",
-      build: () => ({ tenant_id: b.tenantId, role: "superadmin" }),
+      name: "unknown user_role string",
+      build: () => ({ tenant_id: b.tenantId, user_role: "superadmin" }),
     },
     { name: "null claims (no JWT at all)", build: () => null },
   ];
@@ -261,7 +263,7 @@ describe("forged / degenerate claims — all fail closed, never leak", () => {
     await expectQueryRejected(
       db.admin,
       "authenticated",
-      { tenant_id: "not-a-uuid", role: "operator" },
+      { tenant_id: "not-a-uuid", user_role: "operator" },
       `select * from clients`,
       undefined,
       /invalid input syntax for type uuid/
@@ -269,7 +271,7 @@ describe("forged / degenerate claims — all fail closed, never leak", () => {
   });
 
   it("[client_viewer without client_id] sees ZERO rows on every client-scoped table", async () => {
-    const claims = { tenant_id: b.tenantId, role: "client_viewer", sub: b.viewerSub };
+    const claims = { tenant_id: b.tenantId, user_role: "client_viewer", sub: b.viewerSub };
     for (const table of CLIENT_SCOPED_TABLES) {
       const col = table === "clients" ? "id" : "client_id";
       // With no client_id claim, client_scope(row) can never be true.
@@ -282,7 +284,7 @@ describe("forged / degenerate claims — all fail closed, never leak", () => {
 
   it("[nonexistent tenant UUID] self-consistent forged tenant reads nothing and cannot INSERT (FK backstop)", async () => {
     const ghostTenant = randomUUID();
-    const ghost = { tenant_id: ghostTenant, role: "agency_admin", sub: randomUUID() };
+    const ghost = { tenant_id: ghostTenant, user_role: "agency_admin", sub: randomUUID() };
     // Reads: the tenant does not exist, so zero rows everywhere.
     expect(await selectCount(ghost, "clients", `tenant_id = $1`, [ghostTenant])).toBe(0);
     // Writes: RLS WITH CHECK passes (claim == row), but the tenant_id FK to the
