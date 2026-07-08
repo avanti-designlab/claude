@@ -44,6 +44,7 @@ import {
   ChangeNotFoundError,
   ConstraintViolationError,
   MethodNotRegisteredError,
+  RollbackReasonRequiredError,
 } from "./errors";
 import { jsonEqual } from "./json";
 import type {
@@ -214,6 +215,11 @@ export class ChangeManager {
     ctx: TenantContext,
   ): Promise<RollbackOutcome> {
     assertWriter(ctx.actor, "rollback");
+    if (!options.reason || options.reason.trim() === "") {
+      throw new RollbackReasonRequiredError(
+        `rollback ${changeId}: a non-empty reason is required — reverted_reason is the audit trail`,
+      );
+    }
     const row = await this.load(changeId, ctx, "rollback");
     assertLegalTransition(row.status, "reverted");
 

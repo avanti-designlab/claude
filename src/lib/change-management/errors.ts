@@ -22,7 +22,8 @@ export type ChangeErrorCode =
   | "constraint_violation"
   | "tenant_scope"
   | "not_found"
-  | "method_not_registered";
+  | "method_not_registered"
+  | "rollback_reason_required";
 
 export class ChangeManagementError extends Error {
   readonly code: ChangeErrorCode;
@@ -99,5 +100,18 @@ export class MethodNotRegisteredError extends ChangeManagementError {
   constructor(message: string) {
     super(message, "method_not_registered");
     this.name = "MethodNotRegisteredError";
+  }
+}
+
+/**
+ * A manual rollback arrived without a reason. `reverted_reason` is how the
+ * audit trail explains itself (doc 04 §2 step 5) — this layer requires it for
+ * BOTH manual and auto rollback (auto generates its own from the breaches),
+ * even though the column is nullable in the schema.
+ */
+export class RollbackReasonRequiredError extends ChangeManagementError {
+  constructor(message: string) {
+    super(message, "rollback_reason_required");
+    this.name = "RollbackReasonRequiredError";
   }
 }
