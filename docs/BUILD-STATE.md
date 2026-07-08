@@ -3,7 +3,7 @@
 
 > The Orchestrator drives from `07-build-sequence-and-execution-checklist.md`. This file records where the build actually is. Do not cross a 🔒 gate marked ⏸ below.
 
-## Current stage: **PHASE 0 — 0.1 complete, awaiting operator go-ahead for 0.2/0.3/0.4**
+## Current stage: **PHASE 1 OPEN — Freeze Gate 0 passed 2026-07-08 (operator signed off F1 + F2). Foundation frozen.**
 
 | Step | Item | Owner | Gate | Status |
 |---|---|---|---|---|
@@ -11,9 +11,10 @@
 | 0.1 | Project scaffold (Next.js + Supabase + Vercel, CI/CD, staging/prod, secrets, CF Workers readiness) | devops-deployment | Code Review | ✅ Done (2026-07-07) — Code Review **PASS** (see gate record below); operator-side provisioning steps listed in `ops/environments.md` |
 | 0.2 | 4 skills implemented + tested in isolation (gate tests the LIBRARY, per resolution 3) | build agents | Code Review + QA | ✅ Done (2026-07-07) — gate CLOSED after remediation + green re-verification (see gate record) |
 | 0.3 | Multi-tenant data model (F1) | lead-backend-data-architect | Code Review (security+isolation) + QA isolation suite | ✅ Done (2026-07-07) — **GATE CLOSED**, doc 03 §7 criteria 1–5 all MET (see gate record); freeze declaration awaits operator at Freeze Gate 0 |
-| 0.4 | Design system + theming (F2) | lead-ui-ux-designer | Design Review + **operator sign-off** (resolution 4b) | 🔶 Design Review passed; code-review B1 blocker fixed + **re-review CLEARED**; 369 tests green. **Code side clear — awaiting operator walk-through + F2 freeze sign-off.** |
-| 🔒 | **FREEZE GATE 0** — foundation frozen | orchestrator | all of 0.2–0.4 passed; F1 + F2 presented to operator | ⏸ Not reached — **hard stop for operator review** |
-| 1.x | Phase 1 feature work | (per doc 07) | (per doc 07) | 🚫 Blocked by Freeze Gate 0 |
+| 0.4 | Design system + theming (F2) | lead-ui-ux-designer | Design Review + **operator sign-off** (resolution 4b) | ✅ Done — Design Review passed, B1 blocker fixed + re-review CLEARED (369 tests), **operator signed off 2026-07-08. FROZEN.** |
+| 🔒 | **FREEZE GATE 0** — foundation frozen | orchestrator | all of 0.2–0.4 passed; F1 + F2 presented to operator | ✅ **PASSED 2026-07-08** — operator signed off both F1 and F2 after a local walkthrough. Foundation FROZEN; changes now require Orchestrator + Code Review sign-off. |
+| 1.1 | Industry Playbook Engine (M1) — build first | aeo-seo-logic-engineer | Code Review + Content Quality | ⏭️ Next up — Phase 1 open |
+| 1.x | Remaining Phase 1 feature work | (per doc 07) | (per doc 07) | ▶️ Unblocked |
 | 🔒 | **GATE 1a** — single-vertical validation (real estate, GG as client zero, full loop end-to-end) | orchestrator | loop proven + case-study metrics | 🚫 Not reached |
 | 🔒 | **GATE 1** — Phase 1 ships multi-vertical | orchestrator | validated loop across seed verticals + M1b active | 🚫 Not reached |
 
@@ -42,7 +43,15 @@ Suites at review time: 293/293 across 20 files; isolation verified empirically (
 
 ## Freeze log (frozen-foundation decisions + post-freeze changes)
 
-_Nothing frozen yet._
+**🔒 FREEZE GATE 0 — FOUNDATION FROZEN — 2026-07-08 (operator sign-off).**
+The operator reviewed a local prototype build of F2 (`npm run dev` → `/design-system`) and signed off on **both** freezes:
+- **F1 — multi-tenant data model** (doc 03): 6 migrations, RLS enabled + forced on all 13 tables, structural tenant-consistency via composite FKs, in-schema approval/review gates, `auto` publishing prohibited on `site_changes`. Code Review security gate CLOSED (0 leaks under 360+ probes); QA isolation suite 363/363. **FROZEN.**
+- **F2 — design system + white-label theming** (doc 06): token system, tenant theming engine (untrusted-input-safe, B1 CSS-injection fix cleared), 22 token-mapped components, Recharts language, 5 reduced-motion-gated moments. Design Review passed + operator sign-off (resolution 4b). **FROZEN.**
+- Skills (0.2) gate-closed; agent team (0.0) operational.
+
+**Post-freeze change control now in force (CLAUDE.md rule 1):** any change to the frozen data model or design system requires **Orchestrator + Code Review sign-off**, recorded here.
+
+_No post-freeze changes yet._
 
 ## Open escalations to operator
 
