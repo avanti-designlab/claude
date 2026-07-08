@@ -9,7 +9,13 @@
  * re-homed to the roadmap module that owns that class of work.
  */
 
-import type { AuditFix, AuditResult, CheckId } from "@/lib/skills/aeo-audit";
+import type {
+  AuditFix,
+  AuditResult,
+  AutomationLevel,
+  CheckId,
+  OwningModule,
+} from "@/lib/skills/aeo-audit";
 import type { Playbook } from "@/lib/types/playbook";
 import type { ImpactLevel, ModuleRef, RoadmapTask } from "@/lib/types/roadmap";
 import { IMPACT_FACTOR, effortForImpact } from "./scoring";
@@ -76,9 +82,35 @@ export function resolveChannelForModule(
   return topChannel(playbook);
 }
 
-/** True when local work is switched off for this playbook (national / disabled). */
-function localOff(playbook: Playbook): boolean {
+/**
+ * True when local work is switched off for this playbook (national / disabled).
+ * Shared with channel-tasks.ts, which gates local/review playbook starters the
+ * same way this file gates local audit fixes.
+ */
+export function localOff(playbook: Playbook): boolean {
   return playbook.local_intensity === "national" || !playbook.local_module_config.enabled;
+}
+
+/**
+ * Owning modules whose fixes execute as ON-PAGE PUBLISHES: M10 (schema
+ * injection) and M13 (on-page auto-fix) both write to the client site through
+ * the auto-fix engine and land in `site_changes`.
+ *
+ * doc 03 §6: anything that publishes is `ai_draft_human_approve` by default and
+ * NEVER fully autonomous — `site_changes.automation_level` cannot even
+ * represent "auto" (SiteChangeAutomationLevel, src/lib/types/db.ts). No
+ * aeo-audit check emits "auto" today, but generated playbooks (M1b) and future
+ * checks make this seam guard load-bearing: a hostile or malformed "auto" on a
+ * publishing module is clamped here rather than trusted downstream.
+ */
+const PUBLISHING_FIX_MODULES: ReadonlySet<OwningModule> = new Set(["M10", "M13"]);
+
+/** Clamp a fix's automation level per doc 03 §6 (see PUBLISHING_FIX_MODULES). */
+function clampAutomationLevel(fix: AuditFix): AutomationLevel {
+  if (fix.automationLevel === "auto" && PUBLISHING_FIX_MODULES.has(fix.module)) {
+    return "ai_draft_human_approve";
+  }
+  return fix.automationLevel;
 }
 
 /**
@@ -109,7 +141,7 @@ export function auditTasks(audit: AuditResult, playbook: Playbook): RoadmapTask[
       impact,
       priorityScore,
       effortWeight: effortForImpact(impact),
-      automationLevel: fix.automationLevel,
+      automationLevel: clampAutomationLevel(fix),
     });
   }
   return tasks;
