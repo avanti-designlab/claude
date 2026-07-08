@@ -190,7 +190,7 @@ construction (doc 00 §7.3).
 `method` CHECK `wordpress|webflow|wix|edge_worker|pr`; `change_type` CHECK
 `h1|title|meta|schema|alt|content|canonical`; `automation_level` (**F1
 addition**, §9 items 3 + 11) CHECK `ai_draft_human_approve|human_only` —
-**`auto` is not representable on this table** (§6); `diff` `{before, after}`;
+**`auto` is not representable on this table** (§6); `diff` `{before, after, target}`;
 `applied_by` / `approved_by` — nullable same-tenant `tenant_users` actors;
 `status` CHECK `previewed|applied|reverted|auto_reverted` default `previewed`;
 `reverted_reason text` nullable; `applied_at` / `reverted_at` nullable
@@ -272,7 +272,12 @@ publish or unreviewed content publish cannot be represented in this schema.
 - **`content_items.humanization`**: `{humanized, detection_score, passes}`.
 - **`content_items.quality_review` / `compliance_review`**: opaque verdicts
   owned by the reviewing agents.
-- **`site_changes.diff`**: `{before, after}`.
+- **`site_changes.diff`**: `{before, after, target}` — `before`/`after` are the
+  change payload; `target` (added by the 1.2 change-management layer, ratified
+  2026-07-08 — Orchestrator + Code Review, schema-safe: the `diff_is_object`
+  CHECK only requires a jsonb object) identifies the write target (URL + field)
+  so a one-click rollback is executable from the audit row alone, no external
+  lookup. Still opaque to the data layer.
 - **`tasks.payload`, `plans.generated_roadmap`, `audits.score/fixes`,
   `metrics.data`, `alerts.payload`**: opaque to the data layer; shape owned by
   the producing module, to be published as each module lands in 1.x.
