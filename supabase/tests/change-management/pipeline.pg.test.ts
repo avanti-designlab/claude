@@ -510,3 +510,43 @@ describe("bulk batches against the real schema", () => {
     }
   });
 });
+
+describe("store optimistic transition guard through real RLS (DB-query layer, INV 5)", () => {
+  const target: ChangeTarget = { url: "https://client-a.example.com/guard", locator: "title" };
+
+  it("refuses a stale/concurrent illegal transition at the store layer, independent of the manager pre-check", async () => {
+    adapter.setCurrent(target, "Old");
+    const opCtx = ctxFor(a, "operator", a.operatorUserId);
+    const preview = await manager().preview(desired(a, target, "Old", "New"), opCtx);
+    await manager().apply(preview.change.id, { approvedBy: a.adminUserId }, opCtx);
+
+    // Simulate a SECOND, concurrent apply that raced past the manager's in-process
+    // state check (a real TOCTOU) by hitting the store directly: applied → applied.
+    // The DB does NOT enforce transition DIRECTION via CHECK (only field presence),
+    // so the store's optimistic `status = any(legal-sources)` predicate is the
+    // DB-executed backstop. legal-sources('applied') = ['previewed'] and the row is
+    // 'applied', so the UPDATE matches ZERO rows and refuses — no silent re-apply.
+    await expect(
+      store.update(
+        preview.change.id,
+        { status: "applied", approvedBy: a.adminUserId, appliedAt: "2026-07-08T12:00:00.000Z" },
+        opCtx
+      )
+    ).rejects.toBeInstanceOf(ChangeNotFoundError);
+    expect((await dbRow(preview.change.id)).status).toBe("applied"); // unchanged
+
+    // Revert once through the pipeline; a stale re-revert is likewise refused
+    // (legal-sources('reverted') = ['applied'], but the row is now 'reverted').
+    await manager().rollback(preview.change.id, { reason: "one-click" }, opCtx);
+    await expect(
+      store.update(
+        preview.change.id,
+        { status: "reverted", revertedAt: "2026-07-08T12:00:01.000Z", revertedReason: "double revert" },
+        opCtx
+      )
+    ).rejects.toBeInstanceOf(ChangeNotFoundError);
+
+    // Ground truth: exactly one revert; both stale writes were blocked.
+    expect((await dbRow(preview.change.id)).status).toBe("reverted");
+  });
+});
