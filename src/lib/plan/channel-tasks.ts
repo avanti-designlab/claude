@@ -14,7 +14,12 @@
  * found, so merged audit fixes lead the roadmap.
  *
  * Task text is Content-Quality-gated plan copy: specific, actionable, sentence
- * case, no module codes in titles.
+ * case, no module codes in titles. Where an archetype can instantiate for more
+ * than one carrying channel (content, entity, local in the seed five), titles
+ * fold the channel's plain-language subject so no two tasks on a plan share a
+ * title — repeated titles read machine-made to clients, and the onboarding
+ * plan reveal keys its rows by title. Per-plan title uniqueness across all
+ * seed playbooks is test-enforced (generate-plan.test.ts, channel-tasks.test.ts).
  */
 
 import type { Playbook } from "@/lib/types/playbook";
@@ -43,7 +48,13 @@ interface ChannelTaskTemplate {
   effortWeight: number;
   /** doc 03 §6 — publishing → ai_draft_human_approve; authenticity → human_only. */
   automationLevel: AutomationLevel;
-  title: string;
+  /**
+   * A plain string for archetypes that appear at most once per plan; a
+   * function (of the channel) for archetypes that can instantiate for several
+   * carrying channels, so each instance's title names its channel's subject in
+   * natural language and stays unique within the plan.
+   */
+  title: string | ((ctx: TemplateContext) => string);
   describe: (ctx: TemplateContext) => string;
 }
 
@@ -76,6 +87,62 @@ function shortList(items: string[], max: number, separator = ", "): string {
     .join(separator);
 }
 
+/**
+ * Plain-language subject for a CONTENT channel's pages, folded into that
+ * archetype's task titles so two content channels on one plan never share a
+ * title. Ordered keyword match, mirroring classifyChannel's design — specific
+ * signals before broad ones ("Comparison/education pillars" reads as
+ * comparison work, not generic education). Falls back to the generic "pages".
+ */
+function contentSubject(channel: string): string {
+  const c = channel.toLowerCase();
+  if (/menu/.test(c)) return "menu pages";
+  if (/(neighborhood|dish)/.test(c)) return "neighborhood and dish pages";
+  if (/buying guide/.test(c)) return "buying guides";
+  if (/comparison/.test(c)) return "comparison pages";
+  if (/(education|e-e-a-t)/.test(c)) return "educational pages";
+  if (/(product|category)/.test(c)) return "product and category pages";
+  if (/(resource|pillar|faq)/.test(c)) return "resource-center pages";
+  if (/local/.test(c)) return "local pages";
+  return "pages";
+}
+
+/** ENTITY channel → identity-consolidation title naming where the work happens. */
+function entityTitle(channel: string): string {
+  const c = channel.toLowerCase();
+  if (/linkedin/.test(c)) {
+    return "Consolidate your identity signals on LinkedIn";
+  }
+  if (/(\bpr\b|press|byline)/.test(c)) {
+    return "Consolidate your identity signals across your existing press";
+  }
+  if (/(agent|advisor|founder)/.test(c)) {
+    return "Make your agents easy for AI engines to identify";
+  }
+  return "Make the business easy for AI engines to identify";
+}
+
+/** LOCAL channel → profile-completeness title naming the platform. */
+function businessProfilesTitle(channel: string): string {
+  const c = channel.toLowerCase();
+  if (/(reservation|opentable|resy)/.test(c)) {
+    return "Complete every field on your reservation-platform profiles";
+  }
+  if (/(gbp|google business)/.test(c)) {
+    return "Complete every field on your Google Business Profile";
+  }
+  return "Complete every field on each business profile";
+}
+
+/** LOCAL channel → NAP-consistency title (reservation platforms get their own). */
+function napConsistencyTitle(channel: string): string {
+  const c = channel.toLowerCase();
+  if (/(reservation|opentable|resy)/.test(c)) {
+    return "Match your name, address, and phone across reservation platforms";
+  }
+  return "Match name, address, and phone everywhere they appear";
+}
+
 const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
   content: [
     {
@@ -84,7 +151,8 @@ const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
       impact: "high",
       effortWeight: 3,
       automationLevel: "ai_draft_human_approve",
-      title: "Publish pages that answer real buyer questions directly",
+      title: ({ channel }) =>
+        `Publish ${contentSubject(channel.channel)} that answer real buyer questions directly`,
       describe: ({ channel, playbook }) =>
         `For ${channelFocus(channel.channel)}, publish pages that open with a direct answer to one question buyers actually ask. Start from the playbook's templates: ${
           shortList(playbook.content_templates, 2, "; ") ||
@@ -97,7 +165,12 @@ const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
       impact: "medium",
       effortWeight: 2,
       automationLevel: "ai_draft_human_approve",
-      title: "Add structured data to the pages in this channel",
+      title: ({ channel }) => {
+        const subject = contentSubject(channel.channel);
+        return subject === "pages"
+          ? "Add structured data to the pages in this channel"
+          : `Add structured data to your ${subject}`;
+      },
       describe: ({ channel, playbook }) =>
         `Mark up the ${channelFocus(channel.channel)} pages with the schema types AI engines read first for this vertical: ${
           shortList(playbook.schema_profile, 3) || "the playbook's schema profile"
@@ -111,7 +184,7 @@ const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
       impact: "high",
       effortWeight: 3,
       automationLevel: "ai_draft_human_approve",
-      title: "Make the business easy for AI engines to identify",
+      title: ({ channel }) => entityTitle(channel.channel),
       describe: ({ channel, playbook }) =>
         `Use ${channelFocus(channel.channel)} to tie everything to one consistent identity. The signals that matter here: ${
           shortList(playbook.entity_signals, 2, "; ") ||
@@ -184,7 +257,7 @@ const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
       impact: "high",
       effortWeight: 2,
       automationLevel: "ai_draft_human_approve",
-      title: "Complete every field on each business profile",
+      title: ({ channel }) => businessProfilesTitle(channel.channel),
       describe: ({ channel }) =>
         `For ${channelFocus(channel.channel)}, fill in categories, hours, photos, attributes, and services for every location — and keep them current as things change.`,
     },
@@ -194,7 +267,7 @@ const ARCHETYPE_TEMPLATES: Record<ChannelArchetype, ChannelTaskTemplate[]> = {
       impact: "high",
       effortWeight: 2,
       automationLevel: "ai_draft_human_approve",
-      title: "Match name, address, and phone everywhere they appear",
+      title: ({ channel }) => napConsistencyTitle(channel.channel),
       describe: ({ playbook }) =>
         `Keep listings identical across ${
           shortList(playbook.local_module_config.nap_directories, 4) ||
@@ -282,10 +355,11 @@ export function playbookChannelTasks(playbook: Playbook): RoadmapTask[] {
       }
       usedIds.add(id);
 
+      const ctx: TemplateContext = { channel, playbook };
       tasks.push({
         id,
-        title: template.title,
-        description: template.describe({ channel, playbook }),
+        title: typeof template.title === "function" ? template.title(ctx) : template.title,
+        description: template.describe(ctx),
         module: template.module,
         channel: channel.channel,
         source: "playbook",
