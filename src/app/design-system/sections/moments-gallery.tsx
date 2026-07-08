@@ -58,7 +58,9 @@ function MomentPanel({
   children: React.ReactNode;
 }) {
   return (
-    <div>
+    // min-w-0 so a grid track can shrink the panel; wide specimens scroll
+    // inside their own container instead of widening the page (doc 06 §6).
+    <div className="min-w-0">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="font-mono text-xs text-muted">{label}</p>
         {onReplay ? (
@@ -67,7 +69,7 @@ function MomentPanel({
           </Button>
         ) : null}
       </div>
-      <div className="rounded-lg border bg-surface p-5">{children}</div>
+      <div className="overflow-x-auto rounded-lg border bg-surface p-5">{children}</div>
     </div>
   );
 }
