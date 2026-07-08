@@ -3,7 +3,8 @@
  *
  * 1. `toCssVariables` — the app/theming engine (doc 06 §2–3). Emits the
  *    doc-specified custom-property names (`--surface`, `--surface-raised`,
- *    `--ink`, `--muted`, `--accent`, `--positive`, `--negative`) plus
+ *    `--ink`, `--muted`, `--accent`, `--positive`, `--negative`), the additive
+ *    two-accent brand extension (`--accent-secondary`, `--accent-warm`), plus
  *    typography and spacing variables in Tailwind-v4-compatible naming.
  * 2. `toTenantTheme` — the `tenants.theme` jsonb shape (doc 03 §3:
  *    `{logo_url, colors, font, custom_domain}`) for white-label rendering.
