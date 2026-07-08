@@ -30,7 +30,7 @@ describe("buildBrandKit — token completeness from minimal input", () => {
     expect(kit.tokens.typography.display).toBe(SIGNAL_TYPOGRAPHY.display);
     expect(kit.tokens.typography.body).toBe(SIGNAL_TYPOGRAPHY.body);
     expect(kit.tokens.typography.mono).toBe(SIGNAL_TYPOGRAPHY.mono);
-    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl", "3xl", "display", "score"]) {
+    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl", "3xl", "display", "hero", "score"]) {
       expect(kit.tokens.typography.scale[step]?.size).toBeTruthy();
       expect(kit.tokens.typography.scale[step]?.lineHeight).toBeTruthy();
     }

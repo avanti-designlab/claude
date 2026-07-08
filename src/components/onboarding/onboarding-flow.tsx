@@ -48,6 +48,12 @@ function verticalLabel(vertical: SeedVertical | null): string {
   return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "Your";
 }
 
+/** Core Blue hero band (90° per the brand guide), token-derived — no literal. */
+const ONBOARDING_HERO_BG: React.CSSProperties = {
+  background:
+    "radial-gradient(130% 160% at 88% -30%, color-mix(in oklab, var(--surface-raised) 15%, transparent), transparent 55%), linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 56%, var(--ink)))",
+};
+
 export function OnboardingFlow() {
   const [step, setStep] = React.useState(1);
   const [vertical, setVertical] = React.useState<SeedVertical | null>(null);
@@ -124,21 +130,36 @@ export function OnboardingFlow() {
     setRoadmap(null);
   };
 
+  // Step 1 asks its big question AT DISPLAY SCALE in the hero band (the step
+  // panel's own heading goes visually hidden); later steps keep the greeting.
+  const heroTitle =
+    step === 1 ? "Which industry are we optimizing?" : "Let’s build your plan";
+
   return (
     <TooltipProvider>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-10">
-        <header className="flex flex-col gap-6">
+      {/* Core Blue hero band (90° gradient over tokens) — cohesive with the
+          dashboard hero. Text rides the DERIVED --accent-foreground, never a
+          raw white assumption. */}
+      <section className="w-full text-accent-foreground" style={ONBOARDING_HERO_BG}>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pt-10 pb-8">
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="font-display text-lg leading-6 text-ink">Signal</p>
-              <p className="font-mono text-[10px] tracking-[0.18em] text-muted uppercase">
-                Client onboarding
-              </p>
-            </div>
-            <span className="font-mono text-xs text-muted">
+            <p className="font-display text-lg leading-6 font-bold">Signal</p>
+            <span className="font-mono text-xs text-accent-foreground/75">
               Step {step} of {STEPS.length}
             </span>
           </div>
+          <h1 className="font-display text-3xl leading-[1.05] font-bold sm:text-display lg:text-hero">
+            {heroTitle}
+          </h1>
+          <p className="max-w-md text-accent-foreground/85">
+            A real, playbook-driven AEO/GEO and local plan — assembled from your
+            industry, locations, and properties.
+          </p>
+        </div>
+      </section>
+
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-10">
+        <header className="flex flex-col gap-6">
           <OnboardingStepper steps={STEPS} current={step} />
         </header>
 

@@ -30,9 +30,10 @@ export function StepIndustry({ value, onChange }: StepIndustryProps) {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-1.5">
-        <h2 className="font-display text-2xl text-ink">
-          Which industry are we optimizing?
-        </h2>
+        {/* The question is asked at display scale in the flow's Core Blue hero
+            band (operator direction, 2026-07-08); this heading stays for the
+            document outline / screen readers only. */}
+        <h2 className="sr-only">Which industry are we optimizing?</h2>
         <p className="text-sm text-muted">
           Your industry playbook drives everything that follows — the prompts we
           track, the schema we write, and how hard the local push runs.

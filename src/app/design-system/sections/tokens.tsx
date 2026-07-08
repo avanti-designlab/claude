@@ -24,6 +24,7 @@ const COLOR_TOKENS = [
 
 const TYPE_STEPS = [
   { step: "score", sample: "68", note: "The Visibility Score — display face, one line, reserved box" },
+  { step: "hero", sample: "Signal", note: "Hero-band greeting headline (additive step, 2026-07-08)" },
   { step: "display", sample: "Signal over noise", note: "Section heroes" },
   { step: "3xl", sample: "Share of voice", note: "Page titles" },
   { step: "2xl", sample: "Tracker results", note: "Card titles" },
@@ -39,6 +40,7 @@ const SPACE_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16] as const;
 /** Static class map — Tailwind's scanner needs literal class names. */
 const STEP_CLASS: Record<(typeof TYPE_STEPS)[number]["step"], string> = {
   score: "text-score font-display text-ink",
+  hero: "text-hero font-display text-ink",
   display: "text-display font-display text-ink",
   "3xl": "text-3xl text-ink",
   "2xl": "text-2xl text-ink",

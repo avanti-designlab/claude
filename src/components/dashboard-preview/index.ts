@@ -6,10 +6,22 @@
  * brand. Every color is a token — the preview re-skins per tenant like the app.
  */
 
-export { ArrowButton, type ArrowButtonProps } from "./arrow-button";
+export {
+  ArrowButton,
+  type ArrowButtonProps,
+  type ArrowButtonSize,
+  type ArrowButtonTone,
+} from "./arrow-button";
+export { CountUpValue, useCountUp, type CountUpValueProps } from "./count-up";
 export { Delta, type DeltaProps } from "./delta";
-export { StatCard, type StatCardProps } from "./stat-card";
-export { VisibilityGauge, type VisibilityGaugeProps } from "./visibility-gauge";
+export { WashPill, type WashPillProps, type WashPillTone } from "./wash-pill";
+export { StatCard, type StatCardProps, type StatTone } from "./stat-card";
+export {
+  VisibilityGauge,
+  type VisibilityGaugeProps,
+  type GaugeTone,
+  type GaugeSize,
+} from "./visibility-gauge";
 export { PillBars, type PillBarEntry, type PillBarsProps } from "./pill-bars";
 export { AlertsList, type AlertItem, type AlertsListProps, type AlertTone } from "./alerts-list";
 export { PipelineMini, type PipelineMiniProps, type PipelineStage } from "./pipeline-mini";

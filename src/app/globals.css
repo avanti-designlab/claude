@@ -118,6 +118,9 @@
   --text-display: 3.5rem;
   --text-display--line-height: 1.05;
   --text-display--font-weight: 640;
+  --text-hero: 4.5rem;
+  --text-hero--line-height: 1.02;
+  --text-hero--font-weight: 700;
   --text-score: 5.25rem;
   --text-score--line-height: 1;
   --text-score--font-weight: 650;
@@ -302,6 +305,10 @@
   --text-display: 3.5rem;
   --text-display--line-height: 1.05;
   --text-display--font-weight: 640;
+  /* ADDITIVE hero step (operator direction 2026-07-08) — existing steps untouched. */
+  --text-hero: 4.5rem;
+  --text-hero--line-height: 1.02;
+  --text-hero--font-weight: 700;
   --text-score: 5.25rem;
   --text-score--line-height: 1;
   --text-score--font-weight: 650;

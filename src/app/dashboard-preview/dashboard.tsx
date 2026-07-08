@@ -2,30 +2,46 @@
 
 /**
  * DESIGN PREVIEW — sample operator dashboard (doc 06 §5), rendered in the
- * operator's REAL brand (Core Blue / Core Orange / Alachua on a Spendex-airy
- * light-grey canvas). This is a VISUAL TARGET for reaction — NOT the live M19
- * module (doc 07 §1.10 builds that later; it will match this).
+ * operator's REAL brand (Core Blue / Core Orange / Alachua gold / Dark-Blue
+ * navy on a light-grey canvas). A VISUAL TARGET for reaction — NOT the live
+ * M19 module (doc 07 §1.10 builds that later; it will match this).
+ *
+ * Iteration 2 (operator direction, 2026-07-08): a full-width Core Blue HERO
+ * anchors the page (blue gradient at 90° per the brand guide) with circular
+ * quick actions and the score resolving inside it; the numbers and section
+ * headings go BIG + BOLD (`--text-hero` additive step, display face at 700);
+ * and the color arrives as RHYTHM, not wallpaper — exactly four colored zones
+ * (blue hero, one FILLED Core Blue stat tile with a light sparkline, the Core
+ * Orange energy panel at 45° with a white circular ↗, and a Dark-Blue depth
+ * tile), plus soft gold/blue washes. Supporting cards stay light so the color
+ * has impact.
+ *
+ * Interactive: count-ups on the big numbers, hover lifts on cards/tiles,
+ * hover-highlighted share-of-voice rows, and fill-invert circular arrows —
+ * all 150–250ms, all transforms motion-safe, and every count-up renders its
+ * final state instantly under the frozen reduced-motion gate. Dense data
+ * (engine grid, alerts) stays quiet.
  *
  * Everything is token-driven — no hardcoded brand values — so this preview
- * re-skins per tenant exactly like the real app. Gradient washes appear only on
- * "moment" surfaces (the gauge = Core Blue 90°; the opportunity strip = Core
- * Orange 45°), per the brand guide. Motion is confined to the Visibility-Score
- * resolve and respects prefers-reduced-motion via the frozen gate.
+ * re-skins per tenant. Text on every filled surface uses the DERIVED on-color
+ * foregrounds (--accent-foreground etc.) or the opposing surface tokens —
+ * never a raw white assumption.
  */
 
 import * as React from "react";
 import {
   ActivityIcon,
-  ArrowUpRightIcon,
   FileTextIcon,
+  type LucideIcon,
+  PlusIcon,
+  RadarIcon,
   RotateCwIcon,
   SparklesIcon,
   TargetIcon,
   TrendingUpIcon,
   TriangleAlertIcon,
+  ZapIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -37,11 +53,13 @@ import { EngineCitations, VisibilityTrend } from "@/components/charts";
 import {
   AlertsList,
   ArrowButton,
+  CountUpValue,
   Delta,
   PillBars,
   PipelineMini,
   StatCard,
   VisibilityGauge,
+  WashPill,
 } from "@/components/dashboard-preview";
 
 const TREND = [
@@ -58,6 +76,8 @@ const TREND = [
   { date: "Jun 23", score: 67 },
   { date: "Jun 30", score: 68 },
 ];
+
+const CITATION_SPARK = [38, 42, 40, 47, 52, 50, 58, 64];
 
 const ENGINES = [
   { engine: "ChatGPT", status: "cited" as const, detail: "4 citations" },
@@ -110,24 +130,80 @@ const PIPELINE = [
   { label: "Publish", count: 2, state: "pending" as const },
 ];
 
-/** A moment-surface gradient wash (blue 90° / orange 45°), per the brand guide. */
-function washStyle(kind: "blue90" | "orange45"): React.CSSProperties {
-  return kind === "blue90"
-    ? {
-        background:
-          "linear-gradient(90deg, color-mix(in oklab, var(--accent) 13%, transparent), transparent 58%), var(--surface-raised)",
-      }
-    : {
-        background:
-          "linear-gradient(45deg, color-mix(in oklab, var(--accent-secondary) 15%, transparent), transparent 68%), var(--surface-raised)",
-      };
+/**
+ * Moment-surface backgrounds. Each is a gradient over TOKENS (blue at 90°,
+ * orange at 45° per the brand guide; the navy is the ink token nudged toward
+ * Core Blue) — never a literal color.
+ */
+const HERO_BG: React.CSSProperties = {
+  background:
+    "radial-gradient(130% 150% at 84% -20%, color-mix(in oklab, var(--surface-raised) 16%, transparent), transparent 55%), linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 54%, var(--ink)))",
+};
+const ORANGE_BG: React.CSSProperties = {
+  background:
+    "radial-gradient(120% 150% at 0% 0%, color-mix(in oklab, var(--surface-raised) 20%, transparent), transparent 52%), linear-gradient(45deg, var(--accent-secondary), color-mix(in oklab, var(--accent-secondary) 66%, var(--accent-warm)))",
+};
+const DARK_BG: React.CSSProperties = {
+  background:
+    "radial-gradient(130% 140% at 100% 0%, color-mix(in oklab, var(--accent) 42%, transparent), transparent 60%), linear-gradient(140deg, var(--ink), color-mix(in oklab, var(--ink) 78%, var(--accent)))",
+};
+
+/** A subtle Core Blue 90° wash to tie a light analytics card back to the hero. */
+const BLUE_WASH: React.CSSProperties = {
+  background:
+    "linear-gradient(90deg, color-mix(in oklab, var(--accent) 9%, transparent), transparent 60%), var(--surface-raised)",
+};
+
+/**
+ * A quick-action: a frosted circular icon button in the hero (Ref A). Colors
+ * ride the DERIVED --accent-foreground so they re-derive on any tenant accent;
+ * hover is a fill-invert to a solid on-color circle with the accent glyph.
+ */
+function HeroAction({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex flex-col items-center gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent-foreground/70"
+    >
+      <span
+        aria-hidden
+        className={
+          "flex size-12 items-center justify-center rounded-full border border-accent-foreground/25 bg-accent-foreground/14 text-accent-foreground " +
+          "transition-[transform,box-shadow,background-color,color] duration-200 " +
+          "group-hover:bg-accent-foreground group-hover:text-accent group-hover:shadow-lg motion-safe:group-hover:-translate-y-0.5"
+        }
+      >
+        <Icon className="size-5" strokeWidth={2} />
+      </span>
+      <span className="text-xs font-medium text-accent-foreground/85">{label}</span>
+    </button>
+  );
+}
+
+/** Bold section heading — display face, heavy, "Webflow-AEO" scale. */
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <CardTitle className="font-display text-2xl leading-tight font-bold">
+      {children}
+    </CardTitle>
+  );
 }
 
 export function DashboardPreview() {
   const [replay, setReplay] = React.useState(0);
+  const bumpReplay = () => setReplay((n) => n + 1);
 
   return (
-    <div className="min-h-full bg-surface">
+    <div className="min-h-full bg-surface pb-14">
       {/* Unmistakable preview banner */}
       <div
         className="border-b border-border"
@@ -143,62 +219,179 @@ export function DashboardPreview() {
         </p>
       </div>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-        {/* Header */}
-        <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-          <div className="flex flex-col gap-2">
-            <p className="font-mono text-[11px] tracking-[0.2em] text-muted uppercase">
-              Client dashboard · preview
-            </p>
-            <h1 className="font-display text-3xl text-ink">Harborline Realty</h1>
+      {/* ====================================================================
+          HERO — full-width Core Blue band (90° gradient), the page anchor.
+          Big bold headline + quick actions, the Visibility Score resolving
+          large & bold on the right. All text via --accent-foreground.
+          ==================================================================== */}
+      <section className="w-full text-accent-foreground" style={HERO_BG}>
+        <div className="mx-auto grid w-full max-w-6xl gap-10 px-6 pt-10 pb-24 lg:grid-cols-[1.35fr_auto] lg:items-center">
+          <div className="flex flex-col gap-6">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Real estate</Badge>
-              <Badge variant="outline" className="font-mono text-[10px] uppercase">
-                San Diego, CA
-              </Badge>
-              <span className="font-mono text-xs text-muted">Updated 2 min ago</span>
+              <span className="font-mono text-[11px] tracking-[0.2em] text-accent-foreground/70 uppercase">
+                Client dashboard · preview
+              </span>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setReplay((n) => n + 1)}
-            >
-              <RotateCwIcon aria-hidden />
-              Replay resolve
-            </Button>
-            <Button size="sm">
-              <FileTextIcon aria-hidden />
-              Weekly report
-            </Button>
-          </div>
-        </header>
-
-        {/* Hero: gauge (resolve moment) + trend */}
-        <section className="grid gap-6 lg:grid-cols-2">
-          <Card className="overflow-hidden py-0" style={washStyle("blue90")}>
-            <div className="flex flex-col gap-6 p-6">
-              <VisibilityGauge
-                score={68}
-                caption="+6 since last run · resolving out of noise"
-                replayKey={replay}
-              />
-              <div className="border-t border-border pt-5">
-                <p className="mb-3 font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
-                  Cited by engine
-                </p>
-                <EngineCitations data={ENGINES} />
+            <div className="flex flex-col gap-4">
+              <h1 className="font-display text-display leading-[1.02] font-bold sm:text-hero">
+                Harborline Realty
+              </h1>
+              <p className="max-w-lg text-lg text-accent-foreground/85">
+                You&apos;re winning AI search in San Diego. Here&apos;s where to
+                press this week.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-accent-foreground/25 bg-accent-foreground/12 px-2.5 py-0.5 font-mono text-[10px] tracking-wide uppercase">
+                  Real estate
+                </span>
+                <span className="inline-flex items-center rounded-full border border-accent-foreground/25 bg-accent-foreground/12 px-2.5 py-0.5 font-mono text-[10px] tracking-wide uppercase">
+                  San Diego, CA
+                </span>
+                <span className="font-mono text-xs text-accent-foreground/70">
+                  Updated 2 min ago
+                </span>
               </div>
             </div>
-          </Card>
 
-          <Card>
+            {/* Quick-action circular icon buttons (Ref A) */}
+            <div className="flex flex-wrap items-start gap-5 pt-1">
+              <HeroAction icon={RotateCwIcon} label="Replay resolve" onClick={bumpReplay} />
+              <HeroAction icon={FileTextIcon} label="Weekly report" />
+              <HeroAction icon={RadarIcon} label="Run tracker" />
+              <HeroAction icon={PlusIcon} label="New content" />
+            </div>
+          </div>
+
+          {/* Visibility Score — the signature resolve moment, on the hero */}
+          <div className="flex justify-center lg:justify-end">
+            <VisibilityGauge
+              score={68}
+              tone="onAccent"
+              size="lg"
+              caption="+6 since last run · resolving out of the noise"
+              replayKey={replay}
+            />
+          </div>
+        </div>
+      </section>
+
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-9 px-6">
+        {/* KPI strip — floats up to overlap the hero (Ref A). One FILLED Core
+            Blue tile with a light sparkline (Ref B's filled stat tile, in our
+            blue) + a soft gold wash + two light supporting tiles. Numbers
+            count up, big & bold. */}
+        <section className="relative z-10 -mt-16 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            tone="blue"
+            label="AI citations"
+            value="3,412"
+            sparkline={CITATION_SPARK}
+            delta={{ value: 12, unit: "%", context: "vs last run" }}
+          />
+          <StatCard
+            tone="gold"
+            label="Share of voice"
+            value="34"
+            unit="%"
+            delta={{ value: 5, unit: "pts", context: "vs last run" }}
+          />
+          <StatCard
+            tone="plain"
+            label="Avg. AI position"
+            value="#2"
+            delta={{ value: 1, unit: "", context: "position gained" }}
+          />
+          <StatCard
+            tone="plain"
+            label="Content ROI"
+            value="4.8"
+            unit="×"
+            delta={{ value: -0.3, unit: "×", context: "vs last month" }}
+          />
+        </section>
+
+        {/* Highlight row — the "not all white" statement: a Core Orange energy
+            panel (45°) with a white circular ↗ + a Dark-Blue depth tile. */}
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Core Orange energy panel — derived on-orange foreground text */}
+          <div
+            className="group relative flex flex-col gap-5 overflow-hidden rounded-xl border border-transparent p-6 text-accent-secondary-foreground shadow-sm transition-[transform,box-shadow] duration-200 hover:shadow-xl motion-safe:hover:-translate-y-1 lg:col-span-2"
+            style={ORANGE_BG}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span
+                  aria-hidden
+                  className="flex size-10 shrink-0 items-center justify-center rounded-full"
+                  style={{ background: "color-mix(in oklab, var(--ink) 14%, transparent)" }}
+                >
+                  <ZapIcon className="size-5" strokeWidth={2.25} />
+                </span>
+                <p className="font-mono text-[11px] tracking-[0.18em] uppercase opacity-80">
+                  Opportunities to capture · this week
+                </p>
+              </div>
+              {/* The white circular arrow — THE affordance (Ref B), inverts on hover */}
+              <ArrowButton label="Review opportunities" tone="surface" size="lg" />
+            </div>
+
+            <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+              <CountUpValue
+                value="3"
+                className="font-display text-hero leading-none font-bold tabular-nums"
+              />
+              <p className="max-w-md pb-1 text-lg font-medium">
+                competitor citation gaps you can close — Compass SD is cited where
+                you aren&apos;t.
+              </p>
+            </div>
+
+            <p className="max-w-xl text-sm opacity-85">
+              A targeted FAQ pass plus schema on three La Jolla queries wins back
+              the citations. Est. +4 to visibility.
+            </p>
+          </div>
+
+          {/* Dark-Blue depth tile — light number over the ink fill */}
+          <div
+            className="group relative flex flex-col justify-between gap-6 overflow-hidden rounded-xl border border-transparent p-6 text-surface-raised shadow-sm transition-[transform,box-shadow] duration-200 hover:shadow-xl motion-safe:hover:-translate-y-1"
+            style={DARK_BG}
+          >
+            <div className="flex items-center gap-2">
+              <TrendingUpIcon className="size-4 text-surface-raised/80" strokeWidth={2} />
+              <p className="font-mono text-[11px] tracking-[0.18em] text-surface-raised/70 uppercase">
+                Momentum · 12 weeks
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <CountUpValue
+                value="+16"
+                className="font-display text-score leading-none font-bold tabular-nums"
+              />
+              <p className="text-sm text-surface-raised/80">
+                visibility points since April — resolving steadily out of the noise.
+              </p>
+              <Delta
+                value={12}
+                unit="%"
+                context="vs prior 12 weeks"
+                onColor
+                contextClassName="text-surface-raised/70"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Analytics — visibility trend + per-engine citations (light cards) */}
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card
+            style={BLUE_WASH}
+            className="transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1"
+          >
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-1">
-                  <CardTitle>Visibility over time</CardTitle>
+                  <SectionTitle>Visibility over time</SectionTitle>
                   <CardDescription>Weekly tracker runs, last 12 weeks</CardDescription>
                 </div>
                 <ArrowButton label="Open visibility history" />
@@ -208,12 +401,10 @@ export function DashboardPreview() {
               <VisibilityTrend data={TREND} height={220} />
               <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
                 <div className="flex flex-col gap-1">
-                  <span
-                    className="font-display text-2xl leading-none text-ink"
-                    style={{ fontWeight: 300 }}
-                  >
-                    +16
-                  </span>
+                  <CountUpValue
+                    value="+16"
+                    className="font-display text-3xl leading-none font-bold tabular-nums text-ink"
+                  />
                   <span className="font-mono text-[11px] tracking-wide text-muted uppercase">
                     since April
                   </span>
@@ -222,67 +413,32 @@ export function DashboardPreview() {
               </div>
             </CardContent>
           </Card>
-        </section>
 
-        {/* Stat tiles */}
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            label="AI citations"
-            value="3,412"
-            delta={{ value: 12, unit: "%", context: "vs last run" }}
-          />
-          <StatCard
-            label="Share of voice"
-            value="34"
-            unit="%"
-            delta={{ value: 5, unit: "pts", context: "vs last run" }}
-          />
-          <StatCard
-            label="Avg. AI position"
-            value="#2"
-            delta={{ value: 1, unit: "", context: "position gained" }}
-          />
-          <StatCard
-            label="Content ROI"
-            value="4.8"
-            unit="×"
-            delta={{ value: -0.3, unit: "×", context: "vs last month" }}
-          />
-        </section>
-
-        {/* Opportunity strip — the Core Orange "energy" moment (45° wash) */}
-        <section
-          className="flex flex-wrap items-center gap-4 rounded-xl border border-border p-5"
-          style={washStyle("orange45")}
-        >
-          <span
-            aria-hidden
-            className="flex size-10 shrink-0 items-center justify-center rounded-full"
-            style={{ background: "color-mix(in oklab, var(--accent-secondary) 18%, transparent)" }}
-          >
-            <ActivityIcon className="size-5 text-accent-secondary" strokeWidth={2} />
-          </span>
-          <div className="mr-auto flex min-w-0 flex-col gap-0.5">
-            <p className="text-sm font-semibold text-ink">
-              3 competitor citation gaps to capture this week
-            </p>
-            <p className="text-sm text-muted">
-              Compass SD is cited where you aren&apos;t — a targeted FAQ + schema pass closes it.
-            </p>
-          </div>
-          <Button variant="outline" size="sm">
-            Review opportunities
-            <ArrowUpRightIcon aria-hidden />
-          </Button>
-        </section>
-
-        {/* Share of voice + alerts */}
-        <section className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
-          <Card>
+          <Card className="transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1">
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-1">
-                  <CardTitle>Share of voice</CardTitle>
+                  <SectionTitle>Cited by engine</SectionTitle>
+                  <CardDescription>Where the AI engines surface you now</CardDescription>
+                </div>
+                <WashPill tone="gold">4 of 6 cited</WashPill>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <EngineCitations data={ENGINES} />
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* Share of voice + alerts */}
+        {/* minmax(0,…) so the alerts rows' truncating text can never drive the
+            track wider than the container (fr min is `auto` otherwise). */}
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+          <Card className="transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <SectionTitle>Share of voice</SectionTitle>
                   <CardDescription>
                     AI citations vs named competitors, June
                   </CardDescription>
@@ -295,10 +451,15 @@ export function DashboardPreview() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1">
             <CardHeader>
-              <CardTitle>Alerts &amp; tasks</CardTitle>
-              <CardDescription>What needs a human this week</CardDescription>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <SectionTitle>Alerts &amp; tasks</SectionTitle>
+                  <CardDescription>What needs a human this week</CardDescription>
+                </div>
+                <WashPill tone="orange">1 priority</WashPill>
+              </div>
             </CardHeader>
             <CardContent>
               <AlertsList items={ALERTS} />
@@ -307,18 +468,19 @@ export function DashboardPreview() {
         </section>
 
         {/* Content pipeline */}
-        <Card>
+        <Card className="transition-[transform,box-shadow] duration-200 hover:shadow-lg motion-safe:hover:-translate-y-1">
           <CardHeader>
             <div className="flex items-start justify-between gap-3">
               <div className="flex flex-col gap-1">
-                <CardTitle>Content pipeline</CardTitle>
+                <SectionTitle>Content pipeline</SectionTitle>
                 <CardDescription>
                   Draft → humanize → review → publish · nothing advances past a failed gate
                 </CardDescription>
               </div>
-              <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+              <WashPill tone="blue">
+                <ActivityIcon aria-hidden className="size-3" />
                 18 in flight
-              </Badge>
+              </WashPill>
             </div>
           </CardHeader>
           <CardContent className="pt-2">

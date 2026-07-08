@@ -6,6 +6,11 @@
  * rule as the frozen ShareOfVoice chart, restyled for the preview target.
  *
  * Static + token-driven; a chart never picks its own colors.
+ *
+ * Interactive (operator direction, 2026-07-08): hovering a row highlights it
+ * (an overlay-token wash), sharpens the competitor name, and gives the value
+ * bubble a motion-safe emphasis — transform is gated by motion-safe, and the
+ * highlight is a 200ms color transition that reads instantly either way.
  */
 
 import { cn } from "@/lib/theme/utils";
@@ -30,11 +35,16 @@ export function PillBars({ data, className }: PillBarsProps) {
       {data.map((entry) => {
         const width = `${(entry.share / max) * 100}%`;
         return (
-          <li key={entry.name} className="grid grid-cols-[8rem_1fr_3.75rem] items-center gap-4">
+          <li
+            key={entry.name}
+            className="group/row -mx-2 grid grid-cols-[8rem_1fr_3.75rem] items-center gap-4 rounded-lg px-2 py-1 transition-colors duration-200 hover:bg-overlay"
+          >
             <span
               className={cn(
-                "truncate text-sm",
-                entry.isClient ? "font-medium text-ink" : "text-muted"
+                "truncate text-sm transition-colors duration-200",
+                entry.isClient
+                  ? "font-medium text-ink"
+                  : "text-muted group-hover/row:text-ink"
               )}
             >
               {entry.name}
@@ -60,6 +70,7 @@ export function PillBars({ data, className }: PillBarsProps) {
             <span
               className={cn(
                 "relative inline-flex items-center justify-center rounded-lg px-2 py-1 font-mono text-xs tabular-nums",
+                "transition-[transform,box-shadow] duration-200 group-hover/row:shadow-md motion-safe:group-hover/row:scale-110",
                 entry.isClient
                   ? "bg-accent text-accent-foreground"
                   : "bg-ink text-surface"

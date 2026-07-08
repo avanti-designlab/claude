@@ -108,6 +108,13 @@ export const SIGNAL_TYPOGRAPHY: TypographyTokens = Object.freeze({
     "2xl": Object.freeze({ size: "1.75rem", lineHeight: "2.125rem", weight: 600 }),
     "3xl": Object.freeze({ size: "2.25rem", lineHeight: "2.5rem", weight: 600 }),
     display: Object.freeze({ size: "3.5rem", lineHeight: "1.05", weight: 640 }),
+    /**
+     * ADDITIVE step (operator direction, 2026-07-08 — logged with the
+     * Orchestrator): the greeting/hero-band headline, one step past `display`
+     * at full display-face bold (700 — the ceiling both Space Grotesk and Sora
+     * carry). Existing steps are untouched; the frozen scale stays intact.
+     */
+    hero: Object.freeze({ size: "4.5rem", lineHeight: "1.02", weight: 700 }),
     /** The Visibility Score / share-of-voice big number. */
     score: Object.freeze({ size: "5.25rem", lineHeight: "1", weight: 650 }),
   }),
