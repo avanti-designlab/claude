@@ -26,7 +26,13 @@
 import { ArrowUpRightIcon } from "lucide-react";
 import { cn } from "@/lib/theme/utils";
 
-export type ArrowButtonTone = "ink" | "accent" | "onColor" | "surface";
+export type ArrowButtonTone =
+  | "ink"
+  | "accent"
+  | "onColor"
+  | "onBright"
+  | "surface"
+  | "negative";
 export type ArrowButtonSize = "sm" | "md" | "lg";
 
 const TONE: Record<ArrowButtonTone, string> = {
@@ -35,8 +41,14 @@ const TONE: Record<ArrowButtonTone, string> = {
     "border border-transparent bg-accent text-accent-foreground hover:border-accent/40 hover:bg-surface-raised hover:text-accent hover:shadow-md",
   onColor:
     "border border-transparent bg-surface-raised/18 text-surface-raised hover:bg-surface-raised hover:text-ink hover:shadow-md",
+  /** Frosted dark circle for BRIGHT fills (the pass-3 cyan bubble on the dark chrome). */
+  onBright:
+    "border border-transparent bg-surface/20 text-surface hover:bg-surface hover:text-ink hover:shadow-md",
   surface:
     "border border-transparent bg-surface-raised text-ink hover:bg-ink hover:text-surface-raised hover:shadow-lg",
+  /** Urgency (pass-3 "needs fixing" zone) — semantic negative, never orange. */
+  negative:
+    "border border-transparent bg-negative text-negative-foreground hover:border-negative/40 hover:bg-surface-raised hover:text-negative hover:shadow-md",
 };
 
 const SIZE: Record<ArrowButtonSize, { button: string; icon: string }> = {

@@ -13,7 +13,8 @@ export {
   type ArrowButtonTone,
 } from "./arrow-button";
 export { CountUpValue, useCountUp, type CountUpValueProps } from "./count-up";
-export { Delta, type DeltaProps } from "./delta";
+export { Delta, type DeltaProps, type DeltaGround } from "./delta";
+export { GlowCard, type GlowCardProps, type GlowSurface } from "./glow-card";
 export { WashPill, type WashPillProps, type WashPillTone } from "./wash-pill";
 export { StatCard, type StatCardProps, type StatTone } from "./stat-card";
 export {

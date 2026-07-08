@@ -43,6 +43,19 @@
   font-style: normal;
   font-display: swap;
 }
+/* Geist — Vercel's modern neo-grotesque (OFL-1.1; self-hosted from
+   @fontsource-variable/geist 5.2.9; woff2 committed to public/fonts). The
+   display + body face for tenant #1's operator brand theme as of pass 3
+   (operator direction 2026-07-08: "more modern, think Apple and Webflow").
+   Referenced by family name from `tenants.theme.font`, so the real name (not
+   a build hash) is required. The Signal DEFAULT faces below are unchanged. */
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: "Inter";
   src: url("/fonts/inter-var.woff2") format("woff2");

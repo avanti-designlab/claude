@@ -24,6 +24,11 @@ export {
   OPERATOR_TENANT_ID,
   OPERATOR_BRAND_INPUT,
   OPERATOR_TYPOGRAPHY,
+  BLUE_DEPTH_INPUTS,
+  BLUE_DEPTH_SCOPE_ID,
+  blueDepthBuild,
+  blueDepthTheme,
+  type BlueDepthVariant,
 } from "./operator-theme";
 
 export { cn } from "./utils";

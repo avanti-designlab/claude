@@ -15,6 +15,9 @@
 import { describe, expect, test } from "vitest";
 import { contrastRatio, hueSeparationDeg } from "@/lib/skills/brand-kit";
 import {
+  blueDepthBuild,
+  blueDepthTheme,
+  BLUE_DEPTH_SCOPE_ID,
   operatorBuild,
   operatorTheme,
   OPERATOR_TENANT_ID,
@@ -88,9 +91,10 @@ describe("operator theme (tenant #1) — real brand", () => {
     expect(res.variables["--accent-warm-foreground"]).toBeDefined();
   });
 
-  test("uses the Sora geometric-grotesque display face and self-hosted Inter body", () => {
-    expect(operatorTheme.font.display).toContain('"Sora"');
-    expect(operatorTheme.font.body).toContain('"Inter"');
+  test("uses the Geist neo-grotesque for display AND body (pass 3), Inter fallback", () => {
+    expect(operatorTheme.font.display).toContain('"Geist"');
+    expect(operatorTheme.font.body).toContain('"Geist"');
+    expect(operatorTheme.font.display).toContain('"Inter"');
     expect(operatorTheme.font.mono).toContain('"IBM Plex Mono"');
   });
 
@@ -111,5 +115,62 @@ describe("operator theme (tenant #1) — real brand", () => {
     ]) {
       expect(res.variables[name]).toBeDefined();
     }
+  });
+});
+
+describe("pass-3 blue-depth preview variants (/dashboard-preview only)", () => {
+  test("both variants pass the accessibility gate (source = tenant, no fallback)", () => {
+    for (const variant of ["light", "dark"] as const) {
+      const res = resolveTenantTheme(blueDepthTheme[variant]);
+      expect(res.source).toBe("tenant");
+      expect(res.fallbackReason).toBeNull();
+      expect(blueDepthBuild[variant].accessibility.pass).toBe(true);
+    }
+  });
+
+  test("LIGHT: primary blue passes verbatim; the reference cyan is honestly corrected", () => {
+    const c = blueDepthBuild.light.kit.tokens.colors;
+    expect(c.accent).toBe("#2456f0"); // primary vivid blue, untouched
+    expect(c.surface).toBe("#f4f6fa"); // operator chrome unchanged
+    expect(c.surfaceRaised).toBe("#ffffff");
+    expect(c.ink).toBe("#0b152b");
+
+    // The ONLY correction: the light cyan highlight can't mark on white, so
+    // the gate darkens it — reported, never silent (doc 06 §3, §7).
+    const adjusted = blueDepthBuild.light.accessibility.adjustments;
+    expect(adjusted.map((a) => a.token)).toEqual(["accentSecondary"]);
+    expect(adjusted[0].from).toBe("#8fd4ff");
+    expect(adjusted[0].to).toBe("#0091eb");
+    expect(adjusted[0].resolved).toBe(true);
+  });
+
+  test("DARK: the whole palette — including the reference cyan — passes verbatim, zero corrections", () => {
+    const c = blueDepthBuild.dark.kit.tokens.colors;
+    expect(blueDepthBuild.dark.accessibility.adjustments).toEqual([]);
+    expect(c.accent).toBe("#3f7cff");
+    expect(c.accentSecondary).toBe("#8fd4ff"); // the reference bubble cyan, intact
+    expect(c.surface).toBe("#050815");
+    expect(c.surfaceRaised).toBe("#0b1430");
+  });
+
+  test("text on blue: the derived on-accent foreground carries >= 4.5:1 in both variants", () => {
+    for (const variant of ["light", "dark"] as const) {
+      const c = blueDepthBuild[variant].kit.tokens.colors;
+      const choices = deriveOnColorForegrounds(c);
+      const fg = choices.accent === "surface" ? c.surface : c.ink;
+      expect(contrastRatio(fg, c.accent)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test("dark chrome: every foreground clears its floor on BOTH navy layers", () => {
+    const report = blueDepthBuild.dark.accessibility;
+    for (const check of report.checks) expect(check.pass).toBe(true);
+    expect(report.distinguishability.pass).toBe(true);
+  });
+
+  test("stable scope ids, distinct from the operator scope", () => {
+    expect(BLUE_DEPTH_SCOPE_ID.light).toBe("operator-p3-light");
+    expect(BLUE_DEPTH_SCOPE_ID.dark).toBe("operator-p3-dark");
+    expect(Object.values(BLUE_DEPTH_SCOPE_ID)).not.toContain(OPERATOR_TENANT_ID);
   });
 });

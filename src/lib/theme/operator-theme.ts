@@ -38,9 +38,11 @@
  * Dark/hero sections use Dark Blue #0a1c46 through the token layer (a scoped
  * surface override), never a hardcoded value in a component.
  *
- * Display face is Sora (a free, self-hosted geometric grotesque standing in for
- * the brand's proprietary display face); body is the self-hosted Inter; mono
- * stays IBM Plex Mono.
+ * Display AND body face is Geist (Vercel's neo-grotesque, OFL-1.1, self-hosted
+ * from @fontsource-variable/geist 5.2.9 — the Apple/Webflow-grade modern SaaS
+ * face; operator direction, pass 3, 2026-07-08: Sora/Space Grotesk are OUT for
+ * the operator theme). Inter remains the fallback; mono stays IBM Plex Mono.
+ * The frozen Signal DEFAULTS keep Space Grotesk/Inter untouched.
  *
  * This file is a pipeline INPUT (it plays the role of tenant #1's
  * `tenants.theme` row), so — like `demo-themes.ts` and `light-surface.ts` — it
@@ -59,13 +61,15 @@ import {
 export const OPERATOR_TENANT_ID = "operator";
 
 /**
- * Geometric-grotesque display face (Sora). Self-hosted woff2 in
- * `public/fonts/sora-var.woff2`; @font-face in globals.css. Inter (body) and
- * IBM Plex Mono (mono) are already self-hosted.
+ * Modern neo-grotesque face (Geist, weight 100–900 variable). Self-hosted
+ * woff2 in `public/fonts/geist-var.woff2`; @font-face in globals.css. One
+ * family for display AND body — the Apple/Webflow pattern: hierarchy comes
+ * from weight + size + tracking, not a second face. Inter stays as the
+ * self-hosted fallback; IBM Plex Mono is unchanged.
  */
 export const OPERATOR_TYPOGRAPHY = {
-  display: '"Sora", "Inter", system-ui, sans-serif',
-  body: '"Inter", system-ui, -apple-system, sans-serif',
+  display: '"Geist", "Inter", system-ui, sans-serif',
+  body: '"Geist", "Inter", system-ui, -apple-system, sans-serif',
   mono: '"IBM Plex Mono", "SFMono-Regular", Menlo, monospace',
 } as const;
 
@@ -107,3 +111,86 @@ export const operatorTheme: TenantTheme = toTenantTheme(operatorBuild.kit, {
   logoUrl: null,
   customDomain: null,
 });
+
+/* ==========================================================================
+   PASS-3 "BLUE-DEPTH" PREVIEW VARIANTS (operator direction, 2026-07-08)
+   --------------------------------------------------------------------------
+   Scoped to /dashboard-preview ONLY (applied via TenantThemeScope — the
+   frozen engine, unchanged). The operator's reference: illuminated, Apple-
+   grade dark UI — layered blues traveling light → dark. Three blues:
+
+     highlight  #8fd4ff  light cyan-blue (the reference chat-bubble tone) —
+                         authored into accentSecondary. Passes VERBATIM on
+                         the dark navy chrome; on the light chrome the gate
+                         honestly darkens it to #0091eb (3.11:1) — reported,
+                         never silent.
+     primary    #2456f0 (light chrome) / #3f7cff (dark chrome) — the vivid
+                         blue; the accent. Both clear 3:1 on both chrome
+                         layers verbatim, and the DERIVED on-accent
+                         foreground carries >= 5.2:1 for text on blue.
+     anchor     deep navy — carried by the dark variant's SURFACES
+                         (#050815 canvas / #0b1430 cards, Dark-Blue #0a1c46
+                         lineage) and, on the light variant, by gradient ends
+                         mixed toward the navy ink at the token layer.
+
+   Core Orange + Alachua remain in the OPERATOR THEME above (the system keeps
+   them) but are OFF this page — the final palette call is the operator's
+   after seeing pass 3. These are exploration inputs, additive; nothing about
+   the frozen token system or the global operator theme palette changes.
+   ========================================================================== */
+
+/** The /dashboard-preview pass-3 variant axis. */
+export type BlueDepthVariant = "light" | "dark";
+
+/** Stable scope ids for the two preview variants. */
+export const BLUE_DEPTH_SCOPE_ID: Record<BlueDepthVariant, string> = {
+  light: "operator-p3-light",
+  dark: "operator-p3-dark",
+};
+
+/** Brand INPUTS for the two variants (tenants.theme-row shaped, pre-gate). */
+export const BLUE_DEPTH_INPUTS: Record<BlueDepthVariant, BrandKitInput> = {
+  light: {
+    colors: {
+      accent: "#2456f0", // primary vivid blue (passes verbatim on white)
+      accentSecondary: "#8fd4ff", // highlight cyan — gate darkens on white (reported)
+      accentWarm: "#c18000", // Alachua (post-gate lineage) — kept in system, OFF this page
+      surface: "#f4f6fa", // unchanged operator canvas
+      surfaceRaised: "#ffffff", // unchanged white cards
+      ink: "#0b152b", // unchanged navy-tinted near-black
+      muted: "#5b6577",
+      positive: "#16a34a",
+      negative: "#e11d48",
+    },
+    typography: { ...OPERATOR_TYPOGRAPHY },
+  },
+  dark: {
+    colors: {
+      accent: "#3f7cff", // primary vivid blue, brightened for the dark chrome
+      accentSecondary: "#8fd4ff", // highlight cyan — passes verbatim on navy
+      accentWarm: "#f4a200", // original Alachua (passes verbatim on navy), OFF this page
+      surface: "#050815", // near-black canvas with a navy cast (the reference ground)
+      surfaceRaised: "#0b1430", // deep-navy cards (Dark Blue #0a1c46 lineage)
+      ink: "#eaf1fc", // light blue-tinted foreground
+      muted: "#9aa8c7", // blue-slate secondary text
+      positive: "#22c55e", // brightened for the dark chrome
+      negative: "#f43f5e", // brightened rose for the dark chrome
+    },
+    typography: { ...OPERATOR_TYPOGRAPHY },
+  },
+};
+
+/**
+ * Build results (kit + accessibility report) for both variants — exported so
+ * the gate's corrections are surfaced, exactly like `operatorBuild`.
+ */
+export const blueDepthBuild: Record<BlueDepthVariant, ReturnType<typeof buildBrandKit>> = {
+  light: buildBrandKit(BLUE_DEPTH_INPUTS.light),
+  dark: buildBrandKit(BLUE_DEPTH_INPUTS.dark),
+};
+
+/** The two variant themes in `tenants.theme` jsonb shape, post-gate. */
+export const blueDepthTheme: Record<BlueDepthVariant, TenantTheme> = {
+  light: toTenantTheme(blueDepthBuild.light.kit, { logoUrl: null, customDomain: null }),
+  dark: toTenantTheme(blueDepthBuild.dark.kit, { logoUrl: null, customDomain: null }),
+};

@@ -5,15 +5,24 @@
  * carry the direction too (token-gate policy). Semantic green/red only —
  * never the brand accents, so "up/down" never reads as brand energy.
  *
- * The wash is color-mix over the positive/negative token; on light chrome the
- * numerals keep the semantic token color (gate-validated against the light
- * surfaces), and on dark/filled tiles (`onColor`) they shift to a token-derived
- * pastel — the semantic hue mixed toward the raised surface — so contrast on
- * the dark fill comes from the token layer, never a raw white assumption.
+ * The wash is color-mix over the positive/negative token. Because the pill
+ * can sit on three different grounds across the pass-3 variants, `on` names
+ * the ground and the numerals derive from tokens accordingly:
+ *  - "chrome"     (default) — light cards AND the dark variant's navy tiles:
+ *                  the gate already validated the semantic tokens against
+ *                  both chrome layers, so the numerals wear them directly.
+ *  - "deepFill"   — dark/filled tiles on the LIGHT chrome (navy/blue fills):
+ *                  numerals are the semantic hue mixed toward the raised
+ *                  surface (a light pastel), so contrast comes from tokens,
+ *                  never a raw white assumption.
+ *  - "brightFill" — light-cyan/blue fills on the DARK chrome (the reference
+ *                  bubble): numerals mix toward the near-black surface token.
  */
 
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/theme/utils";
+
+export type DeltaGround = "chrome" | "deepFill" | "brightFill";
 
 export interface DeltaProps {
   /** Signed change; sign picks direction + color, magnitude is shown. */
@@ -24,8 +33,8 @@ export interface DeltaProps {
   context?: string;
   /** Color class for the trailing context (override for dark/colored cards). */
   contextClassName?: string;
-  /** Set on dark/filled tiles: stronger wash + light-tinted numerals. */
-  onColor?: boolean;
+  /** Which ground the pill sits on (see module comment). */
+  on?: DeltaGround;
   className?: string;
 }
 
@@ -34,18 +43,21 @@ export function Delta({
   unit = "",
   context,
   contextClassName = "text-muted",
-  onColor = false,
+  on = "chrome",
   className,
 }: DeltaProps) {
   const up = value >= 0;
   const tone = up ? "--positive" : "--negative";
 
   const pillStyle: CSSProperties = {
-    background: `color-mix(in oklab, var(${tone}) ${onColor ? 26 : 13}%, transparent)`,
+    background: `color-mix(in oklab, var(${tone}) ${on === "chrome" ? 13 : 26}%, transparent)`,
   };
-  const numeralStyle: CSSProperties | undefined = onColor
-    ? { color: `color-mix(in oklab, var(${tone}) 45%, var(--surface-raised))` }
-    : undefined;
+  const numeralStyle: CSSProperties | undefined =
+    on === "deepFill"
+      ? { color: `color-mix(in oklab, var(${tone}) 45%, var(--surface-raised))` }
+      : on === "brightFill"
+        ? { color: `color-mix(in oklab, var(${tone}) 35%, var(--surface))` }
+        : undefined;
 
   return (
     <span className={cn("inline-flex items-center gap-2 text-sm", className)}>
@@ -53,7 +65,7 @@ export function Delta({
         style={pillStyle}
         className={cn(
           "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono tabular-nums",
-          !onColor && (up ? "text-positive" : "text-negative")
+          on === "chrome" && (up ? "text-positive" : "text-negative")
         )}
       >
         <span aria-hidden className="text-[0.7em] leading-none" style={numeralStyle}>

@@ -36,3 +36,30 @@ NOT a change to the frozen token *system*, only its values.
 
 ## Accessibility
 All brand colors pass through the brand-kit accessibility gate. Core Blue on white is high-contrast (safe for text). Core Orange on white is borderline for small text — the gate will correct where needed and the adjustment is reported, never silent.
+
+## Pass 3 — "illuminated" blue-depth exploration (2026-07-08, /dashboard-preview only)
+
+Operator direction + reference image (backlit-glass cards, Apple-grade dark premium,
+layered light↔dark blues). Status: **exploration for operator reaction — not the
+final palette call.** Core Orange + Alachua remain in the theme system but are OFF
+this page.
+
+- **Face:** Geist (variable 100–900, OFL-1.1, self-hosted `public/fonts/geist-var.woff2`)
+  replaces Sora/Inter as the operator theme's display AND body — hierarchy via
+  weight + tight tracking. Signal defaults keep Space Grotesk/Inter (frozen).
+- **Blue-depth system** (two gated variant themes in `operator-theme.ts`,
+  applied via `TenantThemeScope`; scope ids `operator-p3-light` / `operator-p3-dark`):
+  - highlight cyan `#8fd4ff` (reference bubble tone) → `--accent-secondary`.
+    Passes VERBATIM on the dark chrome; gate-corrected to `#0091eb` (3.11:1) on light — reported.
+  - primary vivid blue → `--accent`: `#2456f0` (light chrome) / `#3f7cff` (dark chrome);
+    both pass 3:1 verbatim, derived on-accent text ≥ 5.2:1.
+  - deep navy anchor: dark surfaces `#050815` / `#0b1430` (Dark Blue #0a1c46 lineage);
+    on light, gradient ends mix `--accent` toward the navy ink. Gradients travel light→dark.
+  - dark-chrome semantics brightened: positive `#22c55e`, negative `#f43f5e` (zero gate corrections).
+- **Urgency = semantic red** (operator: "red is smart for action items") — the
+  needs-fixing zone wears negative washes/accents, never orange.
+- **Glow language** (`GlowCard`, tokens/color-mix only, STATIC): 1px transparent
+  border painted by a border-box cyan→blue gradient (the lit edge) + layered
+  box-shadow bloom in token blue (red for urgency) + inner radial glow over a
+  light→dark fill. Hero is a floating rounded card (radius `calc(var(--radius)*4)`),
+  not a full-width band.
