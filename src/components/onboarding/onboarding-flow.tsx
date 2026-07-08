@@ -46,8 +46,10 @@ function isDormant(vertical: SeedVertical): boolean {
   return !ACTIVE_VERTICALS.includes(vertical);
 }
 
+// Falls back to "" (not "Your") — consumers compose their own headings and
+// collapse a missing label instead of doubling the pronoun.
 function verticalLabel(vertical: SeedVertical | null): string {
-  return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "Your";
+  return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "";
 }
 
 /**
@@ -118,8 +120,10 @@ export function OnboardingFlow() {
     if (!canAdvance) return;
     // Leaving step 3 → generate the real plan. `now` captured here, not at
     // render, so the pure generator stays deterministic and hydration-safe.
+    // Dormant verticals get no roadmap (Gate 1a: only active playbooks serve
+    // client plans) — they fall through to the truthful coming-soon state.
     if (step === 3 && vertical) {
-      const playbook = getPlaybook(vertical);
+      const playbook = isDormant(vertical) ? null : getPlaybook(vertical);
       setRoadmap(
         playbook
           ? generatePlan({ playbook, now: new Date().toISOString() })
@@ -161,7 +165,7 @@ export function OnboardingFlow() {
               {heroTitle}
             </h1>
             <p className={"max-w-md " + HERO.soft}>
-              A real, playbook-driven AEO/GEO and local plan — assembled from your
+              A playbook-driven AEO/SEO/GEO and local plan — assembled from your
               industry, locations, and properties.
             </p>
           </div>
@@ -209,7 +213,11 @@ export function OnboardingFlow() {
           ) : null}
 
           {step === 5 ? (
-            <StepPlan roadmap={roadmap} verticalLabel={verticalLabel(vertical)} />
+            <StepPlan
+              roadmap={roadmap}
+              verticalLabel={verticalLabel(vertical)}
+              isDormantVertical={vertical ? isDormant(vertical) : true}
+            />
           ) : null}
         </Entrance>
 

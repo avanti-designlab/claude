@@ -29,6 +29,8 @@ import {
 export interface StepPlanProps {
   roadmap: GeneratedRoadmap | null;
   verticalLabel: string;
+  /** True while the vertical has no active playbook yet (dormant rollout). */
+  isDormantVertical: boolean;
 }
 
 function EffortMeter({ weight }: { weight: number }) {
@@ -124,29 +126,48 @@ function ChannelAllocation({
   );
 }
 
-function EmptyPlan({ verticalLabel }: { verticalLabel: string }) {
+function EmptyPlan({
+  verticalLabel,
+  isDormantVertical,
+}: {
+  verticalLabel: string;
+  isDormantVertical: boolean;
+}) {
+  // A missing label collapses cleanly ("Your plan is on its way"), never
+  // "Your your plan…".
+  const heading = ["Your", verticalLabel.toLowerCase(), "plan is on its way"]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed px-6 py-16 text-center">
       <span className="flex size-12 items-center justify-center rounded-full bg-overlay">
         <CalendarCheckIcon aria-hidden className="size-5 text-accent" />
       </span>
       <div className="flex max-w-md flex-col gap-1">
-        <h2 className="font-display text-2xl text-ink">
-          Your {verticalLabel.toLowerCase()} plan is on its way
-        </h2>
+        <h2 className="font-display text-2xl text-ink">{heading}</h2>
         <p className="text-sm text-muted">
-          The playbook engine is being switched on for this industry. Your
-          prioritized, channel-weighted roadmap lands here — no placeholders, the
-          real plan or nothing.
+          {isDormantVertical
+            ? "This industry's playbook is loaded but not yet active — real estate is first while we prove the loop. We'll flag you the moment it opens. Your prioritized, channel-weighted roadmap lands here — we show the real plan, never a placeholder."
+            : "Your plan isn't ready yet — it will be waiting on your dashboard, and we'll flag you when it lands."}
         </p>
       </div>
     </div>
   );
 }
 
-export function StepPlan({ roadmap, verticalLabel }: StepPlanProps) {
+export function StepPlan({
+  roadmap,
+  verticalLabel,
+  isDormantVertical,
+}: StepPlanProps) {
   if (roadmap === null || roadmap.tasks.length === 0) {
-    return <EmptyPlan verticalLabel={verticalLabel} />;
+    return (
+      <EmptyPlan
+        verticalLabel={verticalLabel}
+        isDormantVertical={isDormantVertical}
+      />
+    );
   }
 
   const generatedDate = new Date(roadmap.generatedAt);

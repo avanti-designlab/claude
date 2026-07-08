@@ -27,8 +27,8 @@ export interface StepAssemblingProps {
 
 const ASSEMBLING_STEPS = [
   "Reading your industry playbook",
-  "Auditing your properties",
-  "Prioritizing by channel",
+  "Weighing channels by where authority is built",
+  "Prioritizing tasks by impact",
 ];
 
 function AssemblingPanel() {
@@ -43,7 +43,8 @@ function AssemblingPanel() {
           Assembling your plan
         </h2>
         <p className="text-sm text-muted">
-          Turning the playbook and your audit into a prioritized roadmap.
+          Turning your industry playbook into a prioritized, channel-weighted
+          roadmap.
         </p>
       </div>
       <ul className="flex flex-col gap-2 text-sm text-muted">
@@ -95,7 +96,7 @@ export function StepAssembling({
       {hasTasks ? (
         <OnboardingPlanReveal
           heading="Your plan is ready"
-          subheading="Assembled from your industry playbook and a first pass over your properties. Here are the first moves."
+          subheading="Assembled from your industry playbook — audit findings fold in once your properties connect. Here are the first moves."
           tasks={revealTasks}
         />
       ) : (
@@ -109,8 +110,8 @@ export function StepAssembling({
             </h2>
             <p className="text-sm text-muted">
               {isDormantVertical
-                ? "This industry's playbook is being switched on. Your prioritized plan appears here the moment it goes live."
-                : "Your plan is being finalized. The prioritized roadmap appears here as soon as the playbook engine finishes."}
+                ? "This industry's playbook is loaded but not yet active — real estate is first while we prove the loop. We'll flag you the moment it opens."
+                : "Your plan isn't ready yet — it will be waiting on your dashboard, and we'll flag you when it lands."}
             </p>
           </div>
         </div>

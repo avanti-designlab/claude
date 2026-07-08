@@ -60,7 +60,7 @@ function TaskRow({ task, index }: { task: PlanRevealTask; index: number }) {
 
 export function OnboardingPlanReveal({
   heading = "Your plan is ready",
-  subheading = "Assembled from the industry playbook and your site audit.",
+  subheading = "Assembled from your industry playbook — audit findings fold in once your properties connect.",
   tasks,
   className,
 }: OnboardingPlanRevealProps) {

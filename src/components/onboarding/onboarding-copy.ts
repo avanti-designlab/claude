@@ -67,7 +67,7 @@ export const VERTICAL_META: VerticalMeta[] = [
   },
   {
     id: "ecommerce",
-    label: "Ecommerce",
+    label: "E-commerce",
     blurb: "Product catalogs and brands competing for AI product answers.",
     icon: ShoppingBagIcon,
   },
