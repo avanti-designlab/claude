@@ -20,23 +20,42 @@ export interface ConnectorScope {
 
 /**
  * An opaque, resolved credential. Never persisted, never logged. Held only for
- * the duration of a single vendor call inside the adapter. `toString` is
- * masked so a stray interpolation cannot leak the secret.
+ * the duration of a single vendor call inside the adapter.
+ *
+ * The raw secret CANNOT leak through any standard logging path:
+ *  - it lives in an ES private field (`#secret`), so it is non-enumerable and
+ *    never appears as an own property — `console.log(cred)` / `util.inspect`
+ *    have nothing to print, and `JSON.stringify` never serializes it;
+ *  - `[nodejs.util.inspect.custom]` masks the console.log / util.inspect path;
+ *  - `toString` masks string interpolation; `toJSON` masks JSON serialization.
+ *
+ * The value is reachable ONLY via {@link VendorCredential.reveal}, which call
+ * sites invoke at USE TIME inside an adapter (never storing or logging the
+ * revealed string). A `secrets.test.ts` proves the raw secret appears in none
+ * of util.inspect / String() / JSON.stringify / template / console.log.
  */
 export class VendorCredential {
-  private readonly secret: string;
+  readonly #secret: string;
   constructor(secret: string) {
-    this.secret = secret;
+    this.#secret = secret;
   }
-  /** Reveal the raw value — only inside an adapter, only at call time. */
+  /**
+   * Reveal the raw value — only inside an adapter, only at call time. The
+   * returned string must be handed straight to the vendor call and never
+   * logged, stored, or retained past the call.
+   */
   reveal(): string {
-    return this.secret;
+    return this.#secret;
   }
   toString(): string {
     return "VendorCredential(***)";
   }
   toJSON(): string {
     return "***";
+  }
+  /** Masks the console.log / util.inspect path (the leak the private field also closes). */
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return "VendorCredential(***)";
   }
 }
 

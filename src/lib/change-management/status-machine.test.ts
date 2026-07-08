@@ -116,6 +116,48 @@ describe("assertRowSatisfiesConstraints mirrors the DB CHECKs", () => {
     ).not.toThrow();
   });
 
+  it("rejects an unknown write method (site_changes_method_allowed)", () => {
+    expect(() =>
+      assertRowSatisfiesConstraints(row({ method: "ftp" as never })),
+    ).toThrow(/site_changes_method_allowed/);
+    // every real method is accepted
+    for (const method of ["wordpress", "webflow", "wix", "edge_worker", "pr"] as const) {
+      expect(() => assertRowSatisfiesConstraints(row({ method }))).not.toThrow();
+    }
+  });
+
+  it("rejects an unknown change_type (site_changes_change_type_allowed)", () => {
+    expect(() =>
+      assertRowSatisfiesConstraints(row({ change_type: "sitemap" as never })),
+    ).toThrow(/site_changes_change_type_allowed/);
+    for (const change_type of [
+      "h1",
+      "title",
+      "meta",
+      "schema",
+      "alt",
+      "content",
+      "canonical",
+    ] as const) {
+      expect(() => assertRowSatisfiesConstraints(row({ change_type }))).not.toThrow();
+    }
+  });
+
+  it("rejects a diff that is not a JSON object (site_changes_diff_is_object)", () => {
+    for (const bad of [[], null, "str", 3, true] as unknown[]) {
+      expect(() =>
+        assertRowSatisfiesConstraints(row({ diff: bad as never })),
+      ).toThrow(/site_changes_diff_is_object/);
+    }
+    // a plain object (the contract {before, after} shape, or an empty object) is fine
+    expect(() =>
+      assertRowSatisfiesConstraints(row({ diff: { before: null, after: "x" } })),
+    ).not.toThrow();
+    expect(() =>
+      assertRowSatisfiesConstraints(row({ diff: {} as never })),
+    ).not.toThrow();
+  });
+
   it("reverted / auto_reverted additionally require reverted_at", () => {
     for (const status of ["reverted", "auto_reverted"] as const) {
       expect(() =>

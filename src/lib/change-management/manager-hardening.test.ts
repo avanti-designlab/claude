@@ -16,11 +16,13 @@ import type { TenantUserRole } from "@/lib/types/db";
 import {
   AuthorizationError,
   ChangeManager,
+  ConstraintViolationError,
   InMemoryChangeStore,
   MapAdapterRegistry,
   RecordingWriteAdapter,
   RollbackReasonRequiredError,
   steppingClock,
+  type BatchPreview,
   type DesiredChange,
   type MonitoringSignal,
   type TenantContext,
@@ -162,5 +164,75 @@ describe("verifyConnection (doc 04 §4 no-op access check)", () => {
     await expect(
       manager.verifyConnection(check, ctx("client_viewer", "u-cv"))
     ).rejects.toBeInstanceOf(AuthorizationError);
+  });
+});
+
+describe("applyBatch re-asserts a single client (defense-in-depth)", () => {
+  it("rejects a forged same-tenant two-client batch before any member applies", async () => {
+    const { manager, store, wp } = setup();
+
+    // Two legitimately-previewed changes for DIFFERENT clients in the SAME
+    // tenant. previewBatch would refuse them together; forging a BatchPreview
+    // that spans both is the hole this guard closes.
+    const dc1 = desired({
+      clientId: "c1",
+      target: { url: "https://c1.example/", locator: "title" },
+    });
+    const dc2 = desired({
+      clientId: "c2",
+      target: { url: "https://c2.example/", locator: "title" },
+    });
+    wp.setCurrent(dc1.target, dc1.before);
+    wp.setCurrent(dc2.target, dc2.before);
+    const p1 = await manager.preview(dc1, ctx());
+    const p2 = await manager.preview(dc2, ctx());
+
+    const forged: BatchPreview = {
+      batchId: "batch:forged",
+      tenantId: "t1",
+      // A forged header claiming one client while members span two.
+      clientId: "c1",
+      members: [p1, p2],
+      summary: {
+        memberCount: 2,
+        byChangeType: { title: 2 },
+        label: "forged mixed-client batch",
+      },
+    };
+
+    await expect(
+      manager.applyBatch(forged, { approvedBy: "h" }, ctx())
+    ).rejects.toBeInstanceOf(ConstraintViolationError);
+
+    // Zero writes, and both rows remain previewed (nothing applied under the
+    // single approval).
+    expect(wp.count("apply")).toBe(0);
+    expect(store.peek(p1.change.id)?.status).toBe("previewed");
+    expect(store.peek(p2.change.id)?.status).toBe("previewed");
+  });
+
+  it("still applies a genuine single-client batch", async () => {
+    const { manager, store, wp } = setup();
+    const dc1 = desired({
+      clientId: "c1",
+      changeType: "title",
+      target: { url: "https://c1.example/", locator: "title" },
+    });
+    const dc2 = desired({
+      clientId: "c1",
+      changeType: "meta",
+      target: { url: "https://c1.example/", locator: "meta" },
+    });
+    wp.setCurrent(dc1.target, dc1.before);
+    wp.setCurrent(dc2.target, dc2.before);
+    const batch = await manager.previewBatch([dc1, dc2], ctx());
+
+    const report = await manager.applyBatch(batch, { approvedBy: "h" }, ctx());
+
+    expect(report.complete).toBe(true);
+    expect(report.applied).toHaveLength(2);
+    for (const m of batch.members) {
+      expect(store.peek(m.change.id)?.status).toBe("applied");
+    }
   });
 });

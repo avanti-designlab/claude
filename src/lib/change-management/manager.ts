@@ -183,6 +183,12 @@ export class ChangeManager {
       });
     }
 
+    // ORDERING (deliberate — do NOT reorder): the SITE write happens BEFORE the
+    // DB row update, for every method, at both apply and revert. If store.update
+    // throws after a successful site write, the row is left in its pre-write
+    // status ('previewed') while the site already shows `after`. That is the
+    // safe/idempotent direction: a retry re-applies the SAME `after` (a no-op on
+    // the site) and no un-audited 'applied' claim exists until the DB confirms it.
     await adapter.apply({ target, before: liveBefore, after, ctx: adapterCtx });
 
     const change = await this.store.update(
@@ -223,6 +229,11 @@ export class ChangeManager {
     const row = await this.load(changeId, ctx, "rollback");
     assertLegalTransition(row.status, "reverted");
 
+    // ORDERING (deliberate — do NOT reorder): revert the site BEFORE updating
+    // the DB row. If store.update throws after a successful site revert, the row
+    // stays 'applied' while the site is already reverted — retryable and
+    // eventually-consistent: re-running rollback re-writes the same prior state
+    // (idempotent), and the change is never marked 'reverted' until the DB agrees.
     await this.revertOnSite(row);
     const change = await this.store.update(
       changeId,
@@ -305,6 +316,19 @@ export class ChangeManager {
     if (!options.approvedBy) {
       throw new ApprovalRequiredError(
         `applyBatch ${batch.batchId}: a human approver (approvedBy) is required — bulk changes never fire unattended`,
+      );
+    }
+
+    // Re-derive the single client from the MEMBERS rather than trusting the
+    // caller-supplied batch.clientId. `previewBatch` already refuses a mixed
+    // batch, but a forged same-tenant BatchPreview could smuggle two clients
+    // under one approval; cross-tenant is caught later by load(), but a
+    // same-tenant multi-client batch is not — so reject it here, before ANY
+    // member applies. (Empty batch → no client, nothing to apply.)
+    const memberClientIds = new Set(batch.members.map((m) => m.change.client_id));
+    if (memberClientIds.size > 1) {
+      throw new ConstraintViolationError(
+        `applyBatch ${batch.batchId}: a bulk batch must target a single client — refusing a mixed-client batch (${[...memberClientIds].join(", ")}) before any member applies`,
       );
     }
 
@@ -410,6 +434,8 @@ export class ChangeManager {
     // policy.mode === "execute": fire the auto-rollback.
     const warnings: PipelineWarning[] = [];
     try {
+      // Same ORDERING as manual rollback (do NOT reorder): site revert BEFORE
+      // the DB update. See the catch below for the store-fails-after-revert case.
       await this.revertOnSite(row);
       const change = await this.store.update(
         changeId,
@@ -433,6 +459,11 @@ export class ChangeManager {
     } catch (err) {
       // Auto-revert failed — the row stays 'applied' and retryable; never crash
       // the monitoring loop. The failure is reported for the caller/alerting.
+      // Note the ordering consequence: if revertOnSite SUCCEEDED but store.update
+      // threw, the SITE is already reverted while the row still reads 'applied'.
+      // That errs to the safe direction — the change is neutralized on the site;
+      // a re-run re-reverts idempotently and reconciles the row — so we do not
+      // attempt a compensating re-apply here.
       return {
         changeId,
         status: row.status,
@@ -517,7 +548,16 @@ export class ChangeManager {
     return row;
   }
 
-  /** Revert a change on the live site via the SAME adapter that applied it. */
+  /**
+   * Revert a change on the live site via the SAME adapter that applied it.
+   *
+   * CLOBBER SEMANTICS (intentional — doc 04 §2 "restore prior state"): revert
+   * writes the apply-time `before` UNCONDITIONALLY. If the page was edited
+   * out-of-band AFTER this change applied, those edits are overwritten — rollback
+   * restores the state that existed BEFORE this change, not a three-way merge.
+   * This is the correct, predictable one-click-undo contract; do not "improve" it
+   * into a conditional/merge revert, which would make rollback non-deterministic.
+   */
   private async revertOnSite(row: SiteChangeRow): Promise<void> {
     const adapter = this.adapterFor(row.method);
     const target = this.targetOf(row);

@@ -11,8 +11,11 @@
  * without ever applying).
  *
  * DB constraints replicated here (0005):
- *  - status ∈ {previewed, applied, reverted, auto_reverted}
+ *  - method ∈ {wordpress, webflow, wix, edge_worker, pr}       (method_allowed)
+ *  - change_type ∈ {h1, title, meta, schema, alt, content, canonical} (change_type_allowed)
  *  - automation_level ∈ {ai_draft_human_approve, human_only}   (no 'auto')
+ *  - status ∈ {previewed, applied, reverted, auto_reverted}
+ *  - diff is a JSON object (jsonb_typeof(diff) = 'object')      (diff_is_object)
  *  - status ≠ previewed  ⇒ applied_at NOT NULL       (applied_has_timestamp)
  *  - status ≠ previewed  ⇒ approved_by NOT NULL       (requires_approval)
  *  - status ∈ {reverted, auto_reverted} ⇒ reverted_at NOT NULL (reverted_has_timestamp)
@@ -20,7 +23,9 @@
 
 import {
   SITE_CHANGE_AUTOMATION_LEVELS,
+  SITE_CHANGE_METHODS,
   SITE_CHANGE_STATUSES,
+  SITE_CHANGE_TYPES,
   type SiteChangeRow,
   type SiteChangeStatus,
 } from "@/lib/types/db";
@@ -75,6 +80,9 @@ export function assertLegalTransition(
 export function assertRowSatisfiesConstraints(
   row: Pick<
     SiteChangeRow,
+    | "method"
+    | "change_type"
+    | "diff"
     | "status"
     | "automation_level"
     | "approved_by"
@@ -82,6 +90,24 @@ export function assertRowSatisfiesConstraints(
     | "reverted_at"
   >,
 ): void {
+  if (!SITE_CHANGE_METHODS.includes(row.method)) {
+    throw new ConstraintViolationError(
+      `site_changes_method_allowed: '${row.method}' is not a valid write method`,
+    );
+  }
+  if (!SITE_CHANGE_TYPES.includes(row.change_type)) {
+    throw new ConstraintViolationError(
+      `site_changes_change_type_allowed: '${row.change_type}' is not a valid change type`,
+    );
+  }
+  // jsonb_typeof(diff) = 'object': a JSON object, never an array / primitive /
+  // null. (The column is also NOT NULL; a SQL-null diff never reaches here.)
+  const diff: unknown = row.diff;
+  if (typeof diff !== "object" || diff === null || Array.isArray(diff)) {
+    throw new ConstraintViolationError(
+      `site_changes_diff_is_object: diff must be a JSON object (jsonb_typeof = 'object')`,
+    );
+  }
   if (!SITE_CHANGE_STATUSES.includes(row.status)) {
     throw new ConstraintViolationError(
       `site_changes_status_allowed: '${row.status}' is not a valid status`,
