@@ -20,6 +20,11 @@
 | 🔒 | **GATE 1a** — single-vertical validation (real estate, GG as client zero, full loop end-to-end) | orchestrator | loop proven + case-study metrics | 🚫 Not reached |
 | 🔒 | **GATE 1** — Phase 1 ships multi-vertical | orchestrator | validated loop across seed verticals + M1b active | 🚫 Not reached |
 
+## Post-freeze foundation changes (require Orchestrator + Code Review sign-off — CLAUDE.md rule 1)
+
+**2026-07-08 · F2 token-system extension: add a SECONDARY + WARM accent · Orchestrator AUTHORIZED · Code Review PENDING**
+Reason: the operator's real brand (tenant #1, `docs/design/operator-brand.md`) has **two** headline colors — Core Blue `#1B2FCE` (primary) and Core Orange `#FC4C14` (secondary/energy) — plus Alachua `#F4A200` (warm) and Dark Blue `#0A1C46`. The frozen F2 token set carries a single `--accent`. To represent the brand faithfully, the token system is extended **additively**: add `--accent-secondary` and `--accent-warm` to `ColorTokens`/`DesignTokenSet` + `buildBrandKit` (accessibility-gated like the existing accent) + `toCssVariables`. The existing 7 tokens, the theming engine, the 5 moments, and the component library are unchanged; this is purely additive. Owner: `lead-ui-ux-designer`. **Not "done" until Code Review signs off** (security + no-regression on the frozen brand-kit skill) — this is the sanctioned controlled-change path, not a re-opening of the freeze. Reconciliation: the operator's brand guide is authoritative; the earlier Webflow-blue proxy (`#146EF5`) is discarded.
+
 ## Gate records
 
 **2026-07-07 · 0.4 F2 design system · Code Review (code quality/security, per CLAUDE.md rule 3) → REJECT (1 blocker, 4 minors) → remediated → re-review CLEARED**
