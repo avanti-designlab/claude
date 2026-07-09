@@ -9,10 +9,11 @@ export const metadata: Metadata = {
 
 /**
  * Phase 1.1 onboarding route — now inside the authenticated app shell
- * (src/app/(app)/layout.tsx gates it). The flow is client-side (React stepper)
- * and runs the pure playbook engine in-browser; on completion for the active
- * vertical it persists a real `clients` row via a tenant-scoped server action
- * (see the flow's SaveClientPanel). See `@/components/onboarding/onboarding-flow`.
+ * (src/app/(app)/layout.tsx gates it). The flow is client-side (React
+ * stepper); leaving step 3 calls the tenant-scoped `createClientFromOnboarding`
+ * server action, which persists the `clients` row AND generates + persists the
+ * plan/tasks server-side — the plan the flow then shows is the action's
+ * returned, persisted roadmap. See `@/components/onboarding/onboarding-flow`.
  */
 export default function OnboardingPage() {
   return (

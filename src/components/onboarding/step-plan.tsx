@@ -1,15 +1,25 @@
 "use client";
 
 /**
- * Step 5 — the custom AEO/GEO/local plan (doc 06 §5). Renders the REAL
- * GeneratedRoadmap from the playbook engine: the channel-weighted effort split,
- * the prioritized task list with per-task module + automation-level badges and
- * effort weighting, and the plan summary. No mock data — an empty roadmap
- * (engine still landing, or a dormant vertical) renders a graceful state.
+ * Step 5 — the custom AEO/GEO/local plan (doc 06 §5). Renders the
+ * SERVER-PERSISTED result of `createClientFromOnboarding` — the roadmap shown
+ * is `plan.roadmap` exactly as saved, never a client-side regeneration, so
+ * what the operator sees is what the database holds. Three outcomes:
+ *
+ *  - plan persisted            → "Saved — N tasks created" + the full roadmap
+ *                                (channel-weighted effort split, prioritized
+ *                                task list with module + automation-level
+ *                                badges and effort weighting, plan summary).
+ *  - no active playbook (null) → the client saved; a plan activates when this
+ *                                vertical's playbook ships. Nothing failed.
+ *  - plan write failed (null + planWarning) → the client saved; the server's
+ *                                interface-voice warning, rendered calmly.
  */
 
-import { CalendarCheckIcon } from "lucide-react";
+import Link from "next/link";
+import { CalendarCheckIcon, CheckCircle2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -17,7 +27,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ShareOfVoice, type ShareOfVoiceEntry } from "@/components/charts";
-import type { GeneratedRoadmap, RoadmapTask } from "@/lib/types/roadmap";
+import type { CreatedClient, CreatedPlan } from "@/lib/clients/actions";
+import type { RoadmapTask } from "@/lib/types/roadmap";
 import { cn } from "@/lib/theme/utils";
 import {
   AUTOMATION_META,
@@ -25,12 +36,16 @@ import {
   IMPACT_LABEL,
   MODULE_LABEL,
 } from "./onboarding-copy";
+import { planOutcome } from "./save-outcome";
 
 export interface StepPlanProps {
-  roadmap: GeneratedRoadmap | null;
+  /** The persisted client (the save happened during the assembling step). */
+  client: CreatedClient;
+  /** The persisted plan, or null (no active playbook / plan write failed). */
+  plan: CreatedPlan | null;
+  /** Present iff the client saved but the plan write path failed. */
+  planWarning?: string;
   verticalLabel: string;
-  /** True while the vertical has no active playbook yet (dormant rollout). */
-  isDormantVertical: boolean;
 }
 
 function EffortMeter({ weight }: { weight: number }) {
@@ -126,50 +141,83 @@ function ChannelAllocation({
   );
 }
 
-function EmptyPlan({
-  verticalLabel,
-  isDormantVertical,
+/**
+ * The "Saved — N tasks created" confirmation strip (the save happened during
+ * the assembling step; this is its receipt, in the panel language the old
+ * save panel used: positive border/tint + check).
+ */
+function SavedConfirmation({
+  client,
+  taskCount,
 }: {
-  verticalLabel: string;
-  isDormantVertical: boolean;
+  client: CreatedClient;
+  taskCount: number;
 }) {
-  // A missing label collapses cleanly ("Your plan is on its way"), never
-  // "Your your plan…".
-  const heading = ["Your", verticalLabel.toLowerCase(), "plan is on its way"]
-    .filter(Boolean)
-    .join(" ");
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-positive/40 bg-positive/5 p-4">
+      <CheckCircle2Icon aria-hidden className="size-5 shrink-0 text-positive" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <p className="font-medium text-ink">
+          Saved — {taskCount} {taskCount === 1 ? "task" : "tasks"} created
+        </p>
+        <p className="text-sm text-muted">
+          <span className="font-medium text-ink">{client.name}</span> is in
+          your workspace with this plan on the board.
+        </p>
+      </div>
+      {/* Literal /clients (not APP_HOME): the label promises the clients
+          list, and APP_HOME lands on the dashboard. */}
+      <Button asChild size="sm" variant="outline">
+        <Link href="/clients">View clients</Link>
+      </Button>
+    </div>
+  );
+}
 
+/** Plan-less outcomes: client saved, no roadmap to show — say exactly why. */
+function PlanlessState({
+  client,
+  planWarning,
+}: {
+  client: CreatedClient;
+  planWarning?: string;
+}) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed px-6 py-16 text-center">
       <span className="flex size-12 items-center justify-center rounded-full bg-overlay">
         <CalendarCheckIcon aria-hidden className="size-5 text-accent" />
       </span>
       <div className="flex max-w-md flex-col gap-1">
-        <h2 className="font-display text-2xl text-ink">{heading}</h2>
+        <h2 className="font-display text-2xl text-ink">
+          {planWarning
+            ? `${client.name} is saved`
+            : "No playbook for this industry yet"}
+        </h2>
         <p className="text-sm text-muted">
-          {isDormantVertical
-            ? "This industry's playbook is loaded but not yet active — real estate is first while we prove the loop. We'll flag you the moment it opens. Your prioritized, channel-weighted roadmap lands here — we show the real plan, never a placeholder."
-            : "Your plan isn't ready yet — it will be waiting on your dashboard, and we'll flag you when it lands."}
+          {planWarning ??
+            `${client.name} is saved to your workspace. A plan activates the moment this vertical's playbook ships — we'll flag you when it opens, and your prioritized, channel-weighted roadmap lands here.`}
         </p>
       </div>
+      <Button asChild size="sm" variant="outline">
+        <Link href="/clients">View clients</Link>
+      </Button>
     </div>
   );
 }
 
 export function StepPlan({
-  roadmap,
+  client,
+  plan,
+  planWarning,
   verticalLabel,
-  isDormantVertical,
 }: StepPlanProps) {
-  if (roadmap === null || roadmap.tasks.length === 0) {
-    return (
-      <EmptyPlan
-        verticalLabel={verticalLabel}
-        isDormantVertical={isDormantVertical}
-      />
-    );
+  const outcome = planOutcome(plan, planWarning);
+
+  if (outcome !== "plan" || plan === null) {
+    return <PlanlessState client={client} planWarning={planWarning} />;
   }
 
+  const { roadmap } = plan;
   const generatedDate = new Date(roadmap.generatedAt);
   const generatedLabel = Number.isNaN(generatedDate.getTime())
     ? roadmap.generatedAt
@@ -181,6 +229,8 @@ export function StepPlan({
 
   return (
     <div className="flex flex-col gap-6">
+      <SavedConfirmation client={client} taskCount={plan.taskCount} />
+
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{verticalLabel}</Badge>
@@ -196,22 +246,24 @@ export function StepPlan({
 
       <ChannelAllocation allocation={roadmap.channelAllocation} />
 
-      <div className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h3 className="font-medium text-ink">
-            Prioritized tasks
-          </h3>
-          <span className="font-mono text-xs text-muted">
-            {roadmap.tasks.length} in order
-          </span>
+      {roadmap.tasks.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="font-medium text-ink">
+              Prioritized tasks
+            </h3>
+            <span className="font-mono text-xs text-muted">
+              {roadmap.tasks.length} in order
+            </span>
+          </div>
+          <Separator />
+          <ol className="flex flex-col gap-3">
+            {roadmap.tasks.map((task, index) => (
+              <TaskCard key={task.id} task={task} index={index} />
+            ))}
+          </ol>
         </div>
-        <Separator />
-        <ol className="flex flex-col gap-3">
-          {roadmap.tasks.map((task, index) => (
-            <TaskCard key={task.id} task={task} index={index} />
-          ))}
-        </ol>
-      </div>
+      ) : null}
     </div>
   );
 }

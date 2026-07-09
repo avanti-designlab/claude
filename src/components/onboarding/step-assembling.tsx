@@ -3,26 +3,32 @@
 /**
  * Step 4 — "your custom plan is assembling" (doc 06 §5, animated moment #1).
  *
- * A brief assembling beat resolves into the plan reveal (OnboardingPlanReveal,
- * the sanctioned moment). Under reduced motion the assembling delay is skipped
- * and the plan renders immediately — the moment component itself also renders
- * its final state instantly.
+ * The assembling beat now covers the REAL server write: the flow fires
+ * `createClientFromOnboarding` on entry, and the beat resolves only when both
+ * the animation timer AND the server action have finished (`shouldReveal`) —
+ * holding on the assembling panel if the write outlasts the timer. What
+ * reveals is the SERVER-PERSISTED plan (the action's returned roadmap), via
+ * OnboardingPlanReveal (the sanctioned moment). Under reduced motion the
+ * timer is skipped — the panel waits statically, then the final state renders
+ * instantly. A failed save renders the server's interface-voice error with a
+ * retry; nothing was created, so Back (in the flow footer) stays open too.
  */
 
 import * as React from "react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OnboardingPlanReveal, useReducedMotion } from "@/components/moments";
-import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 import { cn } from "@/lib/theme/utils";
 import { IMPACT_LABEL } from "./onboarding-copy";
+import { planOutcome, shouldReveal, type SaveState } from "./save-outcome";
 
 export interface StepAssemblingProps {
-  roadmap: GeneratedRoadmap | null;
+  /** The in-flight / settled server write (client + plan persistence). */
+  save: SaveState;
   /** Advance to the full plan. */
   onContinue: () => void;
-  /** True while the vertical has no active playbook yet (dormant rollout). */
-  isDormantVertical: boolean;
+  /** Re-fire the save after an error (nothing was created). */
+  onRetry: () => void;
 }
 
 const ASSEMBLING_STEPS = [
@@ -31,11 +37,16 @@ const ASSEMBLING_STEPS = [
   "Prioritizing tasks by impact",
 ];
 
-function AssemblingPanel() {
+function AssemblingPanel({ reduced }: { reduced: boolean }) {
   return (
     <div className="flex flex-col items-center gap-6 rounded-xl border bg-card px-6 py-12 text-center">
       <span className="relative flex size-14 items-center justify-center">
-        <span className="absolute inset-0 animate-ping rounded-full bg-accent/25" />
+        {/* The pulse rides the reduced-motion gate — a static dot when reduced
+            (this panel can now show under reduced motion while the server
+            write is still in flight). */}
+        {reduced ? null : (
+          <span className="absolute inset-0 animate-ping rounded-full bg-accent/25" />
+        )}
         <span className="relative size-3 rounded-full bg-accent" />
       </span>
       <div className="flex flex-col gap-1">
@@ -44,13 +55,18 @@ function AssemblingPanel() {
         </h2>
         <p className="text-sm text-muted">
           Turning your industry playbook into a prioritized, channel-weighted
-          roadmap.
+          roadmap — and saving it to your workspace.
         </p>
       </div>
       <ul className="flex flex-col gap-2 text-sm text-muted">
         {ASSEMBLING_STEPS.map((label) => (
           <li key={label} className="flex items-center gap-2">
-            <span className="size-1.5 animate-pulse rounded-full bg-accent" />
+            <span
+              className={cn(
+                "size-1.5 rounded-full bg-accent",
+                !reduced && "animate-pulse"
+              )}
+            />
             {label}
           </li>
         ))}
@@ -59,10 +75,40 @@ function AssemblingPanel() {
   );
 }
 
+function SaveErrorPanel({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-6 rounded-xl border border-negative/40 bg-negative/5 px-6 py-12 text-center"
+    >
+      <span className="flex size-12 items-center justify-center rounded-full bg-overlay">
+        <XIcon aria-hidden className="size-5 text-negative" />
+      </span>
+      <div className="flex max-w-md flex-col gap-1">
+        <h2 className="font-display text-2xl text-ink">
+          We couldn&apos;t save this client
+        </h2>
+        {/* The server action's error is already interface voice (what
+            happened + what to do) — render it verbatim. */}
+        <p className="text-sm text-muted">{message}</p>
+      </div>
+      <Button type="button" onClick={onRetry}>
+        <RotateCcwIcon aria-hidden /> Try again
+      </Button>
+    </div>
+  );
+}
+
 export function StepAssembling({
-  roadmap,
+  save,
   onContinue,
-  isDormantVertical,
+  onRetry,
 }: StepAssemblingProps) {
   const reduced = useReducedMotion();
   const [timerDone, setTimerDone] = React.useState(false);
@@ -73,30 +119,40 @@ export function StepAssembling({
     return () => clearTimeout(timer);
   }, [reduced]);
 
-  // Reduced motion skips the assembling beat entirely; otherwise the timer
-  // resolves it. Derived (not synced in an effect) to avoid cascading renders.
-  const revealed = reduced || timerDone;
+  // Derived (not synced in an effect) to avoid cascading renders: the beat
+  // resolves when the timer (skipped under reduced motion) AND the server
+  // write have both finished — the animation covers the real await.
+  const revealed = shouldReveal(reduced, timerDone, save);
 
   if (!revealed) {
-    return <AssemblingPanel />;
+    return <AssemblingPanel reduced={reduced} />;
   }
 
-  const hasTasks = roadmap !== null && roadmap.tasks.length > 0;
+  if (save.phase === "error") {
+    return <SaveErrorPanel message={save.message} onRetry={onRetry} />;
+  }
+  if (save.phase !== "saved") {
+    // Unreachable in the flow (the save fires before step 4 mounts); hold the
+    // assembling panel rather than reveal something that doesn't exist.
+    return <AssemblingPanel reduced={reduced} />;
+  }
 
-  const revealTasks = hasTasks
-    ? roadmap.tasks.slice(0, 6).map((task) => ({
-        title: task.title,
-        channel: task.channel,
-        meta: IMPACT_LABEL[task.impact],
-      }))
-    : [];
+  const outcome = planOutcome(save.plan, save.planWarning);
+  const persistedTasks = save.plan?.roadmap.tasks ?? [];
+  const hasTasks = persistedTasks.length > 0;
+
+  const revealTasks = persistedTasks.slice(0, 6).map((task) => ({
+    title: task.title,
+    channel: task.channel,
+    meta: IMPACT_LABEL[task.impact],
+  }));
 
   return (
     <div className="flex flex-col gap-8">
       {hasTasks ? (
         <OnboardingPlanReveal
           heading="Your plan is ready"
-          subheading="Assembled from your industry playbook — audit findings fold in once your properties connect. Here are the first moves."
+          subheading="Saved to your workspace, straight from your industry playbook — audit findings fold in once your properties connect. Here are the first moves."
           tasks={revealTasks}
         />
       ) : (
@@ -106,12 +162,14 @@ export function StepAssembling({
           </span>
           <div className="flex max-w-md flex-col gap-1">
             <h2 className="font-display text-2xl text-ink">
-              You&apos;re all set up
+              {save.client.name} is saved
             </h2>
             <p className="text-sm text-muted">
-              {isDormantVertical
-                ? "This industry's playbook is loaded but not yet active — real estate is first while we prove the loop. We'll flag you the moment it opens."
-                : "Your plan isn't ready yet — it will be waiting on your dashboard, and we'll flag you when it lands."}
+              {outcome === "plan-write-failed"
+                ? save.planWarning
+                : outcome === "no-playbook"
+                  ? "No playbook for this industry yet — a plan activates the moment this vertical's playbook ships."
+                  : "Your plan is saved. Tasks land on your dashboard as your playbook and audit surface them."}
             </p>
           </div>
         </div>

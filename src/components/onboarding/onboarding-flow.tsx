@@ -1,15 +1,19 @@
 "use client";
 
 /**
- * Phase 1.1 onboarding flow (doc 06 §5). A client-side stepper — no backend,
- * no DB — that drives the real playbook engine in-browser:
+ * Phase 1.1 onboarding flow (doc 06 §5). A client-side stepper that ends in
+ * the real tenant write:
  *
- *   select industry → add location(s) → connect properties →
- *   plan assembling (moment #1) → custom plan (real GeneratedRoadmap)
+ *   select industry → add location(s) → connect properties (+ client name) →
+ *   plan assembling (moment #1, covering the server write) →
+ *   the SERVER-PERSISTED plan
  *
- * The plan is generated from `generatePlan(getPlaybook(vertical), { now })`.
- * `now` is captured in the click handler (not at render) so the pure generator
- * stays replayable and nothing hydration-sensitive runs on the server.
+ * Leaving step 3 fires `createClientFromOnboarding` — the server action
+ * persists the client AND generates + persists the plan/tasks server-side.
+ * The assembling beat runs while that write is in flight and holds until it
+ * resolves; steps 4–5 then render EXACTLY what the action returned
+ * (`result.plan.roadmap`). The browser never runs the plan generator — a
+ * single source of truth, no drift between what's shown and what's saved.
  */
 
 import * as React from "react";
@@ -18,18 +22,19 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Entrance } from "@/components/moments";
 import { GlowCard } from "@/components/dashboard-preview";
-import { ACTIVE_VERTICALS, getPlaybook } from "@/lib/playbooks";
-import { generatePlan } from "@/lib/plan";
+import { getPlaybook } from "@/lib/playbooks";
+import { createClientFromOnboarding } from "@/lib/clients/actions";
+import { suggestClientName, toClientLocations } from "@/lib/clients/format";
 import type { LocalIntensity, SeedVertical } from "@/lib/types/playbook";
 import type { PropertyPlatform } from "@/lib/types/db";
-import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 import { OnboardingStepper, type OnboardingStepMeta } from "./onboarding-stepper";
 import { StepIndustry } from "./step-industry";
 import { StepLocations, type LocationDraft } from "./step-locations";
 import { StepProperties, type PropertyDraft } from "./step-properties";
 import { StepAssembling } from "./step-assembling";
 import { StepPlan } from "./step-plan";
-import { SaveClientPanel } from "@/components/clients/save-client-panel";
+import { ClientNameField } from "./client-name-field";
+import { toSaveState, type SaveState } from "./save-outcome";
 import { VERTICAL_META } from "./onboarding-copy";
 
 const STEPS: OnboardingStepMeta[] = [
@@ -43,15 +48,15 @@ const STEPS: OnboardingStepMeta[] = [
 let draftSeq = 0;
 const nextDraftId = (prefix: string) => `${prefix}-${(draftSeq += 1)}`;
 
-function isDormant(vertical: SeedVertical): boolean {
-  return !ACTIVE_VERTICALS.includes(vertical);
-}
-
 // Falls back to "" (not "Your") — consumers compose their own headings and
 // collapse a missing label instead of doubling the pronoun.
 function verticalLabel(vertical: SeedVertical | null): string {
   return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "";
 }
+
+/** Interface-voice fallback when the action call itself fails to round-trip. */
+const SAVE_UNREACHABLE =
+  "We couldn’t reach the server. Check your connection and try again — nothing was created.";
 
 /**
  * Mode-aware on-hero foregrounds (working brand v1): the hero bubble is a
@@ -73,19 +78,32 @@ export function OnboardingFlow() {
   const [properties, setProperties] = React.useState<PropertyDraft[]>([
     { id: "prop-0", url: "", platform: "" },
   ]);
-  const [roadmap, setRoadmap] = React.useState<GeneratedRoadmap | null>(null);
+  // Client name: suggestion-tracking until the operator types (then theirs).
+  const [nameEdited, setNameEdited] = React.useState<string | null>(null);
+  const [save, setSave] = React.useState<SaveState>({ phase: "idle" });
 
   const localIntensity: LocalIntensity | null = React.useMemo(
     () => (vertical ? (getPlaybook(vertical)?.local_intensity ?? null) : null),
     [vertical]
   );
 
+  const clientName =
+    nameEdited ??
+    suggestClientName(
+      locations.map((l) => l.value),
+      properties.map((p) => p.url)
+    );
+
   const canAdvance = React.useMemo(() => {
     if (step === 1) return vertical !== null;
     if (step === 2) return locations.some((l) => l.value.trim().length > 0);
-    if (step === 3) return properties.some((p) => p.url.trim().length > 0);
+    if (step === 3)
+      return (
+        properties.some((p) => p.url.trim().length > 0) &&
+        clientName.trim().length > 0
+      );
     return true;
-  }, [step, vertical, locations, properties]);
+  }, [step, vertical, locations, properties, clientName]);
 
   // Locations ----------------------------------------------------------
   const updateLocation = (id: string, value: string) =>
@@ -114,23 +132,35 @@ export function OnboardingFlow() {
   const removeProperty = (id: string) =>
     setProperties((prev) => prev.filter((p) => p.id !== id));
 
+  // Save (the real write) ----------------------------------------------
+  // Fired on leaving step 3, and again from step 4's retry after an error
+  // (the action's failure contract: nothing was created). The assembling
+  // beat covers the await; steps 4–5 render the returned, persisted plan.
+  const startSave = () => {
+    if (!vertical || save.phase === "saving") return;
+    setSave({ phase: "saving" });
+    createClientFromOnboarding({
+      name: clientName.trim(),
+      vertical,
+      locations: toClientLocations(locations.map((l) => l.value)),
+    }).then(
+      (result) => setSave(toSaveState(result)),
+      () => setSave({ phase: "error", message: SAVE_UNREACHABLE })
+    );
+  };
+
+  // Once the write is in flight or landed, the inputs are history — Back
+  // would invite a duplicate client. Start over begins a fresh one; a failed
+  // save (nothing created) reopens Back for edits.
+  const saveLocked =
+    step >= 4 && (save.phase === "saving" || save.phase === "saved");
+
   // Navigation ---------------------------------------------------------
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
   const goNext = () => {
     if (!canAdvance) return;
-    // Leaving step 3 → generate the real plan. `now` captured here, not at
-    // render, so the pure generator stays deterministic and hydration-safe.
-    // Dormant verticals get no roadmap (Gate 1a: only active playbooks serve
-    // client plans) — they fall through to the truthful coming-soon state.
-    if (step === 3 && vertical) {
-      const playbook = isDormant(vertical) ? null : getPlaybook(vertical);
-      setRoadmap(
-        playbook
-          ? generatePlan({ playbook, now: new Date().toISOString() })
-          : null
-      );
-    }
+    if (step === 3) startSave();
     setStep((s) => Math.min(STEPS.length, s + 1));
   };
 
@@ -139,7 +169,8 @@ export function OnboardingFlow() {
     setVertical(null);
     setLocations([{ id: "loc-0", value: "" }]);
     setProperties([{ id: "prop-0", url: "", platform: "" }]);
-    setRoadmap(null);
+    setNameEdited(null);
+    setSave({ phase: "idle" });
   };
 
   // Step 1 asks its big question AT DISPLAY SCALE in the hero band (the step
@@ -196,42 +227,35 @@ export function OnboardingFlow() {
           ) : null}
 
           {step === 3 ? (
-            <StepProperties
-              properties={properties}
-              onUpdateUrl={updatePropertyUrl}
-              onUpdatePlatform={updatePropertyPlatform}
-              onAdd={addProperty}
-              onRemove={removeProperty}
-            />
+            <div className="flex flex-col gap-6">
+              <StepProperties
+                properties={properties}
+                onUpdateUrl={updatePropertyUrl}
+                onUpdatePlatform={updatePropertyPlatform}
+                onAdd={addProperty}
+                onRemove={removeProperty}
+              />
+              {/* Continue out of this step is the real write, so the client's
+                  name is confirmed here (pre-filled from the properties). */}
+              <ClientNameField value={clientName} onChange={setNameEdited} />
+            </div>
           ) : null}
 
           {step === 4 ? (
             <StepAssembling
-              roadmap={roadmap}
-              isDormantVertical={vertical ? isDormant(vertical) : true}
+              save={save}
+              onRetry={startSave}
               onContinue={() => setStep(5)}
             />
           ) : null}
 
-          {step === 5 ? (
-            <div className="flex flex-col gap-6">
-              <StepPlan
-                roadmap={roadmap}
-                verticalLabel={verticalLabel(vertical)}
-                isDormantVertical={vertical ? isDormant(vertical) : true}
-              />
-              {/* Persist the CLIENT record (the real write). Only offered for an
-                  active vertical — dormant verticals serve no client yet
-                  (Gate 1a). Plan/task persistence is the next slice. */}
-              {vertical && !isDormant(vertical) ? (
-                <SaveClientPanel
-                  vertical={vertical}
-                  verticalLabel={verticalLabel(vertical)}
-                  locations={locations}
-                  properties={properties}
-                />
-              ) : null}
-            </div>
+          {step === 5 && save.phase === "saved" ? (
+            <StepPlan
+              client={save.client}
+              plan={save.plan}
+              planWarning={save.planWarning}
+              verticalLabel={verticalLabel(vertical)}
+            />
           ) : null}
         </Entrance>
 
@@ -244,7 +268,7 @@ export function OnboardingFlow() {
             type="button"
             variant="ghost"
             onClick={goBack}
-            disabled={step === 1}
+            disabled={step === 1 || saveLocked}
           >
             <ArrowLeftIcon aria-hidden /> Back
           </Button>
