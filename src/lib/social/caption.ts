@@ -17,9 +17,16 @@
  * (exactly as M15's review-reply drafting reuses the same pass).
  *
  * COMPLIANCE PRE-SCREEN under the caption's OWN content type — 'social_caption'
- * (the compliance skill supports it) — with the target platform passed through, so
- * platform-specific rules (e.g. cannabis on Meta) surface before the hard gate. The
- * pre-screen is NOT the verdict; compliance-review is.
+ * (the compliance skill supports it) — with the target `platform` passed through.
+ * The vertical's TEXT rules (Fair-Housing, health-claims, guarantees, etc.) fire on
+ * 'social_caption' (they carry no `appliesTo`). NOTE: the platform-GATE rules
+ * (cannabis.ad-platform-gate, health-life-insurance.special-ad-category) are today
+ * scoped `appliesTo: ["ad"]`, so they do NOT yet fire on 'social_caption' — a
+ * cannabis-caption-to-Meta is caught on its text rules but NOT platform-gated here.
+ * HARD PRECONDITION (compliance gate, 2026-07-09): extend those two rules' `appliesTo`
+ * to include 'social_caption' before any SocialPostingProvider connector is wired OR
+ * any regulated vertical is activated for social. The pre-screen is NOT the verdict;
+ * compliance-review is.
  */
 
 import { checkCompliance } from "@/lib/skills/compliance";
