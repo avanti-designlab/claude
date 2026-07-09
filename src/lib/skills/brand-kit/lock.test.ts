@@ -146,6 +146,32 @@ describe("reviseKit", () => {
     expect(base.tokens.typography.body).not.toBe("  ");
   });
 
+  it("rejects a revision smuggling a hostile type scale (B1 gate is authoritative for reviseKit too)", () => {
+    const base = lockKit(freshKit());
+    // A hostile size VALUE, a hostile step KEY, and a hostile WEIGHT — each a
+    // stored-CSS-injection vector that would reach the emitted `--text-*` CSS.
+    const hostile: BrandKitRevision[] = [
+      { tokens: { typography: { scale: { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } } } } },
+      { tokens: { typography: { scale: { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } } } } },
+      { tokens: { typography: { scale: { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; }" } } } } } as unknown as BrandKitRevision,
+    ];
+    for (const change of hostile) {
+      expect(() => reviseKit(base, change)).toThrow(/typography\.scale/);
+    }
+    // The rejected revisions never touch the locked base's scale.
+    expect(base.tokens.typography.scale).toEqual(freshKit().tokens.typography.scale);
+  });
+
+  it("applies a valid custom type-scale revision (merged onto the base scale)", () => {
+    const base = lockKit(freshKit());
+    const { kit: revised } = reviseKit(base, {
+      tokens: { typography: { scale: { base: { size: "1.0625rem", lineHeight: "1.6rem", weight: 500 } } } },
+    });
+    expect(revised.tokens.typography.scale.base).toEqual({ size: "1.0625rem", lineHeight: "1.6rem", weight: 500 });
+    // Untouched steps carry forward (deep-merge, not wholesale replace).
+    expect(revised.tokens.typography.scale.score).toEqual(base.tokens.typography.scale.score);
+  });
+
   it("applies a valid spacing + typography revision through the shared pipeline", () => {
     const base = lockKit(freshKit());
     const { kit: revised, accessibility } = reviseKit(base, {

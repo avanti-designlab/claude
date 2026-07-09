@@ -250,6 +250,50 @@ describe("createBrandKit — build gates + versioning", () => {
     expect(res).toMatchObject({ ok: false, reason: "invalid_brand_input" });
     expect(createClientMock).not.toHaveBeenCalled();
   });
+
+  it("B1 scale: the reviewer's hostile type-scale PoCs are refused with interface copy, no DB touched", async () => {
+    getClaimsMock.mockResolvedValue(OPERATOR_CLAIMS);
+    const payloads = [
+      { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } }, // hostile size value
+      { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } }, // hostile key
+      { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; } body{}" } }, // hostile weight
+    ];
+    for (const scale of payloads) {
+      const res = await createBrandKit({
+        clientId: CLIENT_ID,
+        colors: { accent: "#2b6cff" },
+        typography: { scale },
+      } as unknown as CreateBrandKitInput);
+      expect(res).toMatchObject({ ok: false, reason: "invalid_brand_input" });
+      if (res.ok) continue;
+      // Interface voice — never echoes the raw hostile value or a skill string.
+      expect(res.error).not.toContain("body{");
+      expect(res.error).not.toContain("font-family");
+    }
+    // Refused by the clamp BEFORE any Supabase client is created — no row written.
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it("a valid custom type scale ingests + locks (version 1 persisted)", async () => {
+    const fake = setup({
+      clients: { select: { data: CLIENT_ROW } },
+      brand_kits: { select: { data: [] }, insert: { data: { id: "kit-1" } } },
+    });
+    const res = await createBrandKit({
+      clientId: CLIENT_ID,
+      colors: { accent: "#2b6cff" },
+      typography: { scale: { sm: { size: "0.875rem", lineHeight: "1.25rem" }, "2xl": { size: "2rem", lineHeight: "1.1", weight: 600 } } },
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.version).toBe(1);
+    const row = fake.inserts.find((i) => i.table === "brand_kits")!.values as {
+      locked: boolean;
+      tokens: { typography: { scale: Record<string, unknown> } };
+    };
+    expect(row.locked).toBe(true);
+    expect(Object.keys(row.tokens.typography.scale)).toEqual(["sm", "2xl"]);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -304,6 +348,23 @@ describe("reviseBrandKit — a change is a NEW version, never in place", () => {
     });
     expect(res).toMatchObject({ ok: false, reason: "invalid_brand_input" });
     expect(fake.inserts.some((i) => i.table === "brand_kits")).toBe(false);
+  });
+
+  it("B1 scale holds on the revise path: hostile scale key/value/weight refused, no write", async () => {
+    const scales = [
+      { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } }, // value
+      { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } }, // key
+      { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; } body{}" } }, // weight
+    ];
+    for (const scale of scales) {
+      const fake = setup({ clients: { select: { data: CLIENT_ROW } }, brand_kits: { select: { data: [lockedRow(2)] } } });
+      const res = await reviseBrandKit({
+        clientId: CLIENT_ID,
+        changes: { tokens: { typography: { scale } } },
+      } as unknown as Parameters<typeof reviseBrandKit>[0]);
+      expect(res).toMatchObject({ ok: false, reason: "invalid_brand_input" });
+      expect(fake.inserts.some((i) => i.table === "brand_kits")).toBe(false);
+    }
   });
 
   it("client_viewer cannot revise: forbidden", async () => {

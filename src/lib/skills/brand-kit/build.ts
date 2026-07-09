@@ -27,6 +27,7 @@ import {
 } from "./defaults";
 import { validateFontStack } from "./font-stack";
 import { deepClone } from "./structural";
+import { validateTypeScale } from "./type-scale";
 
 export interface BrandColorInput {
   /** The brand color. Drives the `accent` token. Required. */
@@ -151,23 +152,24 @@ function resolveColors(input: BrandColorInput): ColorTokens {
 }
 
 /**
- * Each face is gated through `validateFontStack` (font-family grammar
- * whitelist) BEFORE it can reach `toCssVariables` — font stacks are emitted
- * verbatim into stylesheets, so a hostile value (`}`/`;`/`<`/`url(`) throws
- * here like a malformed color does, and the theme engine falls back to
- * Signal. See font-stack.ts for the threat model.
+ * Every caller-controlled typography token that reaches emitted CSS verbatim is
+ * gated here BEFORE a kit exists — the authoritative resolve seam for ALL
+ * callers (`buildBrandKit` and `reviseKit`, both via `resolveAndValidateTokens`):
+ *  - each FACE through `validateFontStack` (font-family grammar whitelist), and
+ *  - the type SCALE through `validateTypeScale` — its step keys become
+ *    `--text-${key}` custom-property names and its size/lineHeight/weight are
+ *    emitted verbatim, so a hostile key/value throws here exactly like a
+ *    malformed color / font stack, and the theme engine falls back to Signal.
+ * See font-stack.ts and type-scale.ts for the shared threat model. (The empty-
+ * scale contract lives inside `validateTypeScale` now — same message.)
  */
 function resolveTypography(input?: BrandTypographyInput): TypographyTokens {
-  const resolved: TypographyTokens = {
+  return {
     display: validateFontStack(input?.display ?? SIGNAL_TYPOGRAPHY.display, "display"),
     body: validateFontStack(input?.body ?? SIGNAL_TYPOGRAPHY.body, "body"),
     mono: validateFontStack(input?.mono ?? SIGNAL_TYPOGRAPHY.mono, "mono"),
-    scale: deepClone(input?.scale ?? SIGNAL_TYPOGRAPHY.scale),
+    scale: validateTypeScale(deepClone(input?.scale ?? SIGNAL_TYPOGRAPHY.scale)),
   };
-  if (Object.keys(resolved.scale).length === 0) {
-    throw new Error("typography.scale must define at least one step");
-  }
-  return resolved;
 }
 
 function resolveSpacing(input?: Partial<SpacingTokens>): SpacingTokens {

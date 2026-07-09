@@ -2,11 +2,20 @@
  * Font-stack validation — the anti-injection gate for the three typography
  * token strings (`display` / `body` / `mono`).
  *
- * Font stacks are the only free-text token values a tenant controls: colors
- * are re-parsed to normalized hex and spacing is numeric, but a font stack
- * flows verbatim into `toCssVariables` and from there is string-concatenated
- * into live stylesheets (`toCssBlock`, `tenantThemeCss` → an injected
- * `<style>` on the white-label path) and inline `style` attributes
+ * Two families of typography tokens carry caller-controlled free text that
+ * flows VERBATIM into emitted CSS, and BOTH are gated so the invariant "no
+ * tenant free-text reaches emitted CSS unvalidated" holds:
+ *   - the three font stacks (this file, `validateFontStack`), and
+ *   - the type-scale steps — the `--text-${key}` custom-property NAMES and their
+ *     `size` / `lineHeight` / `weight` values (see `type-scale.ts`,
+ *     `validateTypeScale`).
+ * Colors are re-parsed to normalized hex and spacing is numeric, so they cannot
+ * carry free text; these two are the only paths that can, and both throw on a
+ * hostile value exactly like a malformed color.
+ *
+ * A font stack flows verbatim into `toCssVariables` and from there is
+ * string-concatenated into live stylesheets (`toCssBlock`, `tenantThemeCss` →
+ * an injected `<style>` on the white-label path) and inline `style` attributes
  * (`TenantThemeScope`). A stored value containing `}` would close the
  * `:root[data-tenant-theme]` rule early and inject arbitrary app-wide CSS
  * for every viewer of that tenant — stored CSS injection (defacement,

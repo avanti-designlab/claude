@@ -88,6 +88,34 @@ describe("ingestBrandKit — B1 CSS-injection defense holds through the wrapper"
     }
   });
 
+  it("a hostile type scale (size value / step key / weight) is caught by the SKILL's gate, not passed through", () => {
+    // Even if the M7 seam clamp were bypassed, the frozen skill's validateTypeScale
+    // rejects a scale that would inject into the emitted `--text-*` CSS.
+    const hostileScales: Array<Record<string, unknown>> = [
+      { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } },
+      { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } },
+      { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; } body{}" } },
+    ];
+    for (const scale of hostileScales) {
+      const result = ingestBrandKit({
+        colors: { accent: "#2b6cff" },
+        typography: { scale },
+      } as unknown as Parameters<typeof ingestBrandKit>[0]);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.reason).toBe("invalid_brand_input");
+      expect(result.detail).toContain("typography.scale");
+    }
+  });
+
+  it("a valid custom type scale ingests through the wrapper unchanged", () => {
+    const scale = { sm: { size: "0.875rem", lineHeight: "1.25rem" }, "2xl": { size: "2rem", lineHeight: "1.1", weight: 600 } };
+    const result = ingestBrandKit({ colors: { accent: "#2b6cff" }, typography: { scale } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.kit.tokens.typography.scale).toEqual(scale);
+  });
+
   it("a hostile color is caught by the skill's hex parser, not passed through", () => {
     const result = ingestBrandKit({
       colors: { accent: "#fff; background:url(https://evil)" },

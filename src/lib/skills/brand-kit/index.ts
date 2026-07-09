@@ -38,6 +38,16 @@ export {
 // Font-stack grammar gate (stored-CSS-injection defense)
 export { validateFontStack } from "./font-stack";
 
+// Type-scale grammar gate + field predicates (stored-CSS-injection defense; the
+// predicates let the M7 write seam mirror this gate in interface voice).
+export {
+  isCssLineHeightToken,
+  isCssSizeToken,
+  isFontWeight,
+  isTypeScaleKey,
+  validateTypeScale,
+} from "./type-scale";
+
 // Accessibility validation + correction
 export {
   CONTRAST_REQUIREMENTS,

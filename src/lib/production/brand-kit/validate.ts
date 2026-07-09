@@ -19,9 +19,23 @@
  * refusing over-cap payloads with interface-voice copy (doc 06 §6). It keeps
  * junk out of jsonb; RLS remains the isolation boundary and the skill remains
  * the format validator. Pure + unit-tested in the default `npm test` run.
+ *
+ * ONE format exception, added with the B1 typography.scale close: the type
+ * scale IS grammar-gated here (`gateTypography`), reusing the skill's exported
+ * predicates so there is no second grammar to drift. A hostile scale key/value
+ * (a `--text-{key}` name or a size/lineHeight/weight emitted verbatim) is thus
+ * refused at the seam in interface voice BEFORE the skill's throw — defense in
+ * depth on the injection-capable path, while the skill's `validateTypeScale`
+ * stays the authoritative permanent close for every caller.
  */
 
 import type { BrandKitInput, BrandKitRevision } from "@/lib/skills/brand-kit";
+import {
+  isCssLineHeightToken,
+  isCssSizeToken,
+  isFontWeight,
+  isTypeScaleKey,
+} from "@/lib/skills/brand-kit";
 
 /* ------------------------------------------------------------------ */
 /* Caps (single source of truth — tests import these)                  */
@@ -200,8 +214,34 @@ function gateTypography(raw: unknown): { ok: true } | { ok: false; error: string
     if (!isObject(raw.scale)) {
       return refuse("We couldn’t read the type scale — remove and re-add it, then save again.");
     }
-    if (Object.keys(raw.scale).length > TYPE_SCALE_STEPS_MAX) {
+    const steps = Object.entries(raw.scale);
+    if (steps.length > TYPE_SCALE_STEPS_MAX) {
       return refuse(`The type scale is capped at ${TYPE_SCALE_STEPS_MAX} steps — remove some and try again.`);
+    }
+    // B1 defense in depth: each step KEY becomes a `--text-{key}` custom-property
+    // name and size/lineHeight/weight are emitted verbatim by the skill's
+    // serializer. Reject an injection-capable key/value HERE, in interface voice
+    // (never echoing the raw value), so a hostile scale is refused cleanly at the
+    // seam — not only by the skill's thrown gate. The skill (`validateTypeScale`)
+    // is the authoritative permanent close for every caller; this mirrors its
+    // grammar via the same exported predicates. Values are checked only when
+    // present, so a partial-step revision (size-only, etc.) still merges.
+    for (const [key, step] of steps) {
+      if (!isTypeScaleKey(key)) {
+        return refuse("A type-scale step name isn’t valid — use short lowercase names like “lg” or “2xl”, then try again.");
+      }
+      if (!isObject(step)) {
+        return refuse("We couldn’t read one of the type-scale steps — remove and re-add it, then save again.");
+      }
+      if (step.size !== undefined && !isCssSizeToken(step.size)) {
+        return refuse("A type-scale size isn’t a valid CSS length — use values like “1rem” or “1.5rem”, then try again.");
+      }
+      if (step.lineHeight !== undefined && !isCssLineHeightToken(step.lineHeight)) {
+        return refuse("A type-scale line-height isn’t a valid CSS value — use a number like “1.4” or a length like “1.5rem”, then try again.");
+      }
+      if (step.weight !== undefined && !isFontWeight(step.weight)) {
+        return refuse("A type-scale font-weight must be a number from 1 to 1000 — fix it and try again.");
+      }
     }
   }
   return { ok: true };

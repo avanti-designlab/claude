@@ -92,6 +92,50 @@ describe("validateBrandKitInput", () => {
     });
     expect(res.ok).toBe(false);
   });
+
+  it("passes a valid custom type scale through unchanged (ingests, not stripped)", () => {
+    const scale = {
+      sm: { size: "0.875rem", lineHeight: "1.25rem" },
+      "2xl": { size: "2rem", lineHeight: "1.1", weight: 600 },
+    };
+    const res = validateBrandKitInput({ colors: { accent: "#2b6cff" }, typography: { scale } });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.typography?.scale).toEqual(scale);
+  });
+
+  it("refuses the reviewer's hostile type-scale PoC payloads at the seam (B1 defense in depth)", () => {
+    // Hostile size VALUE (closes :root, injects a rule).
+    const hostileSize = validateBrandKitInput({
+      colors: { accent: "#2b6cff" },
+      typography: { scale: { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } } },
+    });
+    expect(hostileSize.ok).toBe(false);
+    // Hostile step KEY (injects via the --text-{key} name).
+    const hostileKey = validateBrandKitInput({
+      colors: { accent: "#2b6cff" },
+      typography: { scale: { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } } },
+    });
+    expect(hostileKey.ok).toBe(false);
+    // Hostile WEIGHT (String(weight) would emit it raw).
+    const hostileWeight = validateBrandKitInput({
+      colors: { accent: "#2b6cff" },
+      typography: { scale: { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; } body{}" } } },
+    });
+    expect(hostileWeight.ok).toBe(false);
+  });
+
+  it("interface-voice refusal never echoes the raw hostile scale value", () => {
+    const hostile = "1rem; } body{display:none} .x{color:red";
+    const res = validateBrandKitInput({
+      colors: { accent: "#2b6cff" },
+      typography: { scale: { base: { size: hostile, lineHeight: "1.5rem" } } },
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).not.toContain(hostile);
+    expect(res.error).not.toContain("body{");
+  });
 });
 
 describe("sanitizeLogoUrl", () => {
@@ -133,5 +177,21 @@ describe("validateBrandKitRevision", () => {
 
   it("an empty revision is valid (no-op diff)", () => {
     expect(validateBrandKitRevision({}).ok).toBe(true);
+  });
+
+  it("passes a valid type-scale diff through, refuses a hostile one (B1 defense in depth on revise)", () => {
+    const good = validateBrandKitRevision({
+      tokens: { typography: { scale: { base: { size: "1.2rem", lineHeight: "1.6rem" } } } },
+    });
+    expect(good.ok).toBe(true);
+
+    for (const scale of [
+      { base: { size: "1rem; } body{}", lineHeight: "1.5rem" } }, // hostile size value
+      { "x; } body{} .y{": { size: "1rem", lineHeight: "1.5rem" } }, // hostile key
+      { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; }" } }, // hostile weight
+    ]) {
+      const res = validateBrandKitRevision({ tokens: { typography: { scale } } });
+      expect(res.ok).toBe(false);
+    }
   });
 });

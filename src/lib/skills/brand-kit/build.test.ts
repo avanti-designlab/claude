@@ -207,3 +207,44 @@ describe("buildBrandKit — font-stack injection gate (B1: stored CSS injection)
     expect(kit.tokens.typography.display).toBe(stack);
   });
 });
+
+describe("buildBrandKit — type-scale injection gate (B1: stored CSS injection via typography.scale)", () => {
+  // The reviewer's confirmed PoC payloads reach the emitted `--text-*` CSS if
+  // unchecked (serialize.ts:47-53): a hostile size VALUE, a hostile step KEY,
+  // and a hostile WEIGHT (String(weight) emits it raw). Each must throw through
+  // buildBrandKit BEFORE any kit — and therefore any CSS — exists.
+  it("throws on a hostile size value before any CSS can be emitted", () => {
+    expect(() =>
+      buildBrandKit({
+        colors: { accent: "#e3a94f" },
+        typography: { scale: { base: { size: "1rem; } body{display:none} .x{color:red", lineHeight: "1.5rem" } } },
+      })
+    ).toThrow(/typography\.scale\.base\.size is not a valid CSS length/);
+  });
+
+  it("throws on a hostile step key", () => {
+    expect(() =>
+      buildBrandKit({
+        colors: { accent: "#e3a94f" },
+        typography: { scale: { "x; } body{display:none} .y{": { size: "1rem", lineHeight: "1.5rem" } } },
+      })
+    ).toThrow(/typography\.scale step name .* is not a valid CSS custom-property segment/);
+  });
+
+  it("throws on a hostile (non-numeric) weight", () => {
+    const input = {
+      colors: { accent: "#e3a94f" },
+      typography: { scale: { base: { size: "1rem", lineHeight: "1.5rem", weight: "700; } body{display:none}" } } },
+    } as unknown as Parameters<typeof buildBrandKit>[0];
+    expect(() => buildBrandKit(input)).toThrow(/typography\.scale\.base\.weight must be a number/);
+  });
+
+  it("preserves a legitimate custom scale exactly", () => {
+    const scale = {
+      sm: { size: "0.875rem", lineHeight: "1.25rem" },
+      "2xl": { size: "2rem", lineHeight: "1.1", weight: 600 },
+    };
+    const { kit } = buildBrandKit({ colors: { accent: "#e3a94f" }, typography: { scale } });
+    expect(kit.tokens.typography.scale).toEqual(scale);
+  });
+});
