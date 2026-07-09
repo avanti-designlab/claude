@@ -6,6 +6,8 @@
  *  - every cap refuses (interface voice), never silently truncates;
  *  - hostile non-string / non-array / non-Json shapes are refused, never
  *    thrown on (a cyclic geo must not crash the action);
+ *  - geo pollution vectors (`__proto__`/`constructor` own keys) are stripped
+ *    at every level, never persisted;
  *  - the idempotency key is strict UUID v4 or refusal — junk never reaches
  *    Postgres (ticket a).
  */
@@ -108,6 +110,33 @@ describe("validateCreateClientInput — sanitization", () => {
   it("omits geo from the sanitized entry when absent", () => {
     const value = okValue(hostile({ locations: [{ name: "N", address: "A" }] }));
     expect("geo" in value.locations[0]).toBe(false);
+  });
+
+  it("strips __proto__/constructor OWN keys from geo at every level (pollution defense-in-depth)", () => {
+    // JSON round-trips mint these as plain OWN data properties on a plain
+    // object — the prototype check cannot see them, so the sanitizer must
+    // drop them before they reach the jsonb column.
+    const geo = JSON.parse(
+      '{"lat": 1, "__proto__": {"polluted": true}, "constructor": {"x": 1},' +
+        ' "nested": {"constructor": "evil", "keep": [{"__proto__": null}]}}'
+    );
+    const value = okValue(
+      hostile({ locations: [{ name: "N", address: "A", geo }] })
+    );
+    expect(value.locations[0].geo).toEqual({ lat: 1, nested: { keep: [{}] } });
+    expect(Object.keys(value.locations[0].geo as object)).toEqual([
+      "lat",
+      "nested",
+    ]);
+  });
+
+  it("also strips a computed-key literal's __proto__ (own property, prototype untouched)", () => {
+    const geo = { ["__proto__"]: { polluted: true }, ok: 1 };
+    const value = okValue(
+      hostile({ locations: [{ name: "N", address: "A", geo }] })
+    );
+    expect(value.locations[0].geo).toEqual({ ok: 1 });
+    expect(Object.keys(value.locations[0].geo as object)).toEqual(["ok"]);
   });
 });
 

@@ -16,9 +16,13 @@ import type { ClientStatus } from "@/lib/types/db";
  *    sends only a clientId; the tenant comes from the caller's VERIFIED JWT
  *    claim, and RLS (plans/tasks policies, migration 0004) re-pins every row
  *    below us regardless.
- *  - WRITE RIGHTS ARE ADMIN-ONLY (`requireRole("agency_admin")`), mirroring
- *    the RLS write policies — the guard exists for a precise interface-voice
- *    message; RLS is the real gate.
+ *  - WRITE RIGHTS ARE ADMIN-ONLY (`requireRole("agency_admin")`) — a
+ *    deliberate product choice STRICTER than RLS, which admits any writer on
+ *    plans/tasks (`app.is_writer()`, operator included; migration 0004).
+ *    Client-facing plan regeneration stays an admin surface until the
+ *    operator-role UX is designed; RLS remains the enforcement floor either
+ *    way. OPEN PRODUCT QUESTION: widen this guard to operators once their
+ *    console ships.
  *  - The roadmap is generated SERVER-SIDE from the server-loaded playbook
  *    (persistPlan) — nothing generative round-trips through the browser.
  *

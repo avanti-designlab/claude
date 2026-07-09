@@ -9,6 +9,7 @@
  *   .insert(v).select(cols).single()       → { data, error }
  *   .select(cols).eq(…).maybeSingle()      → { data, error }
  *   .select(cols).eq(…)[.order(…)]         → thenable { data, error }
+ *   .update(v).eq(…)[.eq(…)].select(cols).single() → { data, error }
  *   .delete().eq(…)[.eq(…)][.in(…)]        → thenable { error }
  *
  * Results are scripted PER TABLE AND OPERATION as a queue: each call consumes
@@ -35,6 +36,7 @@ export interface ScriptedResult {
 export interface TableScript {
   insert?: ScriptedResult | ScriptedResult[];
   select?: ScriptedResult | ScriptedResult[];
+  update?: ScriptedResult | ScriptedResult[];
   delete?: ScriptedResult | ScriptedResult[];
 }
 
@@ -51,12 +53,18 @@ export interface RecordedSelect {
   filters: Record<string, unknown>;
 }
 
+export interface RecordedUpdate {
+  table: string;
+  values: unknown;
+  filters: Record<string, unknown>;
+}
+
 export interface RecordedDelete {
   table: string;
   filters: Record<string, unknown>;
 }
 
-type Op = "insert" | "select" | "delete";
+type Op = "insert" | "select" | "update" | "delete";
 
 interface Settled {
   data: unknown;
@@ -73,6 +81,11 @@ interface FakeSelectChain {
   ): void;
 }
 
+interface FakeUpdateChain {
+  eq(column: string, value: unknown): FakeUpdateChain;
+  select(columns?: string): { single(): Promise<Settled> };
+}
+
 interface FakeDeleteChain {
   eq(column: string, value: unknown): FakeDeleteChain;
   in(column: string, values: unknown[]): FakeDeleteChain;
@@ -85,6 +98,7 @@ interface FakeDeleteChain {
 export function fakePostgrest(script: FakeScript) {
   const inserts: RecordedInsert[] = [];
   const selects: RecordedSelect[] = [];
+  const updates: RecordedUpdate[] = [];
   const deletes: RecordedDelete[] = [];
 
   const queues = new Map<string, ScriptedResult[]>();
@@ -168,6 +182,26 @@ export function fakePostgrest(script: FakeScript) {
           return chain;
         },
 
+        update(values: unknown) {
+          const call: RecordedUpdate = { table, values, filters: {} };
+          updates.push(call);
+          const result = next(table, "update");
+          const chain: FakeUpdateChain = {
+            eq(column, value) {
+              call.filters[column] = value;
+              return chain;
+            },
+            select() {
+              return {
+                async single(): Promise<Settled> {
+                  return settle(result);
+                },
+              };
+            },
+          };
+          return chain;
+        },
+
         delete() {
           const call: RecordedDelete = { table, filters: {} };
           deletes.push(call);
@@ -196,5 +230,5 @@ export function fakePostgrest(script: FakeScript) {
     },
   };
 
-  return { client, inserts, selects, deletes };
+  return { client, inserts, selects, updates, deletes };
 }

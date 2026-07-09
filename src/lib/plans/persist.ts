@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Plan persistence + reconciliation for a client (doc 03 §3/§6; frozen
  * schema: supabase/migrations/0004_plans_and_tasks.sql). Shared by the two
@@ -25,17 +27,20 @@ import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 
 export type Supabase = Awaited<ReturnType<typeof createClient>>;
 
-/** Interface-voice partial-failure notice (doc 06 §6): what happened + what to do. */
+/** Interface-voice partial-failure notice (doc 06 §6): what happened + what to
+ * do — and the "what to do" points at the dashboard's Generate-plan control
+ * (Design Review Major 1, copy designer-approved verbatim). */
 export const PLAN_WARNING =
-  "Your client was saved, but we couldn’t create their plan — their board shows ‘None yet’ for now.";
+  "Your client was saved, but we couldn’t create their plan — generate it from their card on your dashboard.";
 
 /* ------------------------------------------------------------------ */
 /* Redacted failure telemetry (carried ticket d)                       */
 /* ------------------------------------------------------------------ */
 
 /**
- * Every plan-write failure path emits exactly ONE server-side console.error
- * carrying ONLY:
+ * Every plan-write failure path — and every idempotent-replay reconciliation
+ * failure (the replay_* stages, src/lib/clients/actions.ts) — emits exactly
+ * ONE server-side console.error carrying ONLY:
  *   - the stable marker below (greppable in hosted logs),
  *   - which stage failed,
  *   - the Postgres/PostgREST error CODE, shape-checked — never free text.
@@ -50,9 +55,12 @@ export type PlanWriteStage =
   | "tasks_insert"
   | "cleanup_delete"
   | "supersede_delete"
+  | "replay_update"
+  | "replay_tasks_delete"
+  | "replay_plans_delete"
   | "thrown";
 
-function logPlanWriteFailure(stage: PlanWriteStage, cause: unknown): void {
+export function logPlanWriteFailure(stage: PlanWriteStage, cause: unknown): void {
   console.error(
     `${PLAN_WRITE_FAILURE_MARKER} stage=${stage} code=${errorCode(cause)}`
   );

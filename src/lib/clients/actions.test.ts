@@ -20,6 +20,10 @@
  *    already-saved client (and finishes its plan) indistinguishably from a
  *    first-time success; a FOREIGN-tenant key collision returns the
  *    byte-identical generic failure — no existence leak
+ *  - UPDATE-THROUGH RECONCILIATION (Code Review Major 1): a replayed key with
+ *    EDITED fields updates the row to the confirmed values — never a silent
+ *    stale return; a vertical edit supersedes the replay-run's plan (tasks
+ *    first) before planning against the new playbook
  *  - RUNTIME CLAMP (ticket c): hostile shapes/oversizes are refused in
  *    interface voice before any DB call
  *  - REDACTED TELEMETRY (ticket d): plan-write failures log marker+stage+code
@@ -101,10 +105,16 @@ const INPUT: CreateClientInput = {
 /** A strict UUID v4 — the browser-minted idempotency key (ticket a). */
 const KEY = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
 
-const KEYED_CLIENT_ROW = { ...SAVED_CLIENT_ROW, id: KEY };
+/** What the DB row actually holds after attempt 1 — the recovery re-read now
+ * selects `locations` too, so the fixture must model it. */
+const KEYED_CLIENT_ROW = {
+  ...SAVED_CLIENT_ROW,
+  id: KEY,
+  locations: INPUT.locations,
+};
 
 const PLAN_WARNING =
-  "Your client was saved, but we couldn’t create their plan — their board shows ‘None yet’ for now.";
+  "Your client was saved, but we couldn’t create their plan — generate it from their card on your dashboard.";
 
 /** Pinned once, asserted byte-identical on BOTH failure paths (no-leak rule). */
 const SAVE_FAILED_ERROR =
@@ -621,9 +631,12 @@ describe("createClientFromOnboarding — idempotency key (ticket a)", () => {
     // EXACTLY the same object as any other insert failure — no "already
     // exists", no distinct text an attacker could use as an existence oracle.
     expect(result).toEqual({ ok: false, error: SAVE_FAILED_ERROR });
-    // And nothing beyond the one RLS-scoped re-read happened: no plan probing.
+    // And nothing beyond the one RLS-scoped re-read happened: no plan
+    // probing, no reconciling update (the payload differs from the foreign
+    // row by construction — divergence must never be evaluated here).
     expect(fake.selects.map((s) => s.table)).toEqual(["clients"]);
     expect(fake.inserts.map((i) => i.table)).toEqual(["clients"]);
+    expect(fake.updates).toEqual([]);
     expect(fake.deletes).toEqual([]);
   });
 
@@ -648,6 +661,270 @@ describe("createClientFromOnboarding — idempotency key (ticket a)", () => {
     });
     expect(result).toEqual({ ok: false, error: SAVE_FAILED_ERROR });
     expect(fake.selects).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* update-through reconciliation (Code Review Major 1)                 */
+/* ------------------------------------------------------------------ */
+
+describe("createClientFromOnboarding — replayed key with operator edits (update-through)", () => {
+  const COLLIDE = { error: { message: "duplicate key", code: "23505" } };
+
+  it("name edit: the row is UPDATED to the confirmed values — never a stale return", async () => {
+    const roadmap = generatePlan({
+      playbook: SEED_PLAYBOOKS["real-estate"],
+      now: "2026-07-09T00:00:00.000Z",
+    });
+    const fake = setup({
+      clients: {
+        insert: COLLIDE,
+        select: { data: KEYED_CLIENT_ROW },
+        update: {
+          data: { ...KEYED_CLIENT_ROW, name: "Gable & Grove Realty Group" },
+        },
+      },
+      plans: {
+        select: {
+          data: [
+            {
+              id: "plan-1",
+              playbook_version: roadmap.playbookVersion,
+              generated_roadmap: roadmap,
+            },
+          ],
+        },
+      },
+      tasks: { select: { data: [{ plan_id: "plan-1" }] } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({
+        ...INPUT,
+        name: "Gable & Grove Realty Group",
+        idempotencyKey: KEY,
+      })
+    );
+
+    // The DB row now matches what the operator just confirmed — RLS-scoped,
+    // pinned to the recovered id, all three reconciled columns submitted.
+    expect(fake.updates).toEqual([
+      {
+        table: "clients",
+        values: {
+          name: "Gable & Grove Realty Group",
+          vertical: "real-estate",
+          locations: INPUT.locations,
+        },
+        filters: { tenant_id: "tenant-1", id: KEY },
+      },
+    ]);
+    // …and the response announces exactly those values, keeping the plan
+    // (vertical unchanged → the existing tasked plan is still correct).
+    expect(result.client.name).toBe("Gable & Grove Realty Group");
+    expect(result.plan?.id).toBe("plan-1");
+    expect(result.planWarning).toBeUndefined();
+    expect(fake.inserts.map((i) => i.table)).toEqual(["clients"]);
+    expect(fake.deletes).toEqual([]);
+  });
+
+  it("locations edit: the SANITIZED new locations are updated through; plan flow unchanged", async () => {
+    const fake = setup({
+      clients: {
+        insert: COLLIDE,
+        select: { data: KEYED_CLIENT_ROW },
+        update: { data: KEYED_CLIENT_ROW },
+      },
+      plans: { select: { data: [] }, insert: { data: { id: "plan-2" } } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({
+        ...INPUT,
+        locations: [{ name: " South Park ", address: " 30th St " }],
+        idempotencyKey: KEY,
+      })
+    );
+    expect(fake.updates[0].values).toEqual({
+      name: INPUT.name,
+      vertical: "real-estate",
+      // Sanitized (trimmed), never the raw payload.
+      locations: [{ name: "South Park", address: "30th St" }],
+    });
+    // Vertical unchanged → no supersede; the missing plan is recovered as on
+    // any identical replay.
+    expect(fake.deletes).toEqual([]);
+    expect(result.plan?.id).toBe("plan-2");
+    expect(result.planWarning).toBeUndefined();
+  });
+
+  it("vertical edit (live→live): replay-run plan superseded — tasks first — and regenerated from the NEW playbook", async () => {
+    // Gate 1a leaves only real-estate live; activate restaurants for THIS
+    // test so a live→live vertical edit exists to exercise. Restored below.
+    ACTIVE_VERTICALS.push("restaurants");
+    try {
+      const fake = setup({
+        clients: {
+          insert: COLLIDE,
+          select: { data: KEYED_CLIENT_ROW }, // attempt 1 saved real-estate
+          update: { data: { ...KEYED_CLIENT_ROW, vertical: "restaurants" } },
+        },
+        plans: {
+          // First read: the replay-run's wrong-playbook plan ids; second read
+          // (ensurePlan, after the supersede): none left.
+          select: [{ data: [{ id: "old-plan" }] }, { data: [] }],
+          insert: { data: { id: "plan-new" } },
+        },
+      });
+      const result = okResult(
+        await createClientFromOnboarding({
+          ...INPUT,
+          vertical: "restaurants",
+          idempotencyKey: KEY,
+        })
+      );
+
+      // Old tasks gone FIRST (tasks_plan_fk is on delete restrict), then the
+      // old plan — both tenant-scoped AND pinned to the read ids.
+      expect(fake.deletes).toEqual([
+        {
+          table: "tasks",
+          filters: {
+            tenant_id: "tenant-1",
+            client_id: KEY,
+            plan_id: ["old-plan"],
+          },
+        },
+        {
+          table: "plans",
+          filters: { tenant_id: "tenant-1", client_id: KEY, id: ["old-plan"] },
+        },
+      ]);
+
+      // The fresh plan was generated from the NEW vertical's playbook.
+      expect(fake.inserts.map((i) => i.table)).toEqual([
+        "clients",
+        "plans",
+        "tasks",
+      ]);
+      const persisted = (fake.inserts[1].values as PlanInsertRow)
+        .generated_roadmap;
+      expect(persisted).toEqual(
+        generatePlan({
+          playbook: SEED_PLAYBOOKS.restaurants,
+          now: persisted.generatedAt,
+        })
+      );
+      expect(result.client.vertical).toBe("restaurants");
+      expect(result.plan?.id).toBe("plan-new");
+      expect(result.planWarning).toBeUndefined();
+    } finally {
+      ACTIVE_VERTICALS.splice(ACTIVE_VERTICALS.indexOf("restaurants"), 1);
+    }
+  });
+
+  it("vertical edit (live→dormant): old plan removed, plan null, NO warning (no-playbook contract)", async () => {
+    const fake = setup({
+      clients: {
+        insert: COLLIDE,
+        select: { data: KEYED_CLIENT_ROW },
+        update: { data: { ...KEYED_CLIENT_ROW, vertical: "restaurants" } },
+      },
+      plans: { select: { data: [{ id: "old-plan" }] } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({
+        ...INPUT,
+        vertical: "restaurants",
+        idempotencyKey: KEY,
+      })
+    );
+    expect(result.client.vertical).toBe("restaurants");
+    expect(result.plan).toBeNull();
+    expect(result.planWarning).toBeUndefined(); // nothing failed
+    expect(fake.deletes).toEqual([
+      {
+        table: "tasks",
+        filters: {
+          tenant_id: "tenant-1",
+          client_id: KEY,
+          plan_id: ["old-plan"],
+        },
+      },
+      {
+        table: "plans",
+        filters: { tenant_id: "tenant-1", client_id: KEY, id: ["old-plan"] },
+      },
+    ]);
+    // No fresh plan: dormant verticals get none (Gate 1a).
+    expect(fake.inserts.map((i) => i.table)).toEqual(["clients"]);
+  });
+
+  it("update failure: honest ok:false — never a stale success — with one redacted telemetry line", async () => {
+    const fake = setup({
+      clients: {
+        insert: COLLIDE,
+        select: { data: KEYED_CLIENT_ROW },
+        update: {
+          error: {
+            message: "connection reset (Edited Name, tenant-1)",
+            code: "57014",
+          },
+        },
+      },
+    });
+    const result = await createClientFromOnboarding({
+      ...INPUT,
+      name: "Edited Name",
+      idempotencyKey: KEY,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "We couldn’t save this client’s details. Check your connection and try again.",
+    });
+    // No plan probing after a failed reconciliation — the row's state is
+    // unknown, so nothing further is touched.
+    expect(fake.selects.map((s) => s.table)).toEqual(["clients"]);
+    expect(fake.deletes).toEqual([]);
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy.mock.calls[0][0]).toBe(
+      "[plan-write-failure] stage=replay_update code=57014"
+    );
+  });
+
+  it("supersede failure after a vertical edit: honest planWarning + telemetry; plans delete never attempted", async () => {
+    const fake = setup({
+      clients: {
+        insert: COLLIDE,
+        select: { data: KEYED_CLIENT_ROW },
+        update: { data: { ...KEYED_CLIENT_ROW, vertical: "restaurants" } },
+      },
+      plans: { select: { data: [{ id: "old-plan" }] } },
+      tasks: { delete: { error: { message: "permission denied", code: "42501" } } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({
+        ...INPUT,
+        vertical: "restaurants",
+        idempotencyKey: KEY,
+      })
+    );
+    // The client update stands; the plan state is reported honestly.
+    expect(result.client.vertical).toBe("restaurants");
+    expect(result.plan).toBeNull();
+    expect(result.planWarning).toBe(PLAN_WARNING);
+    expect(fake.deletes).toEqual([
+      {
+        table: "tasks",
+        filters: {
+          tenant_id: "tenant-1",
+          client_id: KEY,
+          plan_id: ["old-plan"],
+        },
+      },
+    ]);
+    expect(consoleErrorSpy.mock.calls.map((call: unknown[]) => call[0])).toEqual([
+      "[plan-write-failure] stage=replay_tasks_delete code=42501",
+    ]);
   });
 });
 

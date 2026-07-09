@@ -81,7 +81,7 @@ const WRITE_FAILED_ERROR =
   "We couldn’t rebuild this plan. Check your connection and try again.";
 
 const TELEMETRY_LINE =
-  /^\[plan-write-failure\] stage=(plan_insert|tasks_insert|cleanup_delete|supersede_delete|thrown) code=[A-Za-z0-9_]{1,16}$/;
+  /^\[plan-write-failure\] stage=(plan_insert|tasks_insert|cleanup_delete|supersede_delete|replay_update|replay_tasks_delete|replay_plans_delete|thrown) code=[A-Za-z0-9_]{1,16}$/;
 
 function setup(script: FakeScript) {
   const fake = fakePostgrest(script);

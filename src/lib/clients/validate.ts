@@ -167,14 +167,38 @@ function sanitizeLocation(entry: unknown): ClientLocation | null {
   // geo is doc-silent (refined by M14 at 1.6) so any Json VALUE is accepted —
   // but it must genuinely be one: plain data, finite numbers, bounded depth
   // (which also rejects cycles before JSON.stringify could throw on them),
-  // bounded serialized size.
+  // bounded serialized size — and no pollution-vector keys (below).
   if (!isJsonValue(record.geo, GEO_MAX_DEPTH)) {
     return null;
   }
-  if (JSON.stringify(record.geo).length > LOCATION_GEO_MAX_JSON_CHARS) {
+  const geo = stripUnsafeKeys(record.geo);
+  if (JSON.stringify(geo).length > LOCATION_GEO_MAX_JSON_CHARS) {
     return null;
   }
-  return { name, address, geo: record.geo };
+  return { name, address, geo };
+}
+
+/**
+ * Drop `__proto__` / `constructor` OWN keys at every level of a geo value.
+ * isJsonValue's prototype check does NOT catch these: JSON round-trips and
+ * computed-key literals mint them as plain own data properties on a plain
+ * object. Defense-in-depth — nothing today merges geo into another object,
+ * but a future consumer that does (Object.assign spreads through the
+ * `__proto__` SETTER) must never receive pollution vectors from this column.
+ */
+function stripUnsafeKeys(value: Json): Json {
+  if (Array.isArray(value)) {
+    return value.map(stripUnsafeKeys);
+  }
+  if (typeof value === "object" && value !== null) {
+    const out: { [key: string]: Json } = {};
+    for (const key of Object.keys(value)) {
+      if (key === "__proto__" || key === "constructor") continue;
+      out[key] = stripUnsafeKeys(value[key]);
+    }
+    return out;
+  }
+  return value;
 }
 
 /** True iff `value` is plain JSON data: no class instances, no functions, no NaN/Infinity, no depth abuse. */

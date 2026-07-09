@@ -1,12 +1,17 @@
 "use server";
 
 import { AuthorizationError, requireRole } from "@/lib/auth/guards";
-import { ensurePlan, PLAN_WARNING, persistPlan } from "@/lib/plans/persist";
+import {
+  ensurePlan,
+  logPlanWriteFailure,
+  PLAN_WARNING,
+  persistPlan,
+} from "@/lib/plans/persist";
 import type { Supabase } from "@/lib/plans/persist";
 import { createClient } from "@/lib/supabase/server";
 import type { ClientLocation, ClientStatus } from "@/lib/types/db";
 import type { GeneratedRoadmap } from "@/lib/types/roadmap";
-import { validateCreateClientInput } from "./validate";
+import { validateCreateClientInput, type ValidClientInput } from "./validate";
 
 /**
  * Client-record server actions (the real "make it real" write of this slice).
@@ -61,10 +66,12 @@ export interface CreateClientInput {
    * client row id — generate ONE UUID v4 per onboarding run
    * (crypto.randomUUID()) and re-send the SAME key on retry. A retry of a
    * lost response then collides on the primary key instead of creating a
-   * duplicate client, and the action recovers by returning the already-saved
-   * row (finishing its plan if that part had failed) — indistinguishable from
-   * a first-time success. Omitted (older callers): server-generated id, no
-   * idempotency — exactly the pre-ticket behavior.
+   * duplicate client, and the action recovers by making the row match THIS
+   * payload (identical resubmit: the saved row is returned as-is, its plan
+   * finished if that part had failed; edited resubmit: the row is updated
+   * through to the resubmitted values — see recoverIdempotentReplay) —
+   * indistinguishable from a first-time success. Omitted (older callers):
+   * server-generated id, no idempotency — exactly the pre-ticket behavior.
    */
   idempotencyKey?: string;
 }
@@ -105,6 +112,16 @@ export type CreateClientResult =
  */
 const SAVE_FAILED_ERROR =
   "We couldn’t save this client. Check your connection and try again — nothing was created.";
+
+/**
+ * Interface-voice failure for a replay whose reconciling UPDATE failed (see
+ * recoverIdempotentReplay). Deliberately NOT SAVE_FAILED_ERROR: by this point
+ * the row from the first attempt exists, so "nothing was created" would be a
+ * lie — and returning ok:true with the stale row would silently discard the
+ * operator's edits. Retrying re-sends the same key and re-runs the update.
+ */
+const REPLAY_UPDATE_FAILED_ERROR =
+  "We couldn’t save this client’s details. Check your connection and try again.";
 
 export async function createClientFromOnboarding(
   input: CreateClientInput
@@ -164,7 +181,8 @@ export async function createClientFromOnboarding(
       return recoverIdempotentReplay(
         supabase,
         claims.tenantId,
-        value.idempotencyKey
+        value.idempotencyKey,
+        value
       );
     }
     // Interface-voice failure (doc 06 §6): what happened + what to do, never a
@@ -195,23 +213,50 @@ export async function createClientFromOnboarding(
 
 /**
  * A keyed insert collided on the clients PK (23505): the id already exists
- * SOMEWHERE. Re-read it under OUR RLS and decide which of two worlds this is.
+ * SOMEWHERE. Re-read it under OUR RLS and decide which of three worlds this is.
  *
- * 1. ROW VISIBLE (same tenant) — the lost-response retry: the first request
- *    saved the client but its response never reached the browser. Return the
- *    saved row as a success and bring its plan to the state a first-time
- *    success would have produced (ensurePlan: hand back the existing tasked
- *    plan; supersede zero-task residue; or persist a fresh plan — which also
- *    recovers the client-saved-but-plan-failed case). The UI cannot, and must
- *    not be able to, tell this apart from a first-time save.
+ * 1. ROW VISIBLE, PAYLOAD IDENTICAL — the plain lost-response retry: the first
+ *    request saved the client but its response never reached the browser.
+ *    Return the saved row as a success and bring its plan to the state a
+ *    first-time success would have produced (ensurePlan: hand back the
+ *    existing tasked plan; supersede zero-task residue; or persist a fresh
+ *    plan — which also recovers the client-saved-but-plan-failed case). The UI
+ *    cannot, and must not be able to, tell this apart from a first-time save.
  *
- * 2. ROW NOT VISIBLE — ADVERSARIAL CASE (pinned by test): the clients PK is
+ * 2. ROW VISIBLE, PAYLOAD DIVERGENT — UPDATE-THROUGH RECONCILIATION
+ *    (Orchestrator decision, Code Review Major 1): the first attempt committed
+ *    server-side, the UI showed failure, and the operator EDITED
+ *    name/vertical/locations before retrying with the same key. Returning the
+ *    original row here would announce success while silently discarding those
+ *    edits — the DB would diverge from what the operator just confirmed. So
+ *    the row is UPDATED to the submitted sanitized values (RLS-scoped;
+ *    clients_update permits admin, migration 0003), then plan coherence:
+ *      - vertical UNCHANGED → the existing plan/tasks still match the loaded
+ *        playbook; ensurePlan exactly as in world 1.
+ *      - vertical CHANGED → the replay-run's plan (if any) was generated from
+ *        the WRONG playbook: supersede it — tasks first (tasks_plan_fk is
+ *        `on delete restrict`, migration 0004), then the plan, both deletes
+ *        tenant-scoped AND pinned to the read ids — then ensurePlan against
+ *        the new vertical (live → fresh plan; dormant → plan:null, no warning,
+ *        matching the no-playbook contract). GOVERNANCE NOTE on the deletes:
+ *        the superseded plan/tasks belong to THIS SAME onboarding run —
+ *        seconds old, purely derived (generatePlan is deterministic), with no
+ *        human work attached — so this is replay reconciliation, not a silent
+ *        auto-fix of operator-owned state.
+ *    Any reconciliation failure is HONEST, never a silent stale return: a
+ *    failed update → ok:false REPLAY_UPDATE_FAILED_ERROR; a failed supersede
+ *    → ok:true with planWarning. Each emits one redacted telemetry line
+ *    (replay_* stages).
+ *
+ * 3. ROW NOT VISIBLE — ADVERSARIAL CASE (pinned by test): the clients PK is
  *    GLOBAL (migration 0003), so the colliding id can belong to ANOTHER
  *    TENANT's row. Return the byte-identical generic save failure — no
  *    distinct text, no "already exists", nothing that distinguishes "foreign
- *    id" from a network blip. (The one extra RLS-scoped read makes the timing
- *    marginally different from a plain insert failure; that cannot be avoided
- *    without adding equalizing reads to every failure path. The residual,
+ *    id" from a network blip. No update, no plan reads — the reconciliation
+ *    paths above are only reachable once the row proved visible under OUR
+ *    RLS. (The one extra RLS-scoped read makes the timing marginally
+ *    different from a plain insert failure; that cannot be avoided without
+ *    adding equalizing reads to every failure path. The residual,
  *    schema-frozen oracle we cannot remove: the INSERT itself succeeds iff
  *    the id is globally free, so a caller who already HOLDS a foreign row's
  *    id can confirm it exists somewhere. It cannot read, write, or attribute
@@ -221,11 +266,12 @@ export async function createClientFromOnboarding(
 async function recoverIdempotentReplay(
   supabase: Supabase,
   tenantId: string,
-  id: string
+  id: string,
+  submitted: ValidClientInput
 ): Promise<CreateClientResult> {
   const { data, error } = await supabase
     .from("clients")
-    .select("id, name, vertical, status")
+    .select("id, name, vertical, status, locations")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) {
@@ -235,15 +281,109 @@ async function recoverIdempotentReplay(
     return { ok: false, error: SAVE_FAILED_ERROR };
   }
 
-  const client: CreatedClient = {
+  const recovered: CreatedClient = {
     id: data.id as string,
     name: data.name as string,
     vertical: data.vertical as string,
     status: data.status as ClientStatus,
   };
 
-  // Indistinguishable-from-first-time: same ok/plan/planWarning shapes the
-  // first request would have produced for this client's current state.
+  // World 1 vs 2: does the saved row already match what the operator just
+  // confirmed? Locations compare structurally (jsonb does not preserve key
+  // order, so string comparison would false-positive divergence).
+  const savedLocations = (data.locations as ClientLocation[] | null) ?? [];
+  const diverged =
+    recovered.name !== submitted.name ||
+    recovered.vertical !== submitted.vertical ||
+    !jsonEqual(savedLocations, submitted.locations);
+
+  if (!diverged) {
+    // Identical resubmit — exactly the pre-reconciliation behavior.
+    return replaySuccess(supabase, tenantId, recovered);
+  }
+
+  // UPDATE-THROUGH: make the row match the submitted sanitized values. RLS
+  // (clients_update) re-pins the tenant regardless; the eq filters make the
+  // claim-sourced scope explicit. select().single() turns a vanished row
+  // (deleted between read and update) into an error instead of a silent no-op.
+  const updated = await supabase
+    .from("clients")
+    .update({
+      name: submitted.name,
+      vertical: submitted.vertical,
+      locations: submitted.locations,
+    })
+    .eq("tenant_id", tenantId)
+    .eq("id", recovered.id)
+    .select("id, name, vertical, status")
+    .single();
+  if (updated.error || !updated.data) {
+    logPlanWriteFailure("replay_update", updated.error);
+    return { ok: false, error: REPLAY_UPDATE_FAILED_ERROR };
+  }
+  const client: CreatedClient = {
+    id: updated.data.id as string,
+    name: updated.data.name as string,
+    vertical: updated.data.vertical as string,
+    status: updated.data.status as ClientStatus,
+  };
+
+  if (recovered.vertical === submitted.vertical) {
+    // Only name/locations moved — the existing plan still matches its
+    // playbook; reconcile plan state exactly as an identical replay would.
+    return replaySuccess(supabase, tenantId, client);
+  }
+
+  // VERTICAL CHANGED: the replay-run's plan was generated from the wrong
+  // playbook — supersede it before planning against the new vertical (see
+  // world-2 governance note above). Read ids first so both deletes stay
+  // pinned to exactly what we saw, never a blanket client_id sweep.
+  const plansRes = await supabase
+    .from("plans")
+    .select("id")
+    .eq("client_id", client.id);
+  if (plansRes.error || !plansRes.data) {
+    // Can't establish plan state → the honest partial-success path (same
+    // contract as ensurePlan's read failures, which emit no telemetry).
+    return { ok: true, client, plan: null, planWarning: PLAN_WARNING };
+  }
+  const planIds = (plansRes.data as Array<{ id: string }>).map((row) => row.id);
+  if (planIds.length > 0) {
+    // Tasks first: tasks_plan_fk is `on delete restrict` (migration 0004), so
+    // a tasked plan cannot be deleted directly.
+    const tasksDeleted = await supabase
+      .from("tasks")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("client_id", client.id)
+      .in("plan_id", planIds);
+    if (tasksDeleted.error) {
+      logPlanWriteFailure("replay_tasks_delete", tasksDeleted.error);
+      return { ok: true, client, plan: null, planWarning: PLAN_WARNING };
+    }
+    const plansDeleted = await supabase
+      .from("plans")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("client_id", client.id)
+      .in("id", planIds);
+    if (plansDeleted.error) {
+      logPlanWriteFailure("replay_plans_delete", plansDeleted.error);
+      return { ok: true, client, plan: null, planWarning: PLAN_WARNING };
+    }
+  }
+  return replaySuccess(supabase, tenantId, client);
+}
+
+/**
+ * Indistinguishable-from-first-time: same ok/plan/planWarning shapes the
+ * first request would have produced for this client's current state.
+ */
+async function replaySuccess(
+  supabase: Supabase,
+  tenantId: string,
+  client: CreatedClient
+): Promise<CreateClientResult> {
   const outcome = await ensurePlan(supabase, tenantId, client);
   switch (outcome.kind) {
     case "exists":
@@ -254,4 +394,39 @@ async function recoverIdempotentReplay(
     case "failed":
       return { ok: true, client, plan: null, planWarning: PLAN_WARNING };
   }
+}
+
+/**
+ * Structural equality over plain JSON data (array order significant, object
+ * key order not). Both sides are trusted-plain by construction: `a` is a
+ * jsonb column PostgREST just parsed, `b` came out of the runtime clamp.
+ */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => jsonEqual(item, b[index]))
+    );
+  }
+  if (
+    typeof a === "object" &&
+    a !== null &&
+    typeof b === "object" &&
+    b !== null
+  ) {
+    const aKeys = Object.keys(a);
+    const bRecord = b as Record<string, unknown>;
+    return (
+      aKeys.length === Object.keys(b).length &&
+      aKeys.every(
+        (key) =>
+          Object.hasOwn(b, key) &&
+          jsonEqual((a as Record<string, unknown>)[key], bRecord[key])
+      )
+    );
+  }
+  return false;
 }
