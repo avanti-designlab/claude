@@ -195,7 +195,7 @@ function PlanlessState({
         </h2>
         <p className="text-sm text-muted">
           {planWarning ??
-            `${client.name} is saved to your workspace. A plan activates the moment this vertical's playbook ships — we'll flag you when it opens, and your prioritized, channel-weighted roadmap lands here.`}
+            `${client.name} is saved to your workspace. A plan activates once this vertical's playbook ships — your prioritized, channel-weighted roadmap lands here the moment it opens.`}
         </p>
       </div>
       <Button asChild size="sm" variant="outline">

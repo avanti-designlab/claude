@@ -177,6 +177,11 @@ export function StepProperties({
           <PlusIcon aria-hidden /> Add another property
         </Button>
       </div>
+
+      <p className="text-xs text-muted">
+        Property connections activate in a later build slice — for now, only
+        your client and locations are saved to your workspace.
+      </p>
     </div>
   );
 }

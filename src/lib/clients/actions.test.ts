@@ -158,7 +158,7 @@ const INPUT: CreateClientInput = {
 };
 
 const PLAN_WARNING =
-  "Your client was saved, but we couldn’t generate the plan — retry from the dashboard.";
+  "Your client was saved, but we couldn’t create their plan — their board shows ‘None yet’ for now.";
 
 function setup(script: FakeScript = HAPPY_SCRIPT) {
   const fake = fakeSupabase(script);

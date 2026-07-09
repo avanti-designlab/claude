@@ -159,7 +159,7 @@ export async function createClientFromOnboarding(
 
 /** Interface-voice partial-failure notice (doc 06 §6): what happened + what to do. */
 const PLAN_WARNING =
-  "Your client was saved, but we couldn’t generate the plan — retry from the dashboard.";
+  "Your client was saved, but we couldn’t create their plan — their board shows ‘None yet’ for now.";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 

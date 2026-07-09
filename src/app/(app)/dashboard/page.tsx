@@ -62,8 +62,8 @@ export const metadata: Metadata = {
  * from the workspace. Modules with no real data source yet (visibility score,
  * AI citations, share of voice, alerts) render an explicit "not connected
  * yet" pending state — never a placeholder metric. Zero states are
- * intentional: no clients → onboarding CTA; clients but no plans/tasks →
- * the plan-generation slice is named as what's landing.
+ * intentional: no clients → onboarding CTA; clients but no tasks → the
+ * empty state points at onboarding a live-industry client.
  *
  * Visually this is the operator-approved preview language made real: the
  * glow hero, count-up stat tiles, and the entrance choreography — all
@@ -145,7 +145,7 @@ async function loadDashboard(): Promise<
         .from("tasks")
         .select("id, client_id, module, automation_level, status, created_at")
         .order("created_at", { ascending: false })
-        .limit(8),
+        .limit(6),
     ]);
     if (
       clientsRes.error ||
@@ -337,6 +337,11 @@ export default async function DashboardPage() {
               We couldn&apos;t load your dashboard right now. Check your
               connection and refresh — your data is safe.
             </p>
+            {/* Server component, so "refresh" is a plain re-navigation — a
+                full document load that re-runs every query. */}
+            <Button asChild size="sm" variant="outline">
+              <a href="/dashboard">Refresh</a>
+            </Button>
           </Card>
         </Entrance>
       </div>
@@ -377,7 +382,7 @@ export default async function DashboardPage() {
             </div>
             <Button asChild size="lg">
               <Link href="/onboarding">
-                <PlusIcon aria-hidden /> Onboard your first client
+                <PlusIcon aria-hidden /> Start onboarding
               </Link>
             </Button>
           </Card>
@@ -624,8 +629,10 @@ export default async function DashboardPage() {
       </section>
 
       {/* Work row — the task pipeline by stage + the recent-tasks log. Both
-          explain themselves when the plan slice hasn't landed yet. */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          explain themselves when there are no tasks yet. items-start keeps
+          each card sized to its own content on desktop — the pipeline never
+          stretches to match a taller log. */}
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
         <Entrance step={afterClients}>
           <Card className="h-full">
             <CardHeader>
@@ -646,15 +653,14 @@ export default async function DashboardPage() {
                 )}
               </div>
             </CardHeader>
-            {/* flex-1 + centering: the stepper sits mid-card when the
-                neighboring log runs taller — no dead space at the bottom. */}
-            <CardContent className="flex flex-1 flex-col justify-center pt-2">
+            <CardContent className="pt-2">
               {taskCount === 0 ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
                   <p className="text-sm font-medium text-ink">No tasks yet</p>
                   <p className="max-w-sm text-xs leading-5 text-muted">
                     Tasks appear the moment a client&apos;s plan is generated —
-                    the plan-generation slice is landing next.
+                    onboard a client in a live industry and their roadmap lands
+                    here.
                   </p>
                 </div>
               ) : (

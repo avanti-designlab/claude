@@ -113,8 +113,9 @@ export function StepIndustry({ value, onChange }: StepIndustryProps) {
           className="rounded-lg border border-dashed bg-surface-raised px-4 py-3 text-sm text-muted"
         >
           We&apos;re rolling out one industry at a time — real estate is live
-          first. You can preview the full flow for this industry now; its plan
-          arrives once the playbook is switched on.
+          first. You can onboard this client now — they&apos;re saved to your
+          workspace, and their plan generates the moment this industry&apos;s
+          playbook switches on.
         </p>
       ) : null}
     </div>

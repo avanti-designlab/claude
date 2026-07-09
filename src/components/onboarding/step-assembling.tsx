@@ -75,6 +75,13 @@ function AssemblingPanel({ reduced }: { reduced: boolean }) {
   );
 }
 
+/**
+ * The error panel's heading. The connection-failure server string opens with
+ * this exact sentence, so the panel trims it from the body instead of saying
+ * it twice; other server errors (e.g. permissions) render verbatim.
+ */
+const SAVE_ERROR_HEADING = "We couldn’t save this client";
+
 function SaveErrorPanel({
   message,
   onRetry,
@@ -82,6 +89,9 @@ function SaveErrorPanel({
   message: string;
   onRetry: () => void;
 }) {
+  const body = message.startsWith(`${SAVE_ERROR_HEADING}.`)
+    ? message.slice(SAVE_ERROR_HEADING.length + 1).trim()
+    : message;
   return (
     <div
       role="alert"
@@ -92,11 +102,12 @@ function SaveErrorPanel({
       </span>
       <div className="flex max-w-md flex-col gap-1">
         <h2 className="font-display text-2xl text-ink">
-          We couldn&apos;t save this client
+          {SAVE_ERROR_HEADING}
         </h2>
         {/* The server action's error is already interface voice (what
-            happened + what to do) — render it verbatim. */}
-        <p className="text-sm text-muted">{message}</p>
+            happened + what to do) — render it with the heading sentence
+            deduped above. */}
+        <p className="text-sm text-muted">{body}</p>
       </div>
       <Button type="button" onClick={onRetry}>
         <RotateCcwIcon aria-hidden /> Try again
