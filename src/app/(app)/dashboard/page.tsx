@@ -31,12 +31,16 @@ import { counterDelayMs, Entrance } from "@/components/moments";
 import { createClient } from "@/lib/supabase/server";
 import { verticalLabel } from "@/lib/clients/format";
 import {
+  CLIENT_STATUSES,
   type ClientRow,
+  type ClientStatus,
   type PlanRow,
   TASK_STATUSES,
   type TaskRow,
   type TaskStatus,
 } from "@/lib/types/db";
+import { isLiveVertical } from "./generate-plan-outcome";
+import { GeneratePlanRow } from "./generate-plan-row";
 import { PendingGauge, PendingModuleCard } from "./pending-module";
 import {
   type RecentTask,
@@ -81,8 +85,6 @@ type PlanSummaryRow = Pick<
   "client_id" | "playbook_version" | "created_at"
 >;
 
-type TaskStatusRow = Pick<TaskRow, "client_id" | "status">;
-
 type RecentTaskRow = Pick<
   TaskRow,
   "id" | "client_id" | "module" | "automation_level" | "status" | "created_at"
@@ -112,14 +114,20 @@ const PIPELINE_FLOW = [
 const MAX_CLIENT_CARDS = 6;
 
 interface DashboardData {
+  /** The rendered page of clients (newest first, capped at MAX_CLIENT_CARDS). */
   clients: DashboardClientRow[];
+  /** Exact totals — counted in the database, never derived from fetched rows. */
+  clientCount: number;
+  clientStatusCounts: Record<ClientStatus, number>;
   planCount: number;
-  /** Latest plan per client (rows arrive created_at-desc; first one wins). */
+  /** Latest plan per SHOWN client (one limit-1 read each). */
   latestPlanByClient: Map<string, PlanSummaryRow>;
   taskCount: number;
   statusCounts: Record<TaskStatus, number>;
+  /** Exact task load per SHOWN client; absent when zero ("None yet"). */
   taskCountsByClient: Map<string, { total: number; inReview: number }>;
-  recentTasks: RecentTaskRow[];
+  /** The limited log rows, client names resolved. */
+  recentTasks: RecentTask[];
 }
 
 async function loadDashboard(): Promise<
@@ -127,76 +135,163 @@ async function loadDashboard(): Promise<
 > {
   try {
     const supabase = await createClient();
-    // Four reads, one round-trip wave. Counts are derived from rows in app
-    // code (no invented DB views); fine at launch scale — revisit with a
-    // server-side aggregate if a tenant's task log ever nears the PostgREST
-    // row cap.
-    const [clientsRes, plansRes, taskStatusRes, recentRes] = await Promise.all([
-      supabase
-        .from("clients")
-        .select("id, name, vertical, status, locations, created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("plans")
-        .select("client_id, playbook_version, created_at")
-        .order("created_at", { ascending: false }),
-      supabase.from("tasks").select("client_id, status"),
-      supabase
-        .from("tasks")
-        .select("id, client_id, module, automation_level, status, created_at")
-        .order("created_at", { ascending: false })
-        .limit(6),
-    ]);
+    // HEAD-only exact count (carried ticket b): the database counts and zero
+    // rows transfer, so the number can never be silently capped the way a
+    // row fetch is — PostgREST tops out near 1,000 rows, and deriving counts
+    // from fetched rows undercounts past that, breaking this page's honesty
+    // rule. `count === null` is treated as a failed read, never as zero.
+    const countOf = (table: "clients" | "plans" | "tasks") =>
+      supabase.from(table).select("id", { count: "exact", head: true });
+    const badCount = (res: { error: unknown; count: number | null }) =>
+      Boolean(res.error) || res.count === null;
+
+    // Wave 1 — the two rendered row sets (both explicitly limited) plus the
+    // workspace-wide aggregates, one round-trip wave. Both status columns are
+    // closed CHECK-constrained sets (migrations 0003/0004), so the per-status
+    // counts partition their tables — each total is their sum, no extra query.
+    const [clientsRes, recentRes, planCountRes, clientStatusRes, taskStatusRes] =
+      await Promise.all([
+        supabase
+          .from("clients")
+          .select("id, name, vertical, status, locations, created_at")
+          .order("created_at", { ascending: false })
+          .limit(MAX_CLIENT_CARDS),
+        supabase
+          .from("tasks")
+          .select("id, client_id, module, automation_level, status, created_at")
+          .order("created_at", { ascending: false })
+          .limit(6),
+        countOf("plans"),
+        Promise.all(
+          CLIENT_STATUSES.map((status) =>
+            countOf("clients").eq("status", status)
+          )
+        ),
+        Promise.all(
+          TASK_STATUSES.map((status) => countOf("tasks").eq("status", status))
+        ),
+      ]);
     if (
       clientsRes.error ||
       !clientsRes.data ||
-      plansRes.error ||
-      !plansRes.data ||
-      taskStatusRes.error ||
-      !taskStatusRes.data ||
       recentRes.error ||
-      !recentRes.data
+      !recentRes.data ||
+      badCount(planCountRes) ||
+      clientStatusRes.some(badCount) ||
+      taskStatusRes.some(badCount)
     ) {
       return { ok: false };
     }
 
-    const plans = plansRes.data as PlanSummaryRow[];
+    const clients = clientsRes.data as DashboardClientRow[];
+    const recentRows = recentRes.data as RecentTaskRow[];
+    const clientStatusCounts = Object.fromEntries(
+      CLIENT_STATUSES.map((status, i) => [status, clientStatusRes[i].count ?? 0])
+    ) as Record<ClientStatus, number>;
+    const statusCounts = Object.fromEntries(
+      TASK_STATUSES.map((status, i) => [status, taskStatusRes[i].count ?? 0])
+    ) as Record<TaskStatus, number>;
+    const clientCount = CLIENT_STATUSES.reduce(
+      (sum, status) => sum + clientStatusCounts[status],
+      0
+    );
+    const taskCount = TASK_STATUSES.reduce(
+      (sum, status) => sum + statusCounts[status],
+      0
+    );
+
+    // Wave 2 — per-card detail, needing wave 1's ids. Everything here is
+    // bounded: the latest plan is a limit-1 read per shown client, the task
+    // loads are HEAD-only counts per shown client (indexed —
+    // tasks_client_status_idx, migration 0004), and the name lookup covers at
+    // most the six recent tasks' client ids. A grouped server-side aggregate
+    // could collapse this fan-out to one query, but views/RPCs need the
+    // post-freeze schema path — revisit if MAX_CLIENT_CARDS grows.
+    const shownIds = clients.map((client) => client.id);
+    const recentClientIds = [
+      ...new Set(recentRows.map((task) => task.client_id)),
+    ];
+    const [latestPlanRes, taskTotalRes, inReviewRes, namesRes] =
+      await Promise.all([
+        Promise.all(
+          shownIds.map((id) =>
+            supabase
+              .from("plans")
+              .select("client_id, playbook_version, created_at")
+              .eq("client_id", id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          )
+        ),
+        Promise.all(
+          shownIds.map((id) => countOf("tasks").eq("client_id", id))
+        ),
+        Promise.all(
+          shownIds.map((id) =>
+            countOf("tasks").eq("client_id", id).eq("status", "in_review")
+          )
+        ),
+        recentClientIds.length > 0
+          ? supabase.from("clients").select("id, name").in("id", recentClientIds)
+          : { data: [], error: null },
+      ]);
+    if (
+      latestPlanRes.some((res) => res.error) ||
+      taskTotalRes.some(badCount) ||
+      inReviewRes.some(badCount) ||
+      namesRes.error ||
+      !namesRes.data
+    ) {
+      return { ok: false };
+    }
+
     const latestPlanByClient = new Map<string, PlanSummaryRow>();
-    for (const plan of plans) {
-      if (!latestPlanByClient.has(plan.client_id)) {
+    for (const res of latestPlanRes) {
+      if (res.data) {
+        const plan = res.data as PlanSummaryRow;
         latestPlanByClient.set(plan.client_id, plan);
       }
     }
 
-    const taskRows = taskStatusRes.data as TaskStatusRow[];
-    const statusCounts = Object.fromEntries(
-      TASK_STATUSES.map((status) => [status, 0])
-    ) as Record<TaskStatus, number>;
+    // Absent-when-zero keeps the card's "None yet" semantics.
     const taskCountsByClient = new Map<
       string,
       { total: number; inReview: number }
     >();
-    for (const task of taskRows) {
-      statusCounts[task.status] += 1;
-      const perClient = taskCountsByClient.get(task.client_id) ?? {
-        total: 0,
-        inReview: 0,
-      };
-      perClient.total += 1;
-      if (task.status === "in_review") perClient.inReview += 1;
-      taskCountsByClient.set(task.client_id, perClient);
-    }
+    shownIds.forEach((id, i) => {
+      const total = taskTotalRes[i].count ?? 0;
+      if (total > 0) {
+        taskCountsByClient.set(id, {
+          total,
+          inReview: inReviewRes[i].count ?? 0,
+        });
+      }
+    });
+
+    const nameById = new Map(
+      (namesRes.data as Pick<ClientRow, "id" | "name">[]).map((row) => [
+        row.id,
+        row.name,
+      ])
+    );
+    const recentTasks: RecentTask[] = recentRows.map((task) => ({
+      ...task,
+      clientName: nameById.get(task.client_id) ?? "Unknown client",
+    }));
 
     return {
       ok: true,
       data: {
-        clients: clientsRes.data as DashboardClientRow[],
-        planCount: plans.length,
+        clients,
+        clientCount,
+        clientStatusCounts,
+        planCount: planCountRes.count ?? 0,
         latestPlanByClient,
-        taskCount: taskRows.length,
+        taskCount,
         statusCounts,
         taskCountsByClient,
-        recentTasks: recentRes.data as RecentTaskRow[],
+        recentTasks,
       },
     };
   } catch {
@@ -350,6 +445,8 @@ export default async function DashboardPage() {
 
   const {
     clients,
+    clientCount,
+    clientStatusCounts,
     planCount,
     latestPlanByClient,
     taskCount,
@@ -361,7 +458,7 @@ export default async function DashboardPage() {
   /* ------------------------------------------------------------------ */
   /* Zero state: no clients — the hero IS the first action.              */
   /* ------------------------------------------------------------------ */
-  if (clients.length === 0) {
+  if (clientCount === 0) {
     return (
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-8 sm:px-6 sm:py-10">
         <Header />
@@ -394,11 +491,9 @@ export default async function DashboardPage() {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Live workspace — derive every displayed number from the rows.       */
+  /* Live workspace — every displayed number is an exact DB count.       */
   /* ------------------------------------------------------------------ */
-  const clientCount = clients.length;
-  const byStatus = (status: ClientRow["status"]) =>
-    clients.filter((client) => client.status === status).length;
+  const byStatus = (status: ClientRow["status"]) => clientStatusCounts[status];
   const openTaskCount =
     statusCounts.todo + statusCounts.in_progress + statusCounts.in_review;
 
@@ -413,13 +508,8 @@ export default async function DashboardPage() {
     `${openTaskCount} open ${openTaskCount === 1 ? "task" : "tasks"}`,
   ];
 
-  const clientNameById = new Map(clients.map((c) => [c.id, c.name]));
-  const recent: RecentTask[] = recentTasks.map((task) => ({
-    ...task,
-    clientName: clientNameById.get(task.client_id) ?? "Unknown client",
-  }));
-
-  const shownClients = clients.slice(0, MAX_CLIENT_CARDS);
+  // Already limited to MAX_CLIENT_CARDS in the query — never sliced here.
+  const shownClients = clients;
   // Entrance step accounting: header 0 · hero 1 · KPIs 2–5 · clients header 6
   // · client cards 7… · then the work row + coming-online follow.
   const afterClients = 7 + shownClients.length;
@@ -586,19 +676,30 @@ export default async function DashboardPage() {
                       </span>
                     </div>
                     <dl className="flex flex-col gap-1.5 border-t border-border pt-3 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <dt className="text-muted">Plan</dt>
-                        {plan ? (
+                      {plan ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="text-muted">Plan</dt>
                           <dd
                             className="truncate font-mono text-ink"
                             title={`Playbook ${plan.playbook_version}`}
                           >
                             {plan.playbook_version}
                           </dd>
-                        ) : (
+                        </div>
+                      ) : isLiveVertical(client.vertical) ? (
+                        // Live vertical, no plan: the regeneration control
+                        // (idempotent server action — a retry can never
+                        // duplicate a plan).
+                        <GeneratePlanRow clientId={client.id} />
+                      ) : (
+                        // Dormant vertical: no button — a plan activates when
+                        // this vertical's playbook ships, and the onboarding
+                        // copy already said so.
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="text-muted">Plan</dt>
                           <dd className="text-muted">None yet</dd>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between gap-2">
                         <dt className="text-muted">Tasks</dt>
                         <dd className="text-ink">
@@ -614,9 +715,9 @@ export default async function DashboardPage() {
             );
           })}
         </div>
-        {clients.length > MAX_CLIENT_CARDS ? (
+        {clientCount > MAX_CLIENT_CARDS ? (
           <p className="text-sm text-muted">
-            Showing {MAX_CLIENT_CARDS} of {clients.length} —{" "}
+            Showing {MAX_CLIENT_CARDS} of {clientCount} —{" "}
             <Link
               href="/clients"
               className="font-medium text-accent underline-offset-4 hover:underline"
@@ -693,7 +794,7 @@ export default async function DashboardPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {recent.length === 0 ? (
+              {recentTasks.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
                   <p className="text-sm font-medium text-ink">
                     Nothing in the log yet
@@ -704,7 +805,7 @@ export default async function DashboardPage() {
                   </p>
                 </div>
               ) : (
-                <RecentTaskList tasks={recent} />
+                <RecentTaskList tasks={recentTasks} />
               )}
             </CardContent>
           </Card>

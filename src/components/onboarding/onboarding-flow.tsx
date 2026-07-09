@@ -81,6 +81,14 @@ export function OnboardingFlow() {
   // Client name: suggestion-tracking until the operator types (then theirs).
   const [nameEdited, setNameEdited] = React.useState<string | null>(null);
   const [save, setSave] = React.useState<SaveState>({ phase: "idle" });
+  // ONE idempotency key per onboarding RUN (carried ticket a): minted when
+  // the flow mounts, re-sent UNCHANGED by every retry — the key becomes the
+  // client row id server-side, so a lost-response retry collides on the PK
+  // and recovers the already-saved client instead of duplicating it. Only
+  // "Start over" (a genuinely new client) mints a fresh key.
+  const [runKey, setRunKey] = React.useState<string>(() =>
+    crypto.randomUUID()
+  );
 
   const localIntensity: LocalIntensity | null = React.useMemo(
     () => (vertical ? (getPlaybook(vertical)?.local_intensity ?? null) : null),
@@ -136,6 +144,9 @@ export function OnboardingFlow() {
   // Fired on leaving step 3, and again from step 4's retry after an error
   // (the action's failure contract: nothing was created). The assembling
   // beat covers the await; steps 4–5 render the returned, persisted plan.
+  // Every attempt in this run sends the SAME `runKey` — that is the whole
+  // point: if the failure was a lost response, the retry recovers the saved
+  // client (idempotent replay) instead of creating a second one.
   const startSave = () => {
     if (!vertical || save.phase === "saving") return;
     setSave({ phase: "saving" });
@@ -143,6 +154,7 @@ export function OnboardingFlow() {
       name: clientName.trim(),
       vertical,
       locations: toClientLocations(locations.map((l) => l.value)),
+      idempotencyKey: runKey,
     }).then(
       (result) => setSave(toSaveState(result)),
       () => setSave({ phase: "error", message: SAVE_UNREACHABLE })
@@ -171,6 +183,9 @@ export function OnboardingFlow() {
     setProperties([{ id: "prop-0", url: "", platform: "" }]);
     setNameEdited(null);
     setSave({ phase: "idle" });
+    // A fresh run is a fresh client — mint a NEW idempotency key so the next
+    // save can never replay-recover the previous run's row.
+    setRunKey(crypto.randomUUID());
   };
 
   // Step 1 asks its big question AT DISPLAY SCALE in the hero band (the step
