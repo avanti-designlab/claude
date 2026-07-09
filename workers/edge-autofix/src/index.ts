@@ -1,16 +1,36 @@
 /**
- * edge-autofix — Phase 0.1 pass-through stub.
+ * edge-autofix — Cloudflare Worker entry (doc 04 §1 method 2; REQUIRED for
+ * Framer, universal fallback for everything else).
  *
- * Phase 1.3 builds the real method: fetch the platform's desired-state for the
- * requested URL and apply diffs (title/meta/schema/H1/alt/canonical) at the
- * edge before the page reaches users and crawlers. Every applied diff comes
- * from the change-management layer (doc 04 §2) — this worker never invents
- * changes and never writes outside a logged, reversible site_changes entry.
+ * One isolated worker per client domain (doc 04 §5). It rewrites HTML
+ * responses in flight — title, meta description, canonical, injected JSON-LD,
+ * img alt — driven by the versioned rules manifest in this instance's KV
+ * namespace (binding `EDGE_RULES`, key `manifest`). Every rule in that
+ * manifest was written by the CloudflareEdgeAdapter through the
+ * change-management pipeline (doc 04 §2): previewed, human-approved, audited
+ * as a `site_changes` row, and reversible by removing the rule — this worker
+ * never invents changes.
+ *
+ * All behavior lives in `worker.ts` (fail-open / cache / verifiability
+ * contract) and `rules.ts` (pure rule application) — this file only wires the
+ * real runtime globals so the rest stays unit-testable without workerd.
  */
+
+import {
+  handleRequest,
+  type EdgeAutofixEnv,
+  type HtmlRewriterConstructor,
+} from "./worker";
+
 const worker = {
-  async fetch(request: Request): Promise<Response> {
-    // Pass-through: no rewriting until the change-management layer exists.
-    return fetch(request);
+  async fetch(request: Request, env: EdgeAutofixEnv | undefined): Promise<Response> {
+    return handleRequest(request, env ?? {}, {
+      originFetch: (req) => fetch(req),
+      // Present in the Cloudflare runtime; undefined anywhere else, which
+      // makes handleRequest a strict pass-through (fail open by construction).
+      rewriter: (globalThis as { HTMLRewriter?: HtmlRewriterConstructor })
+        .HTMLRewriter,
+    });
   },
 };
 

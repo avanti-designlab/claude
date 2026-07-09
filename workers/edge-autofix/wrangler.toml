@@ -1,8 +1,15 @@
-# Template config — per-client instances override `name` and add their own
-# `routes` at onboarding (one isolated worker per client domain, doc 04 §5).
+# Template config — per-client instances override `name`, add their own
+# `routes`, and bind their own KV namespace at onboarding (one isolated worker
+# + one KV namespace per client domain, doc 04 §5).
 name = "edge-autofix-template"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 
-# Per-client route example (set at client onboarding, Phase 1.3):
+# Per-client route example (set at client onboarding, Phase 1.3 wiring step):
 # routes = [{ pattern = "clientdomain.com/*", zone_name = "clientdomain.com" }]
+
+# Per-client rules storage: the versioned manifest lives under key "manifest"
+# in a namespace created for THIS client only. The namespace id is what the
+# platform's CloudflareEdgeAdapter is pinned to — the worker reads it, the
+# adapter writes it (through the change-management pipeline), nobody shares it.
+# kv_namespaces = [{ binding = "EDGE_RULES", id = "<per-client namespace id>" }]

@@ -646,6 +646,9 @@ describe("data-write GET→PUT concurrent-edit window — ACCEPTED RESIDUAL (gat
     fake.editDataItemOnNextPut(COLLECTION_ID, ITEM_ID, {
       name: "Casa Uno — staff renamed mid-write",
     });
+    const updatedBefore = Date.parse(
+      fake.itemSystem(COLLECTION_ID, ITEM_ID)._updatedDate,
+    );
 
     const outcome = await manager.apply(
       preview.change.id,
@@ -662,6 +665,20 @@ describe("data-write GET→PUT concurrent-edit window — ACCEPTED RESIDUAL (gat
     // apply or rollback on the same item can be lost, silently.
     expect(fake.item(COLLECTION_ID, ITEM_ID).name).toBe("Casa Uno");
     expect(fake.item(COLLECTION_ID, ITEM_ID).summary).toBe("New summary");
+    // δ carry (2026-07-09 Wix gate record): prove the mid-write hook FIRED.
+    // Without this the pin is vacuous — the item-state assertions above are
+    // IDENTICAL whether the in-window edit fired-and-was-overwritten or the
+    // fake's hook silently broke and the edit never happened at all. The fake
+    // advances `_updatedDate` one deterministic 1s tick per accepted write,
+    // so this apply must leave exactly TWO ticks on the item (the concurrent
+    // edit landing at PUT-arrival + the full replace itself) against exactly
+    // ONE adapter PUT in the journal. One tick here = the hook never fired =
+    // this pin has gone vacuous: turn red and re-open the disposition.
+    expect(
+      Date.parse(fake.itemSystem(COLLECTION_ID, ITEM_ID)._updatedDate) -
+        updatedBefore,
+    ).toBe(2000);
+    expect(fake.requests.filter((r) => r.method === "PUT")).toHaveLength(1);
   });
 
   it("boundary (NOT the residual): an edit landing BEFORE the fresh read IS re-carried intact — only the in-window slice is exposed", async () => {
