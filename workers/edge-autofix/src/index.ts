@@ -14,22 +14,36 @@
  * All behavior lives in `worker.ts` (fail-open / cache / verifiability
  * contract) and `rules.ts` (pure rule application) — this file only wires the
  * real runtime globals so the rest stays unit-testable without workerd.
+ *
+ * The one piece of real wiring beyond globals: the runtime's HTMLRewriter is
+ * wrapped in `scopeRewriterSelectors`, which translates the structural seam
+ * keys handleRequest registers ("title"/"meta"/"link") into the HEAD-SCOPED
+ * CSS selectors in rules.ts (`head > title` etc.) so inline-SVG accessibility
+ * `<title>` elements are never rewritten (Major-2 fix, gate-dispositioned
+ * 2026-07-09). The scoped selector strings never meet real lol-html in this
+ * repo's suites — first-live-deploy canary, BUILD-STATE carried ticket ii.
  */
 
 import {
   handleRequest,
+  scopeRewriterSelectors,
   type EdgeAutofixEnv,
   type HtmlRewriterConstructor,
 } from "./worker";
 
 const worker = {
   async fetch(request: Request, env: EdgeAutofixEnv | undefined): Promise<Response> {
+    // Present in the Cloudflare runtime; undefined anywhere else, which
+    // makes handleRequest a strict pass-through (fail open by construction).
+    const RuntimeRewriter = (
+      globalThis as { HTMLRewriter?: HtmlRewriterConstructor }
+    ).HTMLRewriter;
     return handleRequest(request, env ?? {}, {
       originFetch: (req) => fetch(req),
-      // Present in the Cloudflare runtime; undefined anywhere else, which
-      // makes handleRequest a strict pass-through (fail open by construction).
-      rewriter: (globalThis as { HTMLRewriter?: HtmlRewriterConstructor })
-        .HTMLRewriter,
+      rewriter:
+        RuntimeRewriter === undefined
+          ? undefined
+          : scopeRewriterSelectors(RuntimeRewriter),
     });
   },
 };

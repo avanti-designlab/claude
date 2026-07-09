@@ -35,17 +35,26 @@
  *    request after propagation. That is the `applied_at` caveat: MONITOR
  *    correlation against applied_at IS sound for this method (unlike
  *    Webflow's staged writes there is no indefinite publish gap), with the
- *    known ≤~60s + next-visit lag; the worker's `x-edge-autofix` response
- *    header is the render-verification hook the MONITOR step uses.
+ *    known ≤~60s + next-visit lag — PLUS one more: visitors holding a primed
+ *    pre-rule cache entry revalidate → 304 → pass-through until their TTL
+ *    expires, so MONITOR must not read stale-cache visitors as a failed
+ *    rule. MONITOR verifies the rendered DOM effect on the live URL; the
+ *    worker's `x-edge-autofix` header only names the rules SELECTED for the
+ *    page (a per-element failure can drop one after the headers are sent),
+ *    so header presence alone is never proof.
  *
- *  - CONCURRENT WRITERS ARE CAUGHT, NOT SILENT (contrast with the Wix
- *    GET→PUT residual). The manifest read-modify-write has the same shape of
- *    window, but (a) the ONLY writer is this adapter driven by the pipeline
- *    (client staff have no path to this KV namespace), and (b) the
- *    byte-exact read-back verification sees any interleaved write: two
- *    racing pipeline operations produce ONE clean verified write and ONE
- *    loud write_verification_failed whose row stays in its pre-call status.
- *    No silent last-writer-wins claim is possible at the manifest level.
+ *  - CONCURRENT WRITERS — WHAT VERIFICATION DOES AND DOES NOT SEE. The
+ *    manifest write is a GET → compose → PUT → verify-GET sequence. The
+ *    byte-exact read-back catches a foreign write landing INSIDE our own
+ *    PUT→verify window (pinned): one clean verified write, one loud
+ *    write_verification_failed whose row stays in its pre-call status. What
+ *    it CANNOT see: a STALE-BASE interleaving — both writers read the same
+ *    base; the second PUT lands after the first writer's verify — is NOT
+ *    detectable at this seam and silently drops the first write (both
+ *    writers read back exactly the bytes they wrote and both report
+ *    verified success). See the KNOWN RACE section below: wiring this
+ *    method to live client properties is gated on per-property write
+ *    serialization.
  *
  * Safety properties, each proven by tests:
  *  - PINNED ACCOUNT/ZONE/WORKER/NAMESPACE (doc 04 §5: per-client isolation).
@@ -86,16 +95,58 @@
  *    throws → network_failure with the whitelisted code only. KV propagation
  *    and partial-manifest states can never yield a false verified claim: the
  *    write is verified against the API's authoritative store (not the edge
- *    cache), and any divergence — torn write, concurrent writer, vanished
- *    key — is write_verification_failed with the row left in its pre-call
- *    status.
+ *    cache), and any divergence VISIBLE ON THE VERIFICATION READ — a torn
+ *    write, an in-window concurrent writer, a vanished key — is
+ *    write_verification_failed with the row left in its pre-call status. (A
+ *    stale-base overwrite landing AFTER verification is not visible here —
+ *    see KNOWN RACE below. An HTML interstitial on the verification read is
+ *    named honestly as unexpected_response, not misattributed as a failed
+ *    write.)
+ *
+ * KNOWN RACE — HARD PRECONDITION ON PRODUCTION WIRING (gate-dispositioned by
+ * Orchestrator + Code Review, 2026-07-09). Workers KV has no compare-and-swap
+ * or conditional write, so NOTHING at this seam can detect a STALE-BASE
+ * interleaving of the GET → compose → PUT → verify-GET sequence:
+ *
+ *   writer A GETs base v5 · writer B GETs base v5 · A PUTs v6ᴬ · A verifies ✓
+ *   · B PUTs v6ᴮ (composed from the stale v5 base) · B verifies ✓
+ *
+ *   Both writers read back exactly the bytes they wrote, so BOTH report
+ *   verified success — and A's write is silently gone from the manifest.
+ *
+ * Consequences if this ever fires against a live property:
+ *   - a lost APPLY is a FALSE AUDIT ROW: `site_changes` says the rule is
+ *     installed and verified while the edge serves the page without it;
+ *   - a lost REVERT is worse: the rule is STILL LIVE on the client's domain
+ *     while its row reads 'reverted' — a direct doc 04 §2 violation (the
+ *     one-action rollback silently did not happen).
+ *
+ * Why it is not closed here: KV offers no CAS to make the read-modify-write
+ * atomic, and a version-check-before-PUT only narrows the window. What DOES
+ * close it: every writer to this namespace is OURS (the pipeline is the only
+ * manifest writer; client staff have no path here), so per-property WRITE
+ * SERIALIZATION at the production-wiring seam (BUILD-STATE carried ticket
+ * ii) eliminates the interleaving entirely — unlike the Wix residual, where
+ * the concurrent writer can be a human outside our control.
+ *
+ * THE BINDING PRECONDITION: this method MUST NOT be wired to live client
+ * properties until per-property write serialization exists at the wiring
+ * seam. The race is pinned by the adapter test named "KNOWN RACE (stale-base
+ * interleaving, gate-dispositioned 2026-07-09): closes at the wiring seam,
+ * not here" — if adapter-level detection ever improves, that test flips and
+ * this disposition must be re-opened.
  *
  * FIRST-LIVE-WRITE CANARY (joins carried ticket ii — confirm when the wiring
  * step connects this method to its first real property): the Cloudflare
  * error-code semantics this adapter keys on — 10009 = "key not found" on the
  * KV values GET (treated as "no manifest yet") and 403 (not 400) for a
  * revoked/insufficient token — plus that the raw KV values GET echoes stored
- * bytes exactly (byte-exact verification depends on it).
+ * bytes exactly (byte-exact verification depends on it), plus READ-AFTER-
+ * WRITE CONSISTENCY of the KV values GET at api.cloudflare.com: the
+ * verification GET assumes the authoritative store echoes a just-PUT value;
+ * a lagging read would surface as a spurious LOUD write_verification_failed
+ * — fail-safe, but it must be recognized as read lag, not misread as a
+ * concurrent writer.
  */
 
 import {
@@ -327,13 +378,27 @@ export class CloudflareEdgeAdapter implements WriteMethodAdapter {
 
     // MANIFEST-LEVEL VERIFICATION (the honesty line): read the authoritative
     // store back and require BYTE-EXACT equality with what was written. A
-    // torn write, a normalizing proxy, a concurrent writer, or a vanished
-    // key all land here as a loud write_verification_failed — the row stays
-    // in its pre-call status and a human decides. What is NOT claimed: that
-    // the worker already renders the rule (KV propagation ~60s; rendering is
-    // per-request) — that render-verification belongs to MONITOR, keyed on
-    // the worker's x-edge-autofix header.
+    // torn write, a normalizing proxy, an IN-WINDOW concurrent writer, or a
+    // vanished key all land here as a loud write_verification_failed — the
+    // row stays in its pre-call status and a human decides. (A stale-base
+    // interleaving is NOT visible here — see the KNOWN RACE header section.)
+    // What is NOT claimed: that the worker already renders the rule (KV
+    // propagation ~60s; rendering is per-request) — render-verification
+    // belongs to MONITOR, which checks the rendered DOM on the live URL
+    // (the worker's x-edge-autofix header only names selected rules).
     const echoed = await this.readManifestRaw(what);
+    // Same HTML-interstitial guard as every other manifest read: a challenge
+    // page answering the VERIFICATION read is an interception, not evidence
+    // about the write — name it honestly instead of misattributing it as a
+    // failed write (the manifest we serialize is JSON and can never look
+    // like HTML, so this can never mask a true byte divergence).
+    if (echoed !== null && looksLikeHtml(echoed)) {
+      throw new WriteMethodError(
+        METHOD,
+        "unexpected_response",
+        `edge_worker ${what}: the write-verification read answered with an HTML page instead of the stored manifest — usually a proxy or challenge page in front of api.cloudflare.com; the write itself is UNVERIFIED (the change row stays in its pre-call status); retry once the interstitial clears`,
+      );
+    }
     if (echoed === null || echoed !== text) {
       throw new WriteMethodError(
         METHOD,

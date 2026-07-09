@@ -8,8 +8,9 @@
  *    byte-exact against the authoritative store. `applied_at` correlation for
  *    MONITOR is sound with ONE stated caveat: the rendered effect lands on
  *    the next request after ~60s KV propagation (this suite asserts the
- *    authoritative manifest state — render-verification is MONITOR's job via
- *    the worker's x-edge-autofix header);
+ *    authoritative manifest state — render-verification is MONITOR's job,
+ *    checking the rendered DOM on the live URL; the worker's x-edge-autofix
+ *    header only names SELECTED rules and is never proof by itself);
  *  - ROLLBACK restores the captured rule state via the same adapter (one
  *    action): a null before REMOVES the rule and the origin — never touched
  *    by this method — shows through; a non-null before re-installs the prior

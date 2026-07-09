@@ -7,11 +7,14 @@
  *    (null = no rule, a fully round-trippable state on this method), writes
  *    compose a canonical next manifest (version bumped) and verify the
  *    stored bytes BYTE-EXACT against what was written;
- *  - honesty around what verification claims: a concurrent manifest writer,
- *    a torn/normalized write, or a vanished key is a LOUD
+ *  - honesty around what verification claims: an IN-WINDOW concurrent
+ *    manifest writer, a torn/normalized write, or a vanished key is a LOUD
  *    write_verification_failed (the contrast pin against the Wix GET→PUT
- *    residual — here the interleaving IS visible); render-verification is
- *    explicitly NOT claimed (MONITOR's job, ~60s KV propagation);
+ *    residual — here the in-window interleaving IS visible); the STALE-BASE
+ *    interleaving is NOT visible at this seam and is pinned as the KNOWN
+ *    RACE (gate-dispositioned 2026-07-09 — closes at the wiring seam);
+ *    render-verification is explicitly NOT claimed (MONITOR's job, ~60s KV
+ *    propagation, DOM effect — never the x-edge-autofix header alone);
  *  - never clobber: a foreign/corrupt stored manifest refuses every
  *    operation and is never overwritten; a DISABLED rule (out-of-band ops
  *    state) refuses read and write;
@@ -327,15 +330,17 @@ describe("revert", () => {
 /* ------------------------------------------------------------------ */
 
 describe("write verification (manifest-level, byte-exact)", () => {
-  it("CONTRAST PIN (vs the Wix GET→PUT residual): a concurrent manifest writer IS caught — loud write_verification_failed, never a silent last-writer-wins claim", async () => {
+  it("CONTRAST PIN (vs the Wix GET→PUT residual): a concurrent writer landing INSIDE our PUT→verify window IS caught — loud write_verification_failed, never a silent last-writer-wins claim", async () => {
     // On Wix, an in-window concurrent edit echoes back exactly what we sent
     // and NOTHING can flag it (accepted residual, gate-dispositioned
     // 2026-07-09). On THIS method the verification read hits the
-    // authoritative store, so an interleaved write — even one landing after
-    // a fully successful PUT — makes verification fail loudly and the row
-    // stays in its pre-call status. If this test ever fails, the edge
-    // method's concurrency story changed — re-examine it against the Wix
-    // disposition.
+    // authoritative store, so a write interleaving INSIDE our own PUT→verify
+    // window makes verification fail loudly and the row stays in its
+    // pre-call status. SCOPE HONESTY: this is the ONLY interleaving the
+    // verification can see — the STALE-BASE interleaving (second PUT landing
+    // after the first writer's verify) is invisible here and pinned as the
+    // KNOWN RACE below. If this test ever fails, the edge method's
+    // concurrency story changed — re-examine it against the Wix disposition.
     const { adapter, fake } = makeAdapter();
     const foreign = expectedManifest(9, [titleRule("The other writer won")]);
     fake.overwriteAfterNextPut(foreign);
@@ -365,6 +370,89 @@ describe("write verification (manifest-level, byte-exact)", () => {
     );
     expect(error.message).toContain("read back different");
     expect(fake.value(MANIFEST_KEY)).toBeNull();
+  });
+
+  it("an HTML interstitial answering the WRITE-VERIFICATION read is named honestly (unexpected_response) — never misattributed as write_verification_failed", async () => {
+    const { adapter, fake } = makeAdapter();
+    // The PUT stores fine; the challenge page appears on the verify read.
+    fake.htmlInterstitialAfterNextPut();
+    const error = await expectFailure(
+      adapter.apply(titleWrite(NEW_TITLE)),
+      "unexpected_response",
+    );
+    expect(error.message).toContain("HTML page");
+    expect(error.message).toContain("UNVERIFIED");
+    // The write itself landed — the honest claim is "unverified", not "failed".
+    expect(fake.value(MANIFEST_KEY)).toBe(expectedManifest(1, [titleRule(NEW_TITLE)]));
+  });
+
+  it("KNOWN RACE (stale-base interleaving, gate-dispositioned 2026-07-09): closes at the wiring seam, not here — GET/GET/PUT₁/verify₁✓/PUT₂/verify₂✓ both claim verified success and the first write is silently gone", async () => {
+    // THE INTERLEAVING (adapter.ts KNOWN RACE header section): two writers
+    // read the SAME base manifest; the second PUT lands after the first
+    // writer's verification passed. Each verification read echoes exactly
+    // the bytes that writer wrote, so BOTH report verified success — and the
+    // first write is silently absent from the final manifest. Workers KV has
+    // no CAS, so nothing at this seam can detect it; every manifest writer
+    // is in-house, so per-property write serialization at the production-
+    // wiring seam (carried ticket ii) closes it completely. THIS METHOD MUST
+    // NOT BE WIRED TO LIVE CLIENT PROPERTIES UNTIL THAT EXISTS.
+    //
+    // IF THIS TEST EVER FAILS: adapter-level detection improved — re-open
+    // the 2026-07-09 Orchestrator + Code Review disposition before shipping.
+    const fake = new FakeCloudflareKv({
+      apiToken: SECRET,
+      accountId: ACCOUNT_ID,
+      namespaceId: NAMESPACE_ID,
+    });
+    const resolver = makeResolver();
+    const config = {
+      pin: PIN,
+      secrets: resolver,
+      authRef: "vault://cloudflare/prop-1",
+      clock: fixedClock(NOW),
+    };
+    const writerA = new CloudflareEdgeAdapter({ ...config, fetch: fake.port });
+
+    // Deterministic interleaving hook: writer B's FIRST PUT parks until
+    // released, so B's base read happens BEFORE A writes and B's PUT
+    // happens AFTER A's verification passed.
+    let signalParked!: () => void;
+    const parked = new Promise<void>((resolve) => (signalParked = resolve));
+    let releaseB!: () => void;
+    const released = new Promise<void>((resolve) => (releaseB = resolve));
+    let bPutsSeen = 0;
+    const gatedPort: typeof fake.port = async (url, init) => {
+      if (init.method === "PUT" && bPutsSeen++ === 0) {
+        signalParked();
+        await released;
+      }
+      return fake.port(url, init);
+    };
+    const writerB = new CloudflareEdgeAdapter({ ...config, fetch: gatedPort });
+
+    // B: GET (reads the shared empty base), composes, parks at its PUT.
+    const bDone = writerB.apply({
+      target: { url: PAGE_URL, locator: edgeLocators.metaDescription() },
+      before: null,
+      after: "B's description",
+      ctx: CTX,
+    });
+    await parked;
+
+    // A: GET (same base) → PUT v1 [title] → verify ✓ — a full, clean success.
+    await expect(writerA.apply(titleWrite(NEW_TITLE))).resolves.toBeUndefined();
+
+    // B resumes: PUT v1 [meta only — composed from the stale base] → verify ✓.
+    releaseB();
+    await expect(bDone).resolves.toBeUndefined();
+
+    // BOTH writers claimed verified success — and A's rule is gone. Even the
+    // version number cannot tell: both manifests say v1.
+    const final = parseManifest(fake.value(MANIFEST_KEY)!)!;
+    expect(final.version).toBe(1);
+    expect(final.rules.map((r) => r.op)).toEqual(["set_meta_description"]);
+    // A's verified-and-audited title rule is silently absent.
+    expect(final.rules.some((r) => r.op === "set_title")).toBe(false);
   });
 
   it("write-through a DISABLED rule is refused pre-write in BOTH directions (defense in depth)", async () => {

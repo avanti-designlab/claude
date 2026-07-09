@@ -13,6 +13,15 @@
  *    existing element when the page has one, and inject a new element just
  *    before `</head>` when it does not (streaming order guarantees every
  *    head child is seen before the head end tag).
+ *  - HEAD-SCOPED, TWICE OVER: the real HTMLRewriter registration uses the
+ *    head-scoped CSS selectors in {@link REGISTERED_CSS_SELECTORS}
+ *    (`head > title` etc.), so inline-SVG accessibility `<title>` elements —
+ *    or any body-level `<meta>`/`<link>` (legal HTML microdata) — never
+ *    match; AND the title/meta/canonical handlers carry a streaming
+ *    head-window gate (`seen.headClosed`) so an element delivered after
+ *    `</head>` is never touched and never marks `seen.*` (which would
+ *    suppress the head injection). img alt is intentionally page-wide — it
+ *    targets body content by design.
  *  - JSON-LD is inject-only into `</head>`, tagged with
  *    `data-edge-autofix-rule` + `data-edge-autofix-schema`; origin JSON-LD
  *    blocks are never touched.
@@ -43,17 +52,61 @@ export interface SeenTargets {
   title: boolean;
   metaDescription: boolean;
   canonical: boolean;
+  /**
+   * Set when `</head>` streams past. Elements delivered AFTER this point —
+   * inline-SVG `<title>`s are the real-world case — are outside the head
+   * and must never be rewritten or marked as seen (the head-window gate).
+   */
+  headClosed: boolean;
 }
 
 export function newSeenTargets(): SeenTargets {
-  return { title: false, metaDescription: false, canonical: false };
+  return { title: false, metaDescription: false, canonical: false, headClosed: false };
 }
 
 /** One HTMLRewriter registration the glue wires up. */
 export interface SelectorAction {
+  /**
+   * The STRUCTURAL SEAM KEY for this registration — the value handed to the
+   * injected rewriter's `on()`. The REAL Cloudflare HTMLRewriter is wired
+   * through `scopeRewriterSelectors` (worker.ts, applied in index.ts), which
+   * maps each key to its head-scoped CSS selector in
+   * {@link REGISTERED_CSS_SELECTORS} before registering with lol-html.
+   */
   selector: "title" | "meta" | "link" | "img";
   handle(element: RewritableElement, seen: SeenTargets): void;
 }
+
+/**
+ * The CSS selector actually registered with the REAL HTMLRewriter for each
+ * seam key (applied at the runtime-wiring seam — `scopeRewriterSelectors` in
+ * worker.ts, wired in index.ts). HEAD-SCOPED on purpose (gate fix,
+ * 2026-07-09): a bare `title` selector matches EVERY `<title>` element in
+ * the byte stream — including inline-SVG accessibility titles anywhere in
+ * the page — so a set_title rule would clobber them page-wide, and an SVG
+ * match could mark `seen.title` and suppress the head injection.
+ * `head > title` matches only the document title (even a malformed
+ * `<svg><title>` inside `<head>` has parent `svg`, not `head`).
+ * meta/link are head-scoped too — cheap defense: body-level
+ * `<meta itemprop>` / `<link>` microdata is legal HTML and must never be
+ * rewritten. img is intentionally page-wide (it targets body content).
+ *
+ * REVIEWER'S NOTE (code-review, 2026-07-09): these real selector strings are
+ * never exercised against real lol-html in this repo's suites — every test
+ * injects a structural fake. Their behavior on the real runtime is a
+ * first-live-deploy canary (BUILD-STATE carried ticket ii), alongside the
+ * adapter's Cloudflare API-semantics canaries.
+ */
+export const REGISTERED_CSS_SELECTORS: Record<
+  SelectorAction["selector"] | "head",
+  string
+> = {
+  title: "head > title",
+  meta: "head > meta",
+  link: "head > link",
+  img: "img",
+  head: "head",
+};
 
 export interface RewritePlan {
   /** `x-edge-autofix` header value: `v{version}; {ruleId} {ruleId} ...` */
@@ -107,6 +160,11 @@ export function buildRewritePlan(
     selectors.push({
       selector: "title",
       handle(element, seen) {
+        // HEAD-WINDOW GATE (defense in depth behind the head-scoped CSS
+        // selector): a <title> delivered after </head> — an inline-SVG
+        // accessibility title is the real-world case — is never touched and
+        // never marks seen.title (which would suppress the head injection).
+        if (seen.headClosed) return;
         seen.title = true;
         // html:false — HTMLRewriter escapes the text itself.
         element.setInnerContent(title.payload.text, { html: false });
@@ -118,6 +176,7 @@ export function buildRewritePlan(
     selectors.push({
       selector: "meta",
       handle(element, seen) {
+        if (seen.headClosed) return; // head-window gate (see title above)
         const name = element.getAttribute("name");
         if (name !== null && name.toLowerCase() === "description") {
           seen.metaDescription = true;
@@ -131,6 +190,7 @@ export function buildRewritePlan(
     selectors.push({
       selector: "link",
       handle(element, seen) {
+        if (seen.headClosed) return; // head-window gate (see title above)
         const rel = element.getAttribute("rel");
         if (rel !== null && relTokens(rel).includes("canonical")) {
           seen.canonical = true;
@@ -143,6 +203,7 @@ export function buildRewritePlan(
   if (imgAlt.length > 0) {
     const bySrc = new Map(imgAlt.map((r) => [r.payload.src, r.payload.alt]));
     selectors.push({
+      // Intentionally UNGATED and page-wide: img alt targets body content.
       selector: "img",
       handle(element) {
         const src = element.getAttribute("src");

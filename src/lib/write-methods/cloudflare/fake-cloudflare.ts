@@ -28,13 +28,16 @@
  *
  * Fault injection: one-shot any-request or write-only failures with any
  * status/code, an Nth-PUT failure (mid-batch adversity), 429 with a
- * scriptable Retry-After, HTML-interstitial mode, `corruptNextWrite` (a torn
- * or normalized store — the counterfactual proving the byte-exact
- * verification is load-bearing), `overwriteAfterNextPut` (a concurrent
- * writer landing between our PUT and the verification GET — the interleaving
- * this method catches LOUDLY, in contrast to Wix's silent residual),
- * namespace deletion, key deletion, token rotation, plus network-level
- * failure via the underlying ScriptedFetch.
+ * scriptable Retry-After, HTML-interstitial mode (all requests, or arriving
+ * only after the next PUT — the verification-read interception),
+ * `corruptNextWrite` (a torn or normalized store — the counterfactual
+ * proving the byte-exact verification is load-bearing),
+ * `overwriteAfterNextPut` (a concurrent writer landing between our PUT and
+ * the verification GET — the IN-WINDOW interleaving this method catches
+ * LOUDLY, in contrast to Wix's silent residual; the STALE-BASE interleaving
+ * is not visible at this seam — see adapter.ts KNOWN RACE), namespace
+ * deletion, key deletion, token rotation, plus network-level failure via
+ * the underlying ScriptedFetch.
  */
 
 import type { FetchPort, FetchPortResponse } from "../shared/http";
@@ -73,6 +76,7 @@ export class FakeCloudflareKv {
   private readonly values = new Map<string, string>();
   private namespaceDeleted = false;
   private htmlInterstitial = false;
+  private interstitialAfterNextPut = false;
   private pendingFailure: FetchPortResponse | null = null;
   private pendingWriteFailure: { afterPuts: number; response: FetchPortResponse } | null =
     null;
@@ -113,6 +117,18 @@ export class FakeCloudflareKv {
   /** Every request answers 200 + an HTML challenge page (CDN/WAF interstitial). */
   simulateHtmlInterstitial(): this {
     this.htmlInterstitial = true;
+    return this;
+  }
+
+  /**
+   * The interstitial arrives only AFTER the next PUT stores successfully —
+   * so the write LANDS but its verification GET (and everything after) reads
+   * a challenge page. Proves the verification read routes through the same
+   * HTML guard as every other read (unexpected_response, named honestly),
+   * instead of misattributing the interception as write_verification_failed.
+   */
+  htmlInterstitialAfterNextPut(): this {
+    this.interstitialAfterNextPut = true;
     return this;
   }
 
@@ -163,9 +179,11 @@ export class FakeCloudflareKv {
   /**
    * A CONCURRENT WRITER: immediately after the next PUT stores, the given
    * text overwrites it — so the writer's verification GET reads the other
-   * write. This is the interleaving the edge method catches LOUDLY (one
-   * clean write, one write_verification_failed), in contrast to the Wix
-   * GET→PUT residual where the echo cannot see it.
+   * write. This is the IN-WINDOW interleaving the edge method catches
+   * LOUDLY (one clean write, one write_verification_failed), in contrast to
+   * the Wix GET→PUT residual where the echo cannot see it. The STALE-BASE
+   * interleaving (second PUT landing after the first writer's verify) is
+   * NOT visible at this seam — see adapter.ts KNOWN RACE and its pin test.
    */
   overwriteAfterNextPut(text: string): this {
     this.pendingOverwrite = text;
@@ -265,6 +283,11 @@ export class FakeCloudflareKv {
         // The concurrent deleter lands right behind us.
         this.values.delete(key);
         this.pendingDelete = false;
+      }
+      if (this.interstitialAfterNextPut) {
+        // The write stored; everything AFTER it hits a challenge page.
+        this.htmlInterstitial = true;
+        this.interstitialAfterNextPut = false;
       }
       return jsonResponse(200, {
         success: true,

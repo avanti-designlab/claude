@@ -2,8 +2,10 @@
  * Pure rule-application suite — the worker's rewrite behavior proven with
  * fake elements, zero Cloudflare runtime (the point of the rules.ts / worker.ts
  * split). Covers: selection (enabled + exact path), replace-vs-inject for
- * title/meta/canonical, byte-exact img-src matching, JSON-LD injection with
- * breakout-proof escaping, and the verifiability header value.
+ * title/meta/canonical, the head-window gate (elements after </head> — SVG
+ * <title>s — are never touched and never mark seen), byte-exact img-src
+ * matching, JSON-LD injection with breakout-proof escaping, and the
+ * verifiability header value.
  */
 
 import { describe, expect, it } from "vitest";
@@ -194,6 +196,54 @@ describe("replace-or-inject", () => {
     expect(plan.headEndHtml(newSeenTargets())).toBe(
       '<link rel="canonical" href="https://ggrealty.example/pricing">',
     );
+  });
+});
+
+describe("head-window gate (inline-SVG <title> defense in depth, 2026-07-09)", () => {
+  it("title/meta/link handlers ignore elements delivered AFTER </head> and never mark seen; img stays page-wide by design; the head injection is unaffected", () => {
+    const alt = rule({
+      enabled: true,
+      path: "/pricing",
+      op: "set_img_alt",
+      payload: { src: "/hero.jpg", alt: "Hero" },
+    });
+    const plan = buildRewritePlan(
+      manifestWith([TITLE, META, CANONICAL, alt]),
+      "/pricing",
+    )!;
+    const seen = newSeenTargets();
+    seen.headClosed = true; // </head> has streamed past
+
+    // An SVG accessibility <title> in the body: untouched, unseen.
+    const svgTitle = new FakeElement();
+    actionFor(plan, "title").handle(svgTitle, seen);
+    expect(svgTitle.innerContent).toBeNull();
+    expect(seen.title).toBe(false);
+
+    // Body-level microdata <meta name="description">: untouched, unseen.
+    const bodyMeta = new FakeElement({ name: "description", content: "microdata" });
+    actionFor(plan, "meta").handle(bodyMeta, seen);
+    expect(bodyMeta.sets).toEqual([]);
+    expect(seen.metaDescription).toBe(false);
+
+    // Body-level <link rel=canonical>: untouched, unseen.
+    const bodyLink = new FakeElement({ rel: "canonical", href: "/x" });
+    actionFor(plan, "link").handle(bodyLink, seen);
+    expect(bodyLink.sets).toEqual([]);
+    expect(seen.canonical).toBe(false);
+
+    // img alt is intentionally UNGATED — body content is its target.
+    const img = new FakeElement({ src: "/hero.jpg" });
+    actionFor(plan, "img").handle(img, seen);
+    expect(img.sets).toEqual([["alt", "Hero"]]);
+
+    // The injection decision at </head> (where headClosed is set) still
+    // emits everything genuinely missing from the head — post-head matches
+    // could not suppress it.
+    const injected = plan.headEndHtml(seen);
+    expect(injected).toContain("<title>");
+    expect(injected).toContain('name="description"');
+    expect(injected).toContain('rel="canonical"');
   });
 });
 
