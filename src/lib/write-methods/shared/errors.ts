@@ -1,0 +1,90 @@
+/**
+ * Typed failure contract for write-method adapters (doc 04 §1) — shared by
+ * WordPress / Webflow / Wix / edge-worker so callers, the QA rollback suite,
+ * and the operator UI can react to WHAT failed without ever parsing a vendor
+ * payload. The change-management pipeline treats adapter errors as opaque
+ * (`asError`), so this family is additive: it refines, it never requires a
+ * pipeline change.
+ *
+ * Failure honesty rules (doc 04 §5):
+ *  - Messages are COMPOSED here from our own coordinates (operation, origin,
+ *    HTTP status, a sanitized vendor error slug) — never from raw vendor
+ *    response bodies, and never from credentials. A credential cannot appear
+ *    in a WriteMethodError by construction.
+ *  - Messages are interface-voice: they tell the operator what happened and
+ *    what to do, not which internal function threw.
+ */
+
+import type { SiteChangeMethod } from "@/lib/types/db";
+
+/** Stable machine-readable codes for every way a write method can refuse/fail. */
+export type WriteMethodErrorCode =
+  /** The adapter was constructed with an unusable site config (bad base URL, creds in URL, ...). */
+  | "misconfigured"
+  /** The target/locator names an operation this method cannot perform reversibly — rejected at plan time. */
+  | "unsupported_operation"
+  /** A before/after value is not installable byte-exact for this operation — rejected at plan time, never at rollback time. */
+  | "invalid_value"
+  /** The call's AdapterContext does not match the property this adapter is pinned to. */
+  | "property_mismatch"
+  /** The target URL is not on this adapter's pinned site origin — a write never crosses origins. */
+  | "cross_site_target"
+  /** The site refused our credentials (HTTP 401/403) — revoked/insufficient application password. */
+  | "credential_rejected"
+  /** The target does not exist on the site (HTTP 404, or a meta field not exposed via REST). */
+  | "target_missing"
+  /** The site answered with something other than the expected REST JSON (the classic wp-login HTML redirect). */
+  | "unexpected_response"
+  /** The site's API errored (5xx / unexpected status with a parseable error envelope). */
+  | "vendor_failure"
+  /** The site could not be reached at all (DNS, TLS, timeout — the fetch itself threw). */
+  | "network_failure"
+  /** The site stored a DIFFERENT value than the one written — byte-exactness is broken; the write is reported failed. */
+  | "write_verification_failed";
+
+/** Optional structured detail — safe-by-construction (status + sanitized slug only). */
+export interface WriteMethodErrorDetail {
+  /** HTTP status that produced the failure, when one exists. */
+  httpStatus?: number;
+  /** Sanitized vendor error slug (e.g. WordPress's `rest_cannot_edit`). */
+  vendorCode?: string;
+}
+
+export class WriteMethodError extends Error {
+  readonly code: WriteMethodErrorCode;
+  readonly method: SiteChangeMethod;
+  readonly httpStatus?: number;
+  readonly vendorCode?: string;
+
+  constructor(
+    method: SiteChangeMethod,
+    code: WriteMethodErrorCode,
+    message: string,
+    detail?: WriteMethodErrorDetail,
+  ) {
+    super(message);
+    this.name = "WriteMethodError";
+    this.method = method;
+    this.code = code;
+    this.httpStatus = detail?.httpStatus;
+    this.vendorCode = detail?.vendorCode;
+  }
+}
+
+/** Family guard for callers holding an `unknown` (e.g. `BatchApplyReport.failed.error`). */
+export function isWriteMethodError(err: unknown): err is WriteMethodError {
+  return err instanceof WriteMethodError;
+}
+
+/**
+ * Extract a vendor error slug SAFELY: only a short machine-style identifier
+ * (letters/digits/underscore/hyphen) survives; anything else — including a
+ * vendor's free-text message, which could echo page content or worse — is
+ * dropped. This is the only piece of a vendor response body that may ever
+ * appear in a WriteMethodError.
+ */
+export function safeVendorCode(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+    ? value
+    : undefined;
+}
