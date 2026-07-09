@@ -3,9 +3,11 @@
 
 > The Orchestrator drives from `07-build-sequence-and-execution-checklist.md`. This file records where the build actually is. Do not cross a 🔒 gate marked ⏸ below.
 
-## Current stage: **PHASE 1 OPEN — Freeze Gate 0 passed 2026-07-08 (operator signed off F1 + F2). Foundation frozen. F1 schema APPLIED to the operator's live Supabase project (verified: 13/13 tables, RLS enabled + forced).**
+## Current stage: **PHASE 1 OPEN — Freeze Gate 0 passed 2026-07-08 (operator signed off F1 + F2). Foundation frozen. LIVE Supabase project fully provisioned (schema 0001–0008 + hook enabled + tenant #1 + operator login) — awaiting operator's first local sign-in.**
 
 > **Provisioning note (2026-07-08):** the frozen F1 foundation schema (migrations 0001–0006) was applied to the operator's live Supabase project via the SQL Editor (the remote build environment's network policy blocks direct DB access, so the operator ran a combined script). Verified live: all 13 public tables present with `relrowsecurity` AND `relforcerowsecurity` = true. App-runtime connection secrets (`NEXT_PUBLIC_SUPABASE_URL`, anon key, etc.) to be wired when the first data-backed screen is built. Network policy note: this environment blocks outbound to Supabase/Vercel/GitHub API; allowlisting `*.supabase.co` would let the orchestrator manage the DB directly (operator/admin change).
+
+> **Provisioning note 2 (2026-07-09) — auth layer LIVE:** with `api.supabase.com` allowlisted and an operator-supplied short-lived access token, the orchestrator provisioned the live project directly via the Supabase Management API (per `ops/environments.md` §Authentication): (1) migrations **0007 + 0008 applied** (verified: `auth_hooks.custom_access_token_hook` + `app.user_role` exist); (2) **Custom Access Token hook ENABLED** via auth config (`pg-functions://postgres/auth_hooks/custom_access_token_hook`); (3) operator auth user created (email confirmed); (4) **tenant #1 "The Design Lab"** created + operator wired as `agency_admin` in `tenant_users`. **End-to-end verified:** a real password sign-in against the live project returned a JWT carrying `tenant_id` + `user_role=agency_admin` with reserved `role=authenticated` — the hook mints claims exactly per contract §2/§12. The operator was instructed to revoke the access token immediately after. Remaining operator-local steps: `.env.local` (URL + anon key), `npm run dev`, sign in, change temp password.
 
 | Step | Item | Owner | Gate | Status |
 |---|---|---|---|---|
