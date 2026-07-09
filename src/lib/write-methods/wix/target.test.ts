@@ -105,6 +105,24 @@ describe("parseWixTarget — the supported operation set", () => {
     ["a field key with spaces", `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/bad key`],
     ["a field key with a hyphen", `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/faq-schema`],
     ["an empty field key", `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/`],
+    // Fail-closed grammar probes: lookalike/encoded system-field spellings
+    // must be as unwritable as the real thing. The grammar's ASCII character
+    // classes admit none of them — a fullwidth underscore (U+FF3F) is not
+    // [A-Za-z0-9_], `_ID` starts with the forbidden underscore like any
+    // case-variant, and `%` (percent-encoding) is outside every class, so
+    // nothing can smuggle a system field past the plan-time gate.
+    [
+      "a fullwidth-underscore (U+FF3F) system-field lookalike",
+      `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/＿id`,
+    ],
+    [
+      "a mixed-case _ID system-field spelling",
+      `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/_ID`,
+    ],
+    [
+      "a percent-encoded %5Fid system-field spelling",
+      `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/%5Fid`,
+    ],
     ["a digit-led collection id", `wix:data/1Listings/${ITEM_ID}/field/summary`],
     ["an empty page id", "wix:page//seo.title"],
     ["a foreign grammar", "webflow:page/683f07d9aa4b5c8d2e1f0a3b/seo.title"],

@@ -31,7 +31,51 @@
  *    directly with the recorded timestamp. This is explicitly UNLIKE Webflow,
  *    whose "applied" is staged-only and whose live effect lands at the
  *    client's next publish (see the 1.3 Webflow gate record's open
- *    correlation ticket — that ticket does NOT apply to this method).
+ *    correlation ticket — that ticket does NOT apply to this method). One
+ *    caveat: rows resumed through the QA-1 crash window (warning
+ *    `resumed_after_partial_apply`) have a live effect that PREDATES
+ *    applied_at by the crash→retry gap — correlation consumers should treat
+ *    resumed rows specially.
+ *
+ * ACCEPTED RESIDUAL — the data-write GET→PUT concurrent-edit window
+ * (gate-dispositioned: Orchestrator + Code Review, 2026-07-09):
+ *  - THE WINDOW: a data-item write is read-fresh → swap exactly the target
+ *    field → PUT the whole item back (full replace — see below). An edit that
+ *    lands on the same item AFTER that fresh GET and BEFORE the PUT is
+ *    silently overwritten with the re-carried pre-edit values. The PUT's echo
+ *    matches what we sent byte-exact, so no echo verification can see it —
+ *    the pipeline records a clean apply with no warning.
+ *  - WHY IT EXISTS: Wix Data v2's Update Data Item is last-writer-wins full
+ *    replace. The surface carries no revision/version field and offers no
+ *    conditional or partial update — nothing at the transport can make the
+ *    PUT fail because the item changed under it, so this adapter cannot
+ *    close the window.
+ *  - HOW SMALL IT IS: one GET immediately followed by one PUT, with only
+ *    in-process work between them (the reversibility gate + one field swap)
+ *    — the span of two back-to-back API calls. Edits landing BEFORE the
+ *    fresh GET are picked up and re-carried intact, and any divergence the
+ *    server introduces is visible at the echo and fails loudly; only the
+ *    in-window slice is exposed.
+ *  - OPERATOR-FACING CONSEQUENCE: a client-staff CMS edit made in the same
+ *    instant as an auto-fix apply or rollback touching the SAME item can be
+ *    lost, with no warning on the change row. If a client reports a vanished
+ *    CMS edit, correlate the item's `_updatedDate` against
+ *    `site_changes.applied_at`/`reverted_at` for this method.
+ *  - PINNED: FakeWix.editDataItemOnNextPut drives the "ACCEPTED RESIDUAL
+ *    (gate-dispositioned)" test in adapter.test.ts, so this behavior stays
+ *    named and load-bearing, never latent.
+ *
+ * FIRST-LIVE-WRITE CANARY (carried ticket ii — confirm when the wiring step
+ * connects this method to its first real property):
+ *  - Pages: this adapter ASSUMES the seoData PATCH merges the provided keys
+ *    (a single-key body leaves the other attribute untouched). The non-target
+ *    echo verification turns replace semantics into a loud
+ *    write_verification_failed instead of silent loss, but the first live
+ *    page write should confirm merge semantics.
+ *  - Data items: confirm the live system-field requirements (system fields
+ *    sent in the body are ignored rather than rejected; no `_id` is required
+ *    in the body) and the PUT/GET echo shape ({ dataItem: { data } } carrying
+ *    system fields) that FakeWix models.
  *
  * Safety properties, each proven by tests:
  *  - PINNED SITE (multi-tenant discipline): the adapter is constructed per
@@ -64,13 +108,23 @@
  *    excluded from verification — `_updatedDate` changes on every write by
  *    definition. The echo is verified TWICE: the target field byte-exact
  *    against the value written, AND every sibling field byte-exact against
- *    the fresh-read value sent — on this surface a sibling divergence is OUR
- *    write's side effect, and it is never silent (write_verification_failed).
+ *    the fresh-read value sent (write_verification_failed on either). That
+ *    catches every divergence VISIBLE at the echo — server normalization,
+ *    replace-semantics surprises, edits that landed before the fresh read.
+ *    What it CANNOT catch: an edit landing INSIDE the GET→PUT window, which
+ *    is silently overwritten with the re-carried values — Wix Data v2 offers
+ *    no conditional update, so that window cannot be closed at the transport
+ *    (the ACCEPTED RESIDUAL above).
  *  - WRITE VERIFICATION: every write re-reads the stored value from the
  *    update echo and compares it byte-exact (jsonEqual) to what was sent. If
  *    Wix normalized or dropped it, the write is reported FAILED — on apply
  *    the row stays 'previewed'; on revert the row stays 'applied' and a human
  *    intervenes — instead of silently recording a state the site does not have.
+ *    Page-SEO writes ADDITIONALLY verify the echo's NON-TARGET seoData
+ *    attribute against the pre-write read (an unset attribute must STAY
+ *    unset — unset≠empty), in both directions: a merge-PATCH that behaved
+ *    like a replace would otherwise silently wipe the page's other SEO
+ *    attribute (live data loss).
  *  - CREDENTIALS (doc 04 §5): the Wix API key reaches this adapter only as a
  *    vault ref + SecretsResolver. It is resolved per call, revealed only into
  *    the Authorization header (Wix API keys are sent bare — no Basic/Bearer
@@ -267,7 +321,15 @@ export class WixAdapter implements WriteMethodAdapter {
    * line (an UNSET field inherits the site's SEO pattern — installing a
    * first-ever explicit value could never be rolled back to "inherit", so it
    * is refused before the PATCH leaves), then a single-key merge-PATCH whose
-   * echo is verified byte-exact. LIVE the moment the PATCH is accepted.
+   * echo is verified TWICE: the target attribute byte-exact against the value
+   * written, AND the NON-TARGET seoData attribute byte-exact against its
+   * pre-write value (unset must stay unset — unset≠empty). The PATCH is
+   * ASSUMED to merge (the header's first-live-write canary); if it ever
+   * behaves as a replace and wipes the other attribute, the non-target check
+   * turns that live data loss into a loud write_verification_failed instead
+   * of a silent success — in BOTH directions (apply and revert), at zero
+   * extra requests (the pre-write GET and the echo are already in hand).
+   * LIVE the moment the PATCH is accepted.
    */
   private async writePageField(
     op: Extract<WixOperation, { kind: "page" }>,
@@ -281,6 +343,11 @@ export class WixAdapter implements WriteMethodAdapter {
       this.extractPageField(op, current, what),
       "live",
     );
+    // The OTHER seoData attribute's pre-write value (null = unset/inherits):
+    // this write is not approved to change it, so the echo must return it
+    // exactly as it stands now.
+    const siblingAttr = op.attr === "title" ? "description" : "title";
+    const siblingBefore = this.extractPageSeoAttr(siblingAttr, current, what);
 
     const payload = await this.request(
       "PATCH",
@@ -296,6 +363,19 @@ export class WixAdapter implements WriteMethodAdapter {
         `wix ${what}: the site stored a different value than the one written — Wix normalized or rewrote it (the LIVE site may now hold the altered value); adjust the change before retrying`,
       );
     }
+    // Non-target verification: the single-key PATCH must not have touched the
+    // page's OTHER SEO attribute. A set value must echo byte-exact; an unset
+    // attribute must STILL be unset (null here) — an echo materializing it as
+    // empty string is a change Wix renders differently (unset inherits the
+    // site's SEO pattern), so it fails too.
+    const siblingEchoed = this.extractPageSeoAttr(siblingAttr, payload, what);
+    if (!jsonEqual(siblingEchoed, siblingBefore)) {
+      throw new WriteMethodError(
+        METHOD,
+        "write_verification_failed",
+        `wix ${what}: the page's OTHER SEO attribute (seo.${siblingAttr}) came back changed by this single-key write — the PATCH was expected to MERGE the seoData object, not replace it, so this write altered data it was not approved to change (the LIVE site may have lost or altered seo.${siblingAttr}); investigate before retrying`,
+      );
+    }
   }
 
   /**
@@ -303,8 +383,14 @@ export class WixAdapter implements WriteMethodAdapter {
    * swap exactly the target field, PUT the whole item back (system fields
    * stripped — server-managed), then verify the echo twice: target field
    * byte-exact against the value written, and every sibling byte-exact
-   * against the fresh-read value sent. On a full-replace surface a sibling
-   * divergence is OUR write's side effect — it is never allowed to be silent.
+   * against the fresh-read value sent. That catches every divergence VISIBLE
+   * at the echo (server normalization, replace-semantics surprises, edits
+   * that landed before the fresh read). It does NOT catch an edit landing
+   * between the fresh GET and the PUT — that edit is silently overwritten
+   * with the re-carried values, the echo matches what we sent, and the write
+   * verifies clean. Wix Data v2 offers no conditional or partial update, so
+   * this window cannot be closed at the transport: it is the header's
+   * ACCEPTED RESIDUAL (gate-dispositioned 2026-07-09).
    */
   private async writeDataField(
     op: Extract<WixOperation, { kind: "data" }>,
@@ -353,8 +439,12 @@ export class WixAdapter implements WriteMethodAdapter {
       );
     }
     // Sibling verification: everything this full-replace PUT carried besides
-    // the target must have landed byte-exact, or the write ALTERED data it
-    // was never approved to change.
+    // the target must have landed byte-exact — this catches every divergence
+    // VISIBLE at the echo (server normalization, replace-semantics
+    // surprises). What it CANNOT see: an edit that landed inside the GET→PUT
+    // window above, which this PUT has already overwritten with the
+    // re-carried values and which echoes back exactly as sent — the header's
+    // ACCEPTED RESIDUAL.
     const siblingsSent: { [k: string]: Json } = { ...sent };
     delete siblingsSent[op.fieldKey];
     const siblingsEchoed: { [k: string]: Json } = { ...echoed };
@@ -582,6 +672,19 @@ export class WixAdapter implements WriteMethodAdapter {
     payload: Json,
     what: string,
   ): Json {
+    return this.extractPageSeoAttr(op.attr, payload, what);
+  }
+
+  /**
+   * Extract ONE seoData attribute by name (the target's or the non-target's —
+   * the same strict unwrap and the same unset→null normalization, so the
+   * non-target verification inherits the unset≠empty discipline).
+   */
+  private extractPageSeoAttr(
+    attr: "title" | "description",
+    payload: Json,
+    what: string,
+  ): Json {
     const envelope = this.entityOf(payload, what);
     const page = envelope.page;
     if (page === null || typeof page !== "object" || Array.isArray(page)) {
@@ -591,7 +694,7 @@ export class WixAdapter implements WriteMethodAdapter {
     if (seoData === null || typeof seoData !== "object" || Array.isArray(seoData)) {
       throw this.unexpectedShape(what, "the API response has no seoData object");
     }
-    const value = (seoData as { [k: string]: Json })[op.attr];
+    const value = (seoData as { [k: string]: Json })[attr];
     return value === undefined ? null : value;
   }
 

@@ -6,8 +6,15 @@
  *  - reads capture the byte-exact LIVE field; writes install exactly one
  *    field and verify the site stored it byte-exact — on the Wix Data
  *    full-replace surface the verification ALSO covers every sibling field
- *    the write re-carried, so a write can never silently alter data it was
- *    not approved to change;
+ *    the write re-carried, and on the page-SEO surface the NON-TARGET
+ *    seoData attribute, so every divergence VISIBLE at the write's echo
+ *    fails loudly (server normalization, replace-semantics surprises, edits
+ *    that landed before the fresh read);
+ *  - the one divergence NOT visible at any echo — a concurrent edit landing
+ *    inside the data write's GET→PUT window — is silently overwritten (Wix
+ *    Data v2 has no conditional/partial update; last-writer-wins) and is
+ *    pinned below as the ACCEPTED RESIDUAL (gate-dispositioned: Orchestrator
+ *    + Code Review, 2026-07-09);
  *  - every failure mode maps to the typed WriteMethodError contract with
  *    interface-voice messages (401/403, 404, 429 + Retry-After whitelisting,
  *    the HTML-interstitial classic, non-JSON, 5xx, network);
@@ -26,7 +33,15 @@
 
 import util from "node:util";
 import { describe, expect, it } from "vitest";
-import type { AdapterContext, AdapterWrite } from "@/lib/change-management";
+import {
+  ChangeManager,
+  InMemoryChangeStore,
+  MapAdapterRegistry,
+  steppingClock,
+  type AdapterContext,
+  type AdapterWrite,
+  type TenantContext,
+} from "@/lib/change-management";
 import {
   VendorCredential,
   type ConnectorScope,
@@ -34,7 +49,7 @@ import {
 } from "@/lib/connectors";
 import type { Json } from "@/lib/types/db";
 import { WriteMethodError, type WriteMethodErrorCode } from "../shared/errors";
-import { ScriptedFetch, textResponse } from "../shared/http-harness";
+import { jsonResponse, ScriptedFetch, textResponse } from "../shared/http-harness";
 import { WixAdapter, type WixAdapterConfig } from "./adapter";
 import { FakeWix } from "./fake-wix";
 import { wixLocators } from "./target";
@@ -479,6 +494,189 @@ describe("revert", () => {
     // would differ from the captured before-state.
     fake.mutateWrites((v) => v.replace(/\s+/g, " "));
     await expectFailure(adapter.revert(write), "write_verification_failed");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Page-SEO non-target verification — the merge-semantics guard        */
+/* ------------------------------------------------------------------ */
+
+describe("page-SEO non-target verification (merge-semantics guard)", () => {
+  it("under MERGE semantics (the modeled, assumed behavior — first-live-write canary) a single-key write passes with an UNSET sibling staying unset", async () => {
+    const { adapter, fake } = makeAdapter();
+    // The set-sibling merge case is proven by the apply suite above; this is
+    // the UNSET case — the About page's description is unset (inherits the
+    // site's SEO pattern) and must still be unset in the echo.
+    await adapter.apply({
+      target: {
+        url: PAGE_URL,
+        locator: wixLocators.pageSeoTitle(UNSET_PAGE_ID),
+      },
+      before: "About GG Realty",
+      after: "About GG Realty | San Diego",
+      ctx: CTX,
+    });
+    expect(fake.page(UNSET_PAGE_ID).seoData.title).toBe(
+      "About GG Realty | San Diego",
+    );
+    expect(fake.page(UNSET_PAGE_ID).seoData.description).toBeUndefined();
+  });
+
+  it("under REPLACE semantics a single-key title write WIPES the description — write_verification_failed, never a silent success (apply direction)", async () => {
+    const { adapter, fake } = makeAdapter();
+    fake.simulateSeoDataReplaceSemantics();
+    const error = await expectFailure(
+      adapter.apply(seoTitleWrite("New Title")),
+      "write_verification_failed",
+    );
+    expect(error.message).toContain("seo.description");
+    expect(error.message).toContain("not approved to change");
+    // The loss is REAL on the live site — which is exactly why the failure
+    // must be loud instead of a recorded success the operator would trust.
+    expect(fake.page(PAGE_ID).seoData.description).toBeUndefined();
+  });
+
+  it("the guard covers the REVERT direction too — a restore that wipes the sibling is reported, never a false 'reverted'", async () => {
+    const { adapter, fake } = makeAdapter();
+    const write = seoTitleWrite("New Title");
+    await adapter.apply(write);
+    expect(fake.page(PAGE_ID).seoData.description).toBe(ORIGINAL_SEO_DESC);
+    // The vendor's PATCH semantics change under us between apply and revert
+    // (the canary counterfactual).
+    fake.simulateSeoDataReplaceSemantics();
+    const error = await expectFailure(
+      adapter.revert(write),
+      "write_verification_failed",
+    );
+    expect(error.message).toContain("seo.description");
+    expect(fake.page(PAGE_ID).seoData.description).toBeUndefined();
+  });
+
+  it("an UNSET sibling must STAY unset: an echo materializing it as empty string fails (unset≠empty — Wix renders them differently)", async () => {
+    // ScriptedFetch, not FakeWix: the GET shows the description UNSET; the
+    // PATCH echo materializes it as "" — a server that "helpfully" fills a
+    // wiped key with an empty string must still be caught, because unset
+    // inherits the site's SEO pattern and empty does not.
+    const scripted = new ScriptedFetch()
+      .on("GET", /site-pages/, () =>
+        jsonResponse(200, {
+          page: {
+            id: UNSET_PAGE_ID,
+            name: "About",
+            seoData: { title: "About GG Realty" },
+          },
+        }),
+      )
+      .on("PATCH", /site-pages/, () =>
+        jsonResponse(200, {
+          page: {
+            id: UNSET_PAGE_ID,
+            name: "About",
+            seoData: { title: "About | GG", description: "" },
+          },
+        }),
+      );
+    const { adapter } = makeAdapter({ fetch: scripted.port });
+    const error = await expectFailure(
+      adapter.apply({
+        target: {
+          url: PAGE_URL,
+          locator: wixLocators.pageSeoTitle(UNSET_PAGE_ID),
+        },
+        before: "About GG Realty",
+        after: "About | GG",
+        ctx: CTX,
+      }),
+      "write_verification_failed",
+    );
+    expect(error.message).toContain("seo.description");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The data-write GET→PUT concurrent-edit window — ACCEPTED RESIDUAL   */
+/* (gate-dispositioned: Orchestrator + Code Review, 2026-07-09)        */
+/* ------------------------------------------------------------------ */
+
+describe("data-write GET→PUT concurrent-edit window — ACCEPTED RESIDUAL (gate-dispositioned)", () => {
+  it("ACCEPTED RESIDUAL (gate-dispositioned 2026-07-09): an edit landing INSIDE the GET→PUT window is silently overwritten — the pipeline records 'applied' with NO warning", async () => {
+    // This test PINS the accepted residual; it does not defend a fix. Wix
+    // Data v2's update is last-writer-wins full replace (no revision field,
+    // no conditional or partial update), so an edit landing between the
+    // adapter's fresh pre-write GET and its PUT is overwritten with the
+    // re-carried pre-edit values, the echo matches what we sent byte-exact,
+    // and NOTHING can flag it. Boundary cases, both proven elsewhere in this
+    // file: an edit landing BEFORE the fresh read IS re-carried intact (the
+    // next test), and a divergence the server introduces IS caught at the
+    // echo (the sibling-normalization test in the apply suite). If this test
+    // ever fails, the residual has changed shape — re-open the disposition.
+    const { adapter, fake } = makeAdapter();
+    const clock = steppingClock("2026-07-09T12:00:00.000Z");
+    const store = new InMemoryChangeStore({ clock });
+    const manager = new ChangeManager({
+      store,
+      adapters: new MapAdapterRegistry([adapter]),
+      clock,
+    });
+    const tenantCtx: TenantContext = {
+      tenantId: "t1",
+      actor: { id: "user-op", role: "operator" },
+    };
+
+    const preview = await manager.preview(
+      {
+        tenantId: "t1",
+        clientId: "c1",
+        propertyId: "prop-1",
+        method: "wix",
+        changeType: "content",
+        target: {
+          url: PAGE_URL,
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "summary"),
+        },
+        before: ORIGINAL_SUMMARY,
+        after: "New summary",
+      },
+      tenantCtx,
+    );
+
+    // The client-staff CMS edit lands at the exact instant the apply's PUT
+    // arrives: AFTER the adapter's fresh pre-write GET (which re-carried the
+    // pre-edit name), BEFORE the full replace processes.
+    fake.editDataItemOnNextPut(COLLECTION_ID, ITEM_ID, {
+      name: "Casa Uno — staff renamed mid-write",
+    });
+
+    const outcome = await manager.apply(
+      preview.change.id,
+      { approvedBy: "user-admin" },
+      tenantCtx,
+    );
+
+    // The pipeline saw NOTHING: applied, zero warnings, clean verified write.
+    expect(outcome.change.status).toBe("applied");
+    expect(outcome.warnings).toEqual([]);
+    // And the staff rename is GONE — overwritten with the re-carried
+    // pre-edit value. This is the operator-facing consequence the adapter
+    // header documents: a CMS edit made in the same instant as an auto-fix
+    // apply or rollback on the same item can be lost, silently.
+    expect(fake.item(COLLECTION_ID, ITEM_ID).name).toBe("Casa Uno");
+    expect(fake.item(COLLECTION_ID, ITEM_ID).summary).toBe("New summary");
+  });
+
+  it("boundary (NOT the residual): an edit landing BEFORE the fresh read IS re-carried intact — only the in-window slice is exposed", async () => {
+    const { adapter, fake } = makeAdapter();
+    // The staff edit lands at rest, before our write begins.
+    fake.editDataItem(COLLECTION_ID, ITEM_ID, {
+      name: "Casa Uno — staff renamed",
+    });
+    await adapter.apply(summaryWrite("New summary"));
+    // The fresh pre-write GET picked the rename up; the full-replace PUT
+    // re-carried it byte-exact alongside the one approved field change.
+    expect(fake.item(COLLECTION_ID, ITEM_ID).name).toBe(
+      "Casa Uno — staff renamed",
+    );
+    expect(fake.item(COLLECTION_ID, ITEM_ID).summary).toBe("New summary");
   });
 });
 

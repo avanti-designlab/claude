@@ -40,8 +40,18 @@
  * Fault injection: one-shot any-request or write-only failures with any
  * status/slug, HTML-interstitial mode (a CDN/WAF challenge page where JSON
  * was promised), a write mutator (server-side normalization sim, to force
- * verification failures), entity removal mid-flight, key rotation, and
- * network-level failure via the underlying ScriptedFetch.
+ * verification failures), entity removal mid-flight, key rotation,
+ * network-level failure via the underlying ScriptedFetch — plus the
+ * concurrent-editor pair (mirroring FakeWebflow's setMirror /
+ * flipMirrorOnNextPatch split): `editDataItem()` models a client-staff CMS
+ * edit landing BETWEEN our calls (the adapter's next fresh read picks it up
+ * and re-carries it), and `editDataItemOnNextPut()` lands the edit at the
+ * exact instant the next PUT to that item arrives — AFTER the adapter's
+ * fresh pre-write GET, BEFORE the full replace processes — the GET→PUT
+ * window of the gate-dispositioned ACCEPTED RESIDUAL (adapter header). And
+ * `simulateSeoDataReplaceSemantics()` flips the pages PATCH from merge to
+ * replace semantics (non-provided seoData keys are WIPED), the canary
+ * counterfactual the adapter's non-target verification must catch.
  */
 
 import type { Json } from "@/lib/types/db";
@@ -109,6 +119,12 @@ export class FakeWix {
   private pendingFailure: FetchPortResponse | null = null;
   private pendingWriteFailure: FetchPortResponse | null = null;
   private writeMutator: ((value: string) => string) | null = null;
+  private pendingItemEdit: {
+    collectionId: string;
+    itemId: string;
+    fields: Record<string, Json>;
+  } | null = null;
+  private seoDataReplaceSemantics = false;
   /** Deterministic `_updatedDate` advancement — one tick per accepted write. */
   private writeSeq = 0;
 
@@ -215,6 +231,61 @@ export class FakeWix {
   }
 
   /**
+   * A client-staff CMS edit landing AT REST (between our API calls): the
+   * given user fields merge into the item immediately and `_updatedDate`
+   * advances, exactly as if someone saved the item in the CMS editor. An
+   * adapter write that starts AFTER this edit picks it up on its fresh
+   * pre-write GET and re-carries it intact — the boundary case OUTSIDE the
+   * accepted-residual window (see {@link editDataItemOnNextPut}).
+   */
+  editDataItem(
+    collectionId: string,
+    itemId: string,
+    fields: Record<string, Json>,
+  ): this {
+    const item = this.storedItem(collectionId, itemId);
+    item.user = { ...item.user, ...fields };
+    this.writeSeq++;
+    item.system._updatedDate = new Date(
+      EPOCH_MS + this.writeSeq * 1000,
+    ).toISOString();
+    return this;
+  }
+
+  /**
+   * One-shot MID-WRITE edit (mirrors FakeWebflow.flipMirrorOnNextPatch): the
+   * given user fields land on the item at the instant the NEXT PUT to it
+   * arrives — i.e. AFTER the adapter's fresh pre-write GET (whose payload did
+   * not include them) and BEFORE the full-replace processes. This is the
+   * GET→PUT concurrent-edit window the 2026-07-09 gates dispositioned as an
+   * ACCEPTED RESIDUAL: Wix Data v2's update is last-writer-wins with no
+   * conditional/partial variant, so the PUT overwrites the edit with the
+   * re-carried pre-edit values and echoes exactly what the adapter sent —
+   * no verification can see it, and the write reports clean success.
+   */
+  editDataItemOnNextPut(
+    collectionId: string,
+    itemId: string,
+    fields: Record<string, Json>,
+  ): this {
+    this.pendingItemEdit = { collectionId, itemId, fields };
+    return this;
+  }
+
+  /**
+   * Flip the pages PATCH from MERGE to REPLACE semantics: the seoData object
+   * becomes exactly the provided keys, so a single-key PATCH WIPES the other
+   * attribute. The adapter assumes merge semantics (its header's
+   * first-live-write canary); this toggle is the counterfactual that proves
+   * the non-target echo verification turns silent live data loss into a loud
+   * write_verification_failed.
+   */
+  simulateSeoDataReplaceSemantics(): this {
+    this.seoDataReplaceSemantics = true;
+    return this;
+  }
+
+  /**
    * Rotate the account's API key: the fake now expects `next`, so a resolver
    * still handing out the old key starts getting 401 UNAUTHENTICATED —
    * exactly a mid-flight rotation/revocation.
@@ -300,6 +371,13 @@ export class FakeWix {
       }
     }
 
+    if (this.seoDataReplaceSemantics) {
+      // REPLACE semantics (the canary counterfactual): seoData becomes
+      // exactly the provided keys — a non-provided attribute is WIPED back
+      // to unset, silently, before the provided keys are stored below.
+      page.seoData = {};
+    }
+
     const store = (value: string): string =>
       this.writeMutator ? this.writeMutator(value) : value;
     if (typeof seoData.title === "string") {
@@ -345,6 +423,25 @@ export class FakeWix {
 
       const item = this.collections.get(collectionId)?.get(itemId);
       if (!item) return envelope(404, "ITEM_NOT_FOUND");
+
+      if (
+        this.pendingItemEdit &&
+        this.pendingItemEdit.collectionId === collectionId &&
+        this.pendingItemEdit.itemId === itemId
+      ) {
+        // The one-shot concurrent edit lands NOW — the PUT has arrived (the
+        // adapter's fresh GET is behind us) but has not yet processed. It is
+        // another actor's write, so it lands regardless of what happens to
+        // OUR request next; the full replace below then overwrites it.
+        const edit = this.pendingItemEdit;
+        this.pendingItemEdit = null;
+        item.user = { ...item.user, ...edit.fields };
+        this.writeSeq++;
+        item.system._updatedDate = new Date(
+          EPOCH_MS + this.writeSeq * 1000,
+        ).toISOString();
+      }
+
       if (this.pendingWriteFailure) {
         const failure = this.pendingWriteFailure;
         this.pendingWriteFailure = null;
