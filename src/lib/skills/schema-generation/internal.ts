@@ -370,8 +370,12 @@ export function buildAggregateRating(
     );
   } else {
     node.ratingValue = rating.ratingValue;
-    // A displayed aggregate score should be visible where it is claimed.
-    claim(gen, p(path, "ratingValue"), "Aggregate rating value", String(rating.ratingValue), "number", "warning");
+    // A displayed aggregate score MUST be visible where it is claimed — a
+    // fabricated star rating inflates social proof (FTC / manual-action risk,
+    // doc 05 M10), so this is an error-severity claim that BLOCKS emission on
+    // mismatch (frozen-skill tightening 2026-07-09, Orchestrator-authorized;
+    // was "warning" before).
+    claim(gen, p(path, "ratingValue"), "Aggregate rating value", String(rating.ratingValue), "number", "error");
   }
   node.bestRating = best;
   node.worstRating = worst;
@@ -387,6 +391,20 @@ export function buildAggregateRating(
       );
     } else {
       node[key] = count;
+      // A displayed review/rating count MUST appear on the page — a fabricated
+      // count inflates social proof (FTC / manual-action risk, doc 05 M10), so
+      // it is an error-severity, digit-matched claim (frozen-skill tightening
+      // 2026-07-09, Orchestrator-authorized; was unregistered — never matched —
+      // before). numberBoundaryRegex tolerates thousands separators, so "5123"
+      // matches a page rendering "5,123".
+      claim(
+        gen,
+        p(path, key),
+        key === "reviewCount" ? "Aggregate review count" : "Aggregate rating count",
+        String(count),
+        "number",
+        "error",
+      );
     }
   }
 
@@ -413,6 +431,16 @@ export function buildReview(gen: Gen, path: string, review: ReviewValueInput): J
     node.reviewBody = review.reviewBody;
     claim(gen, p(path, "reviewBody"), "Review body", review.reviewBody, "text", "error");
   }
+  // NOTE (frozen-skill tightening 2026-07-09): unlike the AGGREGATE rating value
+  // + counts (buildAggregateRating, now error-gated), an INDIVIDUAL review's star
+  // rating is deliberately NOT registered as a visible-text claim. The review
+  // BODY above is already error-gated, which closes the fabrication surface (a
+  // review whose text is not on the page already rejects); and a single review's
+  // rating renders as star glyphs/words ("★★★★★", "five stars") far more often
+  // than as a digit, so digit-matching it would systematically false-reject
+  // legitimate review markup. The FTC / social-proof exposure lives in the
+  // AGGREGATE, which is now fully error-gated. (Scope flagged to Code Review +
+  // Compliance for ratification.)
   const { worst, best } = ratingBounds(review.worstRating, review.bestRating);
   if (!isRatingInRange(review.ratingValue, review.worstRating, review.bestRating)) {
     gen.issues.push(

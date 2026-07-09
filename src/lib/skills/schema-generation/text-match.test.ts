@@ -106,6 +106,48 @@ describe("verifyClaims — price/number", () => {
   });
 });
 
+describe("verifyClaims — number thousands separators", () => {
+  const countClaim = (value: string): ClaimSpec => ({
+    path: "aggregateRating.reviewCount",
+    label: "Aggregate review count",
+    value,
+    kind: "number",
+    severity: "error",
+  });
+
+  it("matches a count rendered contiguously (exact match)", () => {
+    expect(verifyClaims([countClaim("5123")], "Rated 4.9 from 5123 reviews.").issues).toHaveLength(0);
+  });
+
+  it("matches a count rendered with an en-US thousands comma (5,123)", () => {
+    expect(verifyClaims([countClaim("5123")], "Rated 4.9 from 5,123 reviews.").issues).toHaveLength(0);
+  });
+
+  it("matches a multi-group count with thousands commas (1,234,567)", () => {
+    expect(verifyClaims([countClaim("1234567")], "Trusted by 1,234,567 members.").issues).toHaveLength(0);
+  });
+
+  it("rejects a fabricated count that is absent from the page", () => {
+    const { issues } = verifyClaims([countClaim("5123")], "Rated 4.9 by our customers.");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe("TEXT_MISMATCH");
+  });
+
+  it("does not over-match: 5123 must NOT match a larger 5,123,999", () => {
+    const { issues } = verifyClaims([countClaim("5123")], "Trusted by 5,123,999 members.");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe("TEXT_MISMATCH");
+  });
+
+  it("does not over-match: 5123 must NOT match a decimal 5,123.4", () => {
+    expect(verifyClaims([countClaim("5123")], "Index value 5,123.4 today.").issues).toHaveLength(1);
+  });
+
+  it("does not treat a comma-then-space list ('5, 123') as a thousands group", () => {
+    expect(verifyClaims([countClaim("5123")], "See items 5, 123 in the index.").issues).toHaveLength(1);
+  });
+});
+
 describe("verifyClaims — phone", () => {
   const phoneClaim = (value: string): ClaimSpec => ({
     path: "telephone",

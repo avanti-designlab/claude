@@ -9,7 +9,8 @@
  *   quote/dash folding + whitespace collapse + lowercase — so markup-driven casing
  *   or curly quotes never cause false mismatches, but reworded content always does.
  * - "price"/"number" claims: digit-boundary numeric match ("24.99" matches "$24.99"
- *   but never "124.99"; "45" also matches "45.00" and vice versa).
+ *   but never "124.99"; "45" also matches "45.00" and vice versa) with thousands-
+ *   separator tolerance ("5123" matches "5,123" but never "5,123,999").
  * - "phone" claims: digit-sequence match tolerant of separators; falls back to the
  *   last 10 digits so "+1-619-555-0143" matches "(619) 555-0143".
  *
@@ -74,13 +75,42 @@ function matchText(claimValue: string, normalizedPage: string): MatchHit {
 }
 
 /**
- * Digit-boundary regex: no digit or decimal point immediately before, and no
- * "(optionally .)digit" immediately after — so "24" never matches inside "124"
- * or "24.99". Built via the RegExp constructor because lookbehind syntax is
- * newer than the project's ES2017 target (runtime Node supports it).
+ * Digit-boundary regex with thousands-separator tolerance. Boundaries: not
+ * preceded by a digit, decimal point, or thousands-comma, and not followed by
+ * "(optionally , or .)digit" — so "24" never matches inside "124" or "24.99",
+ * and "5123" matches "5,123" but NOT "5,123,999" (the trailing ",999" fails the
+ * right boundary) nor "5,123.4" (a different, decimal number). Built via the
+ * RegExp constructor because lookbehind syntax is newer than the project's
+ * ES2017 target (runtime Node supports it).
  */
 function numberBoundaryRegex(value: string): RegExp {
-  return new RegExp(`(?<![\\d.])${escapeRegExp(value)}(?!\\.?\\d)`);
+  return new RegExp(`(?<![\\d.,])${thousandsTolerantCore(value)}(?![,.]?\\d)`);
+}
+
+/**
+ * Regex source that matches `value` allowing an OPTIONAL thousands separator (a
+ * comma) between the integer's right-anchored 3-digit groups — so a claim "5123"
+ * matches a page rendering "5,123" as well as "5123", but a genuinely-present
+ * count is no longer false-rejected by comma formatting.
+ *
+ * Only the comma (en-US) separator is tolerated, not a space: after whitespace
+ * collapse an inter-number space is indistinguishable from a space-grouped
+ * thousands mark, so allowing it would over-match across two adjacent numbers.
+ * The fractional part (if any) is matched exactly. Grouping never widens the
+ * match unsoundly — numberBoundaryRegex's digit-group boundaries still reject a
+ * longer number ("5,123,999") or a decimal ("5,123.4"), and a middle/last group
+ * can't be matched on its own because it is preceded by a comma the left
+ * boundary forbids. Non-numeric values fall back to an escaped literal.
+ */
+function thousandsTolerantCore(value: string): string {
+  if (!/^\d+(\.\d+)?$/.test(value)) return escapeRegExp(value);
+  const [intPart, fracPart] = value.split(".");
+  const groups: string[] = [];
+  for (let end = intPart.length; end > 0; end -= 3) {
+    groups.unshift(intPart.slice(Math.max(0, end - 3), end));
+  }
+  const intPattern = groups.join("[,]?");
+  return fracPart === undefined ? intPattern : `${intPattern}\\.${fracPart}`;
 }
 
 /** Candidate renderings of a numeric value: "45" ↔ "45.00", "6.5" ↔ "6.50", "24.50" ↔ "24.5". */
