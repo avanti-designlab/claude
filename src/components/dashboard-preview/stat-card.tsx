@@ -43,6 +43,14 @@ export interface StatCardProps {
   countDelay?: number;
   /** Let the glow tile's bloom join the entrance choreography. */
   bloom?: boolean;
+  /**
+   * Corner-arrow behavior (live-dashboard use, additive):
+   *  - undefined — the preview's decorative arrow button (default, unchanged).
+   *  - string    — the arrow is a REAL link to that route.
+   *  - null      — no arrow at all (the tile has no destination yet; a live
+   *    dashboard never shows a dead control).
+   */
+  href?: string | null;
   className?: string;
 }
 
@@ -135,6 +143,7 @@ export function StatCard({
   tone = "plain",
   countDelay = 0,
   bloom = false,
+  href,
   className,
 }: StatCardProps) {
   const spec = TONES[tone];
@@ -151,7 +160,14 @@ export function StatCard({
           <span aria-hidden className={cn("size-1.5 rounded-full", spec.chip)} />
           {label}
         </p>
-        <ArrowButton label={`View ${label}`} size="sm" tone={spec.arrow} />
+        {href === null ? null : (
+          <ArrowButton
+            label={`View ${label}`}
+            size="sm"
+            tone={spec.arrow}
+            href={href}
+          />
+        )}
       </div>
 
       <div className="flex items-end justify-between gap-3">

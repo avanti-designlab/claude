@@ -23,6 +23,7 @@
  * (a visual target M19 will match), not in src/components/ui.
  */
 
+import Link from "next/link";
 import { ArrowUpRightIcon } from "lucide-react";
 import { cn } from "@/lib/theme/utils";
 
@@ -71,6 +72,12 @@ export interface ArrowButtonProps {
   label: string;
   tone?: ArrowButtonTone;
   size?: ArrowButtonSize;
+  /**
+   * Real destination (live-dashboard use, additive): when set, the arrow
+   * renders as a Next <Link> with identical styling so the navigation is
+   * REAL, not decorative. Omit for the preview's inert showcase button.
+   */
+  href?: string;
   className?: string;
 }
 
@@ -78,32 +85,43 @@ export function ArrowButton({
   label,
   tone = "ink",
   size = "md",
+  href,
   className,
 }: ArrowButtonProps) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
+  const classes = cn(
+    "group/arrow inline-flex shrink-0 items-center justify-center rounded-full outline-none",
+    "transition-[transform,box-shadow,background-color,color,border-color] duration-200",
+    "motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-105 motion-safe:active:scale-95",
+    "focus-visible:ring-[3px] focus-visible:ring-ring/50",
+    (tone === "onColor" || tone === "surface" || tone === "onGlow") &&
+      "focus-visible:ring-surface-raised/60",
+    TONE[tone],
+    SIZE[size].button,
+    className
+  );
+
+  const glyph = (
+    <ArrowUpRightIcon
       className={cn(
-        "group/arrow inline-flex shrink-0 items-center justify-center rounded-full outline-none",
-        "transition-[transform,box-shadow,background-color,color,border-color] duration-200",
-        "motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-105 motion-safe:active:scale-95",
-        "focus-visible:ring-[3px] focus-visible:ring-ring/50",
-        (tone === "onColor" || tone === "surface" || tone === "onGlow") &&
-          "focus-visible:ring-surface-raised/60",
-        TONE[tone],
-        SIZE[size].button,
-        className
+        SIZE[size].icon,
+        "transition-transform duration-200",
+        "motion-safe:group-hover/arrow:translate-x-px motion-safe:group-hover/arrow:-translate-y-px"
       )}
-    >
-      <ArrowUpRightIcon
-        className={cn(
-          SIZE[size].icon,
-          "transition-transform duration-200",
-          "motion-safe:group-hover/arrow:translate-x-px motion-safe:group-hover/arrow:-translate-y-px"
-        )}
-        strokeWidth={2.25}
-      />
+      strokeWidth={2.25}
+    />
+  );
+
+  if (href) {
+    return (
+      <Link href={href} aria-label={label} className={classes}>
+        {glyph}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" aria-label={label} className={classes}>
+      {glyph}
     </button>
   );
 }

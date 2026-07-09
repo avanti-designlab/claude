@@ -5,7 +5,7 @@
  */
 
 /** Where a successful sign-in (and the top-bar wordmark) lands. */
-export const APP_HOME = "/clients";
+export const APP_HOME = "/dashboard";
 
 /** The public login route (mirrors guards' DEFAULT_LOGIN_PATH). */
 export const LOGIN_PATH = "/login";
@@ -17,6 +17,7 @@ export interface AppNavItem {
 
 /** Primary in-shell destinations shown in the top bar. */
 export const APP_NAV: AppNavItem[] = [
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/clients", label: "Clients" },
   { href: "/onboarding", label: "Onboard a client" },
 ];

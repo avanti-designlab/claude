@@ -1,0 +1,75 @@
+import type { LucideIcon } from "lucide-react";
+import { RadarIcon } from "lucide-react";
+
+import { WashPill } from "@/components/dashboard-preview";
+
+/**
+ * Honest pending states for dashboard modules with NO real data source yet
+ * (HONESTY RULE: the live dashboard never shows a fake number — a module
+ * either renders real workspace data or says exactly why it can't). These are
+ * deliberately QUIET — dashed borders, muted tones, no glow, no animation —
+ * so a pending module never competes with real data for attention.
+ */
+
+/**
+ * A "coming online" tile: which module, and what has to ship before it lights
+ * up. Server-safe (pure markup) — used in the coming-online strip.
+ */
+export function PendingModuleCard({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex h-full items-start gap-3 rounded-lg border border-dashed border-border p-4">
+      <span
+        aria-hidden
+        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-overlay"
+      >
+        <Icon className="size-4 text-muted" strokeWidth={2} />
+      </span>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-ink">{title}</span>
+          <WashPill tone="gold">Not connected yet</WashPill>
+        </div>
+        <p className="text-xs leading-5 text-muted">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Visibility Score's pending state, shaped like the gauge it will become
+ * (a dashed ring where the resolve moment will live) so the hero composition
+ * matches the approved preview without inventing a score. Foregrounds are the
+ * hero card's MODE-AWARE treatment: derived on-accent tokens on the light
+ * mode's vivid-blue fill, ink/muted on the dark mode's navy fill — pure token
+ * choices, same as the preview's HERO classes.
+ */
+export function PendingGauge() {
+  return (
+    <div className="flex max-w-[15rem] flex-col items-center gap-3 text-center">
+      <span
+        aria-hidden
+        className="flex size-36 items-center justify-center rounded-full border-2 border-dashed border-accent-foreground/30 sm:size-40 dark:border-ink/25"
+      >
+        <RadarIcon
+          className="size-8 text-accent-foreground/70 dark:text-muted"
+          strokeWidth={1.75}
+        />
+      </span>
+      <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-accent-foreground/85 dark:text-ink/85">
+        Visibility Score
+      </p>
+      <p className="text-xs leading-5 text-accent-foreground/70 dark:text-muted">
+        Not connected yet — the score resolves here when the visibility
+        tracker (M3) comes online.
+      </p>
+    </div>
+  );
+}
