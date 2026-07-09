@@ -16,6 +16,7 @@
  * rides inside the existing jsonb.)
  */
 
+import type { CompliancePrescreen } from "@/lib/production/content";
 import type { HumanizationResult } from "@/lib/types/db";
 import type { DetectorReading } from "./detector";
 import type { DriftExcerpt } from "./drift";
@@ -23,8 +24,32 @@ import type { DriftExcerpt } from "./drift";
 /** The M9 gate outcome. `flagged_for_human` = a human must resolve before it can proceed to approval. */
 export type HumanizationVerdict = "passed" | "flagged_for_human";
 
-/** Why an item was flagged (empty when passed). Reported, never hidden. */
-export type FlagReason = "meaning_drift" | "voice_drift" | "detection_above_threshold";
+/**
+ * Why an item was flagged (empty when passed). Reported, never hidden.
+ * `compliance_regression` = the humanizer's rewrite introduced a NEW block
+ * violation, or DROPPED a required element the original satisfied — the humanized
+ * text is never applied in that case (the compliant original is kept).
+ */
+export type FlagReason =
+  | "meaning_drift"
+  | "voice_drift"
+  | "detection_above_threshold"
+  | "compliance_regression";
+
+/**
+ * How the HUMANIZED body's compliance screen compares to the ORIGINAL's — the
+ * signal behind `compliance_regression`. M9 flags + refuses to apply the humanized
+ * text on a regression; it NEVER writes the compliance_review verdict (that stays
+ * the independent Compliance gate's — M9 flags, it does not self-clear).
+ */
+export interface ComplianceRegression {
+  /** True when the humanizer introduced a new block or dropped a required element. */
+  regressed: boolean;
+  /** Block rule ids present on the humanized body but NOT on the original. */
+  newBlockRuleIds: string[];
+  /** Required-element rule ids satisfied on the original but MISSING on the humanized body. */
+  droppedRequiredRuleIds: string[];
+}
 
 /**
  * The record persisted to `content_items.humanization`. A strict SUPERSET of the
@@ -76,6 +101,15 @@ export interface HumanizationRecord extends HumanizationResult {
     voice: DriftExcerpt[];
     detected: boolean;
   };
+  /**
+   * FRESH compliance pre-screen computed on the SHIPPING body (the humanized text
+   * when applied, else the kept original). Attached so the downstream Compliance
+   * gate assists on the actual shipping text, not M8's stale pre-humanization
+   * screen. It is a guardrail summary, NOT the compliance_review verdict.
+   */
+  compliancePrescreen: CompliancePrescreen;
+  /** Original-vs-humanized compliance delta driving `compliance_regression`. */
+  complianceRegression: ComplianceRegression;
 }
 
 /* ------------------------------------------------------------------ */
@@ -117,4 +151,21 @@ export interface AuthenticityVerdictView {
   quorum: { required: number | null; met: boolean | null };
   thresholds: { passAt: number | null; minDetectors: number | null; requireUnanimous: boolean | null };
   drift: { meaning: DriftExcerpt[]; voice: DriftExcerpt[]; detected: boolean };
+  /**
+   * FRESH compliance pre-screen of the shipping body (null when M9 has not run or
+   * the row is a legacy/minimal record). The Compliance gate assists on THIS, not
+   * M8's stale pre-humanization screen.
+   */
+  compliancePrescreen: CompliancePrescreenView | null;
+  /** Original-vs-humanized compliance delta (safe defaults when absent/malformed). */
+  complianceRegression: ComplianceRegression;
+}
+
+/** Defensively-parsed compliance pre-screen for the read-side view. */
+export interface CompliancePrescreenView {
+  pass: boolean | null;
+  blockCount: number | null;
+  warnCount: number | null;
+  blockedRuleIds: string[];
+  disclaimer: string | null;
 }

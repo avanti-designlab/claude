@@ -29,6 +29,8 @@ function record(overrides: Partial<HumanizationRecord> = {}): HumanizationRecord
     quorum: { required: 2, met: true },
     thresholds: { passAt: 0.3, minDetectors: 2, requireUnanimous: true },
     drift: { meaning: [], voice: [], detected: false },
+    compliancePrescreen: { pass: true, blockCount: 0, warnCount: 0, blockedRuleIds: [], disclaimer: "not legal review" },
+    complianceRegression: { regressed: false, newBlockRuleIds: [], droppedRequiredRuleIds: [] },
     ...overrides,
   };
 }
@@ -71,6 +73,42 @@ describe("authenticityVerdictView — defensive parse", () => {
     expect(view!.detectors).toHaveLength(2);
     expect(view!.detectionScore).toBe(0.2);
     expect(view!.flaggedReasons).toEqual(["detection_above_threshold"]);
+    // FIX 3: the fresh compliance prescreen + regression delta ride into the view.
+    expect(view!.compliancePrescreen).toEqual({
+      pass: true,
+      blockCount: 0,
+      warnCount: 0,
+      blockedRuleIds: [],
+      disclaimer: "not legal review",
+    });
+    expect(view!.complianceRegression).toEqual({ regressed: false, newBlockRuleIds: [], droppedRequiredRuleIds: [] });
+  });
+
+  it("FIX 3: surfaces a regression + a blocked fresh prescreen for the downstream gate", () => {
+    const view = authenticityVerdictView(
+      record({
+        passes: false,
+        verdict: "flagged_for_human",
+        flaggedReasons: ["compliance_regression"],
+        compliancePrescreen: {
+          pass: false,
+          blockCount: 1,
+          warnCount: 0,
+          blockedRuleIds: ["real-estate.fair-housing-preference"],
+          disclaimer: "not legal review",
+        },
+        complianceRegression: {
+          regressed: true,
+          newBlockRuleIds: ["real-estate.fair-housing-preference"],
+          droppedRequiredRuleIds: [],
+        },
+      }),
+    );
+    expect(view!.flaggedReasons).toEqual(["compliance_regression"]);
+    expect(view!.compliancePrescreen?.pass).toBe(false);
+    expect(view!.compliancePrescreen?.blockedRuleIds).toEqual(["real-estate.fair-housing-preference"]);
+    expect(view!.complianceRegression.regressed).toBe(true);
+    expect(view!.complianceRegression.newBlockRuleIds).toEqual(["real-estate.fair-housing-preference"]);
   });
 
   it("returns null when M9 has not run (null / non-object humanization)", () => {
@@ -88,6 +126,9 @@ describe("authenticityVerdictView — defensive parse", () => {
     expect(view!.humanized).toBe(true);
     expect(view!.detectionScore).toBe(0.4);
     expect(view!.detectors).toEqual([]);
+    // A legacy record carries no compliance fields — the view fails safe.
+    expect(view!.compliancePrescreen).toBeNull();
+    expect(view!.complianceRegression).toEqual({ regressed: false, newBlockRuleIds: [], droppedRequiredRuleIds: [] });
   });
 
   it("hostile / malformed jsonb is dead weight — safe defaults, never a throw, never a forced pass", () => {
@@ -109,5 +150,8 @@ describe("authenticityVerdictView — defensive parse", () => {
     expect(view!.detectionScore).toBeNull();
     expect(view!.drift.meaning).toEqual([{ kind: "statistic", excerpt: "9%" }]); // only well-formed excerpts
     expect(view!.quorum).toEqual({ required: null, met: null });
+    // Malformed/absent compliance fields ⇒ safe defaults, never a forced pass.
+    expect(view!.compliancePrescreen).toBeNull();
+    expect(view!.complianceRegression).toEqual({ regressed: false, newBlockRuleIds: [], droppedRequiredRuleIds: [] });
   });
 });

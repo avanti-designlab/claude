@@ -33,6 +33,8 @@ import type {
 import type { DriftExcerpt } from "./drift";
 import type {
   AuthenticityVerdictView,
+  CompliancePrescreenView,
+  ComplianceRegression,
   DetectorVerdictView,
   FlagReason,
   HumanizationRecord,
@@ -94,7 +96,12 @@ function strOrNull(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-const FLAG_REASONS: readonly FlagReason[] = ["meaning_drift", "voice_drift", "detection_above_threshold"];
+const FLAG_REASONS: readonly FlagReason[] = [
+  "meaning_drift",
+  "voice_drift",
+  "detection_above_threshold",
+  "compliance_regression",
+];
 const DRIFT_KINDS: readonly DriftExcerpt["kind"][] = ["statistic", "superlative", "banned_phrase"];
 
 function toDriftExcerpts(value: unknown): DriftExcerpt[] {
@@ -124,6 +131,33 @@ function toDetectorViews(value: unknown): DetectorVerdictView[] {
     });
   }
   return out;
+}
+
+/** String-only members of a (possibly hostile) array; anything else dropped. */
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** The FRESH post-humanization compliance prescreen (or null when absent/malformed). */
+function toCompliancePrescreenView(value: unknown): CompliancePrescreenView | null {
+  if (!isObject(value)) return null;
+  return {
+    pass: boolOrNull(value.pass),
+    blockCount: numOrNull(value.blockCount),
+    warnCount: numOrNull(value.warnCount),
+    blockedRuleIds: toStringArray(value.blockedRuleIds),
+    disclaimer: strOrNull(value.disclaimer),
+  };
+}
+
+/** The original-vs-humanized compliance delta (safe defaults when absent/malformed). */
+function toComplianceRegression(value: unknown): ComplianceRegression {
+  const v = isObject(value) ? value : {};
+  return {
+    regressed: v.regressed === true,
+    newBlockRuleIds: toStringArray(v.newBlockRuleIds),
+    droppedRequiredRuleIds: toStringArray(v.droppedRequiredRuleIds),
+  };
 }
 
 /**
@@ -178,6 +212,8 @@ export function authenticityVerdictView(humanization: unknown): AuthenticityVerd
       voice: toDriftExcerpts(drift.voice),
       detected: drift.detected === true,
     },
+    compliancePrescreen: toCompliancePrescreenView(h.compliancePrescreen),
+    complianceRegression: toComplianceRegression(h.complianceRegression),
   };
 }
 

@@ -61,7 +61,6 @@ export {
   type GenerateContentInput,
   type GenerateContentOutcome,
   type GenerationReport,
-  type CompliancePrescreen,
 } from "./generate";
 
 // The constrain seam (voice + playbook + compliance → spec) — reused by tests/callers.
@@ -73,8 +72,19 @@ export {
   type DraftRequest,
 } from "./constrain";
 
-// The anti-fabrication grounding pass + compliance pre-screen.
-export { findUngroundedClaims, screenCompliance, type UngroundedClaim } from "./ground";
+// The anti-fabrication grounding pass + voice.dont screen + AEO-formatting check
+// + the compliance pre-screen (its summary shape + summarizer shared with M9).
+export {
+  findUngroundedClaims,
+  findBannedVoicePhrases,
+  evaluateAeoFormatting,
+  screenCompliance,
+  summarizeCompliancePrescreen,
+  type UngroundedClaim,
+  type BannedVoicePhrase,
+  type AeoFormattingFinding,
+  type CompliancePrescreen,
+} from "./ground";
 
 // Row mapping + read shapes (the pre-approval insert-row builder + the pinned literals).
 export {

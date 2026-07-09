@@ -19,11 +19,20 @@
  * verdicts.
  */
 
-import type { ComplianceResult } from "@/lib/skills/compliance";
 import type { Playbook, Vertical } from "@/lib/types/playbook";
 import type { VoiceProfile } from "@/lib/types/brand";
 import { buildGenerationSpec, type DraftRequest } from "./constrain";
-import { findUngroundedClaims, screenCompliance, type UngroundedClaim } from "./ground";
+import {
+  evaluateAeoFormatting,
+  findBannedVoicePhrases,
+  findUngroundedClaims,
+  screenCompliance,
+  summarizeCompliancePrescreen,
+  type AeoFormattingFinding,
+  type BannedVoicePhrase,
+  type CompliancePrescreen,
+  type UngroundedClaim,
+} from "./ground";
 import type { ContentGenerationProvider } from "./provider";
 import type { GeneratableContentType } from "./types";
 
@@ -31,17 +40,8 @@ import type { GeneratableContentType } from "./types";
 /* Report + outcome contracts                                          */
 /* ------------------------------------------------------------------ */
 
-/** Compact, serializable compliance pre-screen summary (the full verdict is the gate's job). */
-export interface CompliancePrescreen {
-  /** No known-bad pattern detected. NOT a certification — see the skill disclaimer. */
-  pass: boolean;
-  blockCount: number;
-  warnCount: number;
-  /** Distinct block-violation rule ids (e.g. "cannabis.health-claims"). */
-  blockedRuleIds: string[];
-  /** The compliance skill's honest-scope disclaimer, carried through. */
-  disclaimer: string;
-}
+// `CompliancePrescreen` + its summarizer live in ./ground (shared with M9's
+// post-humanization re-screen); re-exported from the M8 index for stability.
 
 /**
  * What the draft carries into the pipeline — the evidence the review gates,
@@ -61,6 +61,10 @@ export interface GenerationReport {
   };
   /** Candidate ungrounded factual assertions — flagged, never emitted as verified fact. */
   ungroundedClaims: UngroundedClaim[];
+  /** Banned `voice.dont` phrases present in M8's OWN generated draft — flagged, never gated. */
+  voiceViolations: BannedVoicePhrase[];
+  /** AEO direct-answer-opening check over the generated body — flagged, never gated. */
+  aeoFormatting: AeoFormattingFinding;
   /** Deterministic compliance guardrail result (NOT the compliance-review verdict). */
   compliancePrescreen: CompliancePrescreen;
 }
@@ -84,16 +88,6 @@ export interface GenerateContentInput {
 /* ------------------------------------------------------------------ */
 /* generateContentDraft                                                */
 /* ------------------------------------------------------------------ */
-
-function summarizePrescreen(result: ComplianceResult): CompliancePrescreen {
-  return {
-    pass: result.pass,
-    blockCount: result.violations.length,
-    warnCount: result.warnings.length,
-    blockedRuleIds: [...new Set(result.violations.map((v) => v.ruleId))].sort(),
-    disclaimer: result.disclaimer,
-  };
-}
 
 /**
  * Generate one draft. The provider is injected; a thrown/rejected provider (the
@@ -123,6 +117,8 @@ export async function generateContentDraft(
   if (body === "") return { ok: false, reason: "empty_generation" };
 
   const ungroundedClaims = findUngroundedClaims(body, spec.groundingFacts);
+  const voiceViolations = findBannedVoicePhrases(body, spec.voice.dont);
+  const aeoFormatting = evaluateAeoFormatting(spec.contentType, body);
   const prescreen = screenCompliance(spec.playbook.vertical, spec.contentType, body);
 
   return {
@@ -139,7 +135,9 @@ export async function generateContentDraft(
         targetPrompt: spec.playbook.targetPrompt,
       },
       ungroundedClaims,
-      compliancePrescreen: summarizePrescreen(prescreen),
+      voiceViolations,
+      aeoFormatting,
+      compliancePrescreen: summarizeCompliancePrescreen(prescreen),
     },
   };
 }

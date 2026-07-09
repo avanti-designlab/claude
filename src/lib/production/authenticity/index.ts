@@ -80,7 +80,9 @@ export {
   type HumanizationRecord,
   type HumanizationVerdict,
   type FlagReason,
+  type ComplianceRegression,
   type AuthenticityVerdictView,
+  type CompliancePrescreenView,
   type DetectorVerdictView,
 } from "./types";
 

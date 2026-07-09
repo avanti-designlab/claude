@@ -40,6 +40,17 @@ describe("recheckDrift — meaning", () => {
     expect(drift.meaning).toEqual([]);
     expect(drift.voice).toEqual([]);
   });
+
+  it("flags an INTRODUCED '20%' even though the original contains '2024' (R1: value-exact, not digit-substring)", () => {
+    // Old digit-substring grounding wrongly grounded '20' inside '2024'; value-exact flags it.
+    const original = "Our 2024 market report covers expat buyers.";
+    const humanized = "Our 2024 market report covers expat buyers. Prices rose 20% this year.";
+    const drift = recheckDrift({ original, humanized, voice: VOICE });
+    expect(drift.detected).toBe(true);
+    expect(drift.meaning.map((m) => m.excerpt)).toContain("20%");
+    // The legitimately-carried '2024' is still grounded (present in the original) — not flagged.
+    expect(drift.meaning.map((m) => m.excerpt)).not.toContain("2024");
+  });
 });
 
 describe("recheckDrift — voice", () => {

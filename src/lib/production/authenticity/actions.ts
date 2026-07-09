@@ -14,7 +14,9 @@ import {
 } from "./persist";
 import { authenticityVerdictView } from "./rows";
 import type { AuthenticityVerdictView } from "./types";
-import type { ContentItemStatus } from "@/lib/types/db";
+import type { ComplianceContentType } from "@/lib/skills/compliance";
+import type { ContentItemStatus, ContentItemType } from "@/lib/types/db";
+import type { Vertical } from "@/lib/types/playbook";
 
 /**
  * M9 Humanization + AI-detection authenticity gate — server actions (doc 05 Part
@@ -97,6 +99,26 @@ const READ_FAILED_ERROR =
 /** Statuses M9 may run on — a fresh draft or one already in the review queue (re-humanize). */
 const RUNNABLE_STATUSES: readonly ContentItemStatus[] = ["draft", "in_review"];
 
+/**
+ * Map a `content_items.type` to the compliance skill's content-type taxonomy for
+ * the post-humanization re-screen (mirrors M8's constrain.toComplianceContentType,
+ * extended to the full column: caption → social_caption; schema_copy → page).
+ */
+function toComplianceContentType(type: ContentItemType): ComplianceContentType {
+  switch (type) {
+    case "blog":
+      return "blog";
+    case "faq":
+      return "faq";
+    case "pillar":
+      return "page";
+    case "caption":
+      return "social_caption";
+    case "schema_copy":
+      return "page";
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* runAuthenticityGate — humanize → detect → record → advance          */
 /* ------------------------------------------------------------------ */
@@ -148,6 +170,23 @@ export async function runAuthenticityGate(input: {
     }
     if (kitRes.kit === null) return { ok: false, reason: "no_brand_kit", error: NO_BRAND_KIT_ERROR };
 
+    // The client's VERTICAL drives the MANDATORY post-humanization compliance
+    // re-screen (a humanizer can reword out a required disclaimer or into a vertical
+    // violation that drift can't see). RLS-scoped read; a cross-tenant/nonexistent
+    // id is the SAME empty observation (doc 03 §4). An unknown vertical fails closed
+    // inside the compliance skill — never a silent pass.
+    const clientRes = await supabase
+      .from("clients")
+      .select("id, vertical")
+      .eq("id", draft.client_id)
+      .maybeSingle();
+    if (clientRes.error) {
+      logAuthenticityFailure("draft_read", null);
+      return { ok: false, reason: "write_failed", error: WRITE_FAILED_ERROR };
+    }
+    if (!clientRes.data) return { ok: false, reason: "not_found", error: DRAFT_NOT_FOUND_ERROR };
+    const vertical = (clientRes.data as { vertical: string }).vertical as Vertical;
+
     // HUMANIZE → DETECT via the injected (deferred) providers. Unavailable → honest
     // unavailable, NOTHING persisted.
     const outcome = await authenticate({
@@ -155,6 +194,8 @@ export async function runAuthenticityGate(input: {
       voice: kitRes.kit.voiceProfile,
       humanizer: resolveHumanizerProvider(),
       detectors: resolveDetectorPanel(),
+      vertical,
+      contentType: toComplianceContentType(draft.type),
     });
     if (!outcome.ok) {
       if (outcome.reason === "humanizer_unavailable") {

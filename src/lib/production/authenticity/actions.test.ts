@@ -119,11 +119,12 @@ function setup(
   return fake;
 }
 
-/** Happy-path script: draft read → locked kit → humanization update. */
+/** Happy-path script: draft read → locked kit → client vertical → humanization update. */
 function happyScript(draftOverrides: Record<string, unknown> = {}): FakeScript {
   return {
     content_items: { select: { data: draftRow(draftOverrides) }, update: { data: { id: "ci-1" } } },
     brand_kits: { select: { data: [lockedRow()] } },
+    clients: { select: { data: { id: CLIENT_ID, vertical: "real-estate" } } },
   };
 }
 
@@ -229,6 +230,28 @@ describe("runAuthenticityGate — never advances to approved/published", () => {
     expect(values).not.toHaveProperty("body"); // drifted text discarded
     expect(values.status).toBe("in_review");
   });
+
+  it("humanizer introduces a Fair-Housing violation ⇒ flagged, humanized body NOT persisted, no review verdict", async () => {
+    // A rewrite that is compliant-clean to drift (no stat/superlative/banned phrase) but a
+    // Fair-Housing preference violation — caught only by the post-humanization compliance re-screen.
+    const violating = new ScriptedHumanizerProvider("hz").rewrite(
+      () => "This home is perfect for growing families near downtown.",
+    );
+    const fake = setup(happyScript(), OPERATOR_CLAIMS, violating, [
+      new ScriptedDetectionProvider("d1", 0.05),
+      new ScriptedDetectionProvider("d2", 0.05), // detection would pass
+    ]);
+    const res = await runAuthenticityGate({ contentItemId: DRAFT_ID });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.flaggedReasons).toContain("compliance_regression");
+    expect(res.verdict.passes).toBe(false);
+
+    const values = contentUpdate(fake)!.values as Record<string, unknown>;
+    expect(values).not.toHaveProperty("body"); // non-compliant humanized text discarded (original kept)
+    expect(values.status).toBe("in_review"); // still only the review stage
+    expect(values).not.toHaveProperty("compliance_review"); // M9 flags; it never writes the verdict
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -298,6 +321,7 @@ describe("runAuthenticityGate — deferred vendors", () => {
         update: { error: { code: "23514", message: "violates check; body='secret humanized text' score=0.9" } },
       },
       brand_kits: { select: { data: [lockedRow()] } },
+      clients: { select: { data: { id: CLIENT_ID, vertical: "real-estate" } } },
     });
     const res = await runAuthenticityGate({ contentItemId: DRAFT_ID });
     expect(res).toMatchObject({ ok: false, reason: "write_failed" });

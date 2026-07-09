@@ -36,6 +36,8 @@ describe("authenticate — happy pass", () => {
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: cleanHumanizer(),
       detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.2)],
     });
@@ -54,6 +56,8 @@ describe("authenticate — happy pass", () => {
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: cleanHumanizer(),
       detectors: [
         new ScriptedDetectionProvider("d1", 0.05),
@@ -79,6 +83,8 @@ describe("authenticate — CANNOT pass the panel ⇒ flagged, never force-passed
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: cleanHumanizer(),
       detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.85)],
     });
@@ -104,6 +110,8 @@ describe("authenticate — meaning/voice drift is caught (and drifted text never
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: drifting,
       detectors: [new ScriptedDetectionProvider("d1", 0.05), new ScriptedDetectionProvider("d2", 0.05)], // would pass
     });
@@ -124,6 +132,8 @@ describe("authenticate — meaning/voice drift is caught (and drifted text never
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: drifting,
       detectors: [new ScriptedDetectionProvider("d1", 0.05), new ScriptedDetectionProvider("d2", 0.05)],
     });
@@ -135,11 +145,107 @@ describe("authenticate — meaning/voice drift is caught (and drifted text never
   });
 });
 
+describe("authenticate — post-humanization compliance re-screen (drop/violation the drift can't see)", () => {
+  const RE_DETECTORS = () => [new ScriptedDetectionProvider("d1", 0.05), new ScriptedDetectionProvider("d2", 0.05)];
+
+  it("humanizer DROPS a required disclaimer ⇒ compliance_regression flagged, original kept", async () => {
+    // Original satisfies the real-estate regulatory-freshness required element ("Last verified");
+    // the humanizer rewrites it OUT — neither a stat/superlative nor a banned phrase, so drift passes.
+    const original = "Golden visa rules for Dubai buyers. Last verified January 2025. Foreign buyers can apply.";
+    const dropping = new ScriptedHumanizerProvider("hz").rewrite(
+      () => "Golden visa rules for Dubai buyers. Foreign buyers can apply.",
+    );
+    const res = await authenticate({
+      body: original,
+      voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
+      humanizer: dropping,
+      detectors: RE_DETECTORS(), // detection would pass
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.record.verdict).toBe("flagged_for_human");
+    expect(res.record.passes).toBe(false);
+    expect(res.record.flaggedReasons).toContain("compliance_regression");
+    // Drift did NOT catch it (no new stat/superlative/banned phrase) — compliance did.
+    expect(res.record.drift.detected).toBe(false);
+    // The dropped required element is surfaced for the human resolver.
+    expect(res.record.complianceRegression.droppedRequiredRuleIds).toContain("real-estate.regulatory-freshness");
+    // The humanized (non-compliant) text is NOT applied — the compliant original is kept.
+    expect(res.record.humanized).toBe(false);
+    expect(res.bodyToPersist).toBeNull();
+  });
+
+  it("humanizer INTRODUCES a Fair-Housing block phrase ⇒ compliance_regression flagged, original kept", async () => {
+    // "perfect for growing families" is a Fair-Housing preference violation but NOT a stat/superlative/banned phrase.
+    const original = "This home has four bedrooms and a large yard near downtown.";
+    const violating = new ScriptedHumanizerProvider("hz").rewrite(
+      () => "This home is perfect for growing families, with four bedrooms near downtown.",
+    );
+    const res = await authenticate({
+      body: original,
+      voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
+      humanizer: violating,
+      detectors: RE_DETECTORS(),
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.record.flaggedReasons).toContain("compliance_regression");
+    expect(res.record.drift.detected).toBe(false); // drift is blind to it — compliance re-screen catches it
+    expect(res.record.complianceRegression.newBlockRuleIds).toContain("real-estate.fair-housing-preference");
+    expect(res.record.humanized).toBe(false);
+    expect(res.bodyToPersist).toBeNull();
+  });
+
+  it("clean humanization ⇒ applied + FRESH prescreen (on the shipping body) attached", async () => {
+    const res = await authenticate({
+      body: ORIGINAL,
+      voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
+      humanizer: cleanHumanizer(),
+      detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.2)],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.record.verdict).toBe("passed");
+    expect(res.record.humanized).toBe(true);
+    expect(res.bodyToPersist).toBe(CLEAN);
+    // The fresh prescreen describes the SHIPPING (humanized) body — clean.
+    expect(res.record.compliancePrescreen.pass).toBe(true);
+    expect(res.record.compliancePrescreen.blockCount).toBe(0);
+    expect(res.record.compliancePrescreen.disclaimer).toContain("not legal review");
+    expect(res.record.complianceRegression.regressed).toBe(false);
+  });
+
+  it("M9 self-clear guard: the record carries NO review-verdict columns (it flags, it never approves)", async () => {
+    const res = await authenticate({
+      body: ORIGINAL,
+      voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
+      humanizer: cleanHumanizer(),
+      detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.2)],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The compliance prescreen is a GUARDRAIL summary, never the compliance_review verdict.
+    expect(res.record).not.toHaveProperty("compliance_review");
+    expect(res.record).not.toHaveProperty("quality_review");
+    expect(res.record).not.toHaveProperty("status");
+  });
+});
+
 describe("authenticate — providers unavailable ⇒ honest, nothing to persist", () => {
   it("humanizer throws ⇒ humanizer_unavailable (never a silent pass)", async () => {
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: new ScriptedHumanizerProvider("hz").failNext(new Error("secret prompt inside")),
       detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.1)],
     });
@@ -150,6 +256,8 @@ describe("authenticate — providers unavailable ⇒ honest, nothing to persist"
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: new ScriptedHumanizerProvider("hz").rewrite(() => "   "),
       detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.1)],
     });
@@ -160,6 +268,8 @@ describe("authenticate — providers unavailable ⇒ honest, nothing to persist"
     const res = await authenticate({
       body: ORIGINAL,
       voice: VOICE,
+      vertical: "real-estate",
+      contentType: "blog",
       humanizer: cleanHumanizer(),
       detectors: [
         new ScriptedDetectionProvider("d1", 0.1),
@@ -174,7 +284,7 @@ describe("authenticate — providers unavailable ⇒ honest, nothing to persist"
   });
 
   it("an EMPTY detector panel (deferred vendors) ⇒ detectors_unavailable", async () => {
-    const res = await authenticate({ body: ORIGINAL, voice: VOICE, humanizer: cleanHumanizer(), detectors: [] });
+    const res = await authenticate({ body: ORIGINAL, voice: VOICE, vertical: "real-estate", contentType: "blog", humanizer: cleanHumanizer(), detectors: [] });
     expect(res).toMatchObject({ ok: false, reason: "detectors_unavailable" });
   });
 });
@@ -185,6 +295,8 @@ describe("authenticate — determinism", () => {
       authenticate({
         body: ORIGINAL,
         voice: VOICE,
+        vertical: "real-estate",
+        contentType: "blog",
         humanizer: cleanHumanizer(),
         detectors: [new ScriptedDetectionProvider("d1", 0.1), new ScriptedDetectionProvider("d2", 0.2)],
       });

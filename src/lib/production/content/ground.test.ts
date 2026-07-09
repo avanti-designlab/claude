@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { findUngroundedClaims, screenCompliance } from "./ground";
+import { evaluateAeoFormatting, findBannedVoicePhrases, findUngroundedClaims, screenCompliance } from "./ground";
 
 describe("findUngroundedClaims — statistics", () => {
   it("flags a percentage and a large number that the grounding facts don't support", () => {
@@ -22,6 +22,70 @@ describe("findUngroundedClaims — statistics", () => {
 
   it("ignores small bare counts as noise", () => {
     expect(findUngroundedClaims("Here are 3 tips and 5 steps.", [])).toEqual([]);
+  });
+});
+
+describe("findUngroundedClaims — value-exact numeric grounding (R1: no digit-substring under-flag)", () => {
+  it("FLAGS '98%' when a fact only contains '1980' ('98' must NOT match inside '1980')", () => {
+    const flags = findUngroundedClaims("Our approval rate is 98%.", ["We were founded in 1980."]);
+    expect(flags.map((f) => f.excerpt)).toContain("98%");
+  });
+
+  it("FLAGS '20%' when a fact only contains '2024' ('20' must NOT match inside '2024')", () => {
+    const flags = findUngroundedClaims("Prices rose 20% last year.", ["Report published in 2024."]);
+    expect(flags.map((f) => f.excerpt)).toContain("20%");
+  });
+
+  it("still grounds VALUE-EXACT matches (separator/format-insensitive)", () => {
+    const flags = findUngroundedClaims(
+      "The fee is $1,200 and we closed 500 homes at a 98% rate.",
+      ["Our fee is 1200 dollars.", "Closed 500 homes.", "A 98% satisfaction score."],
+    );
+    expect(flags).toEqual([]);
+  });
+
+  it("grounds '1,200' against '1200.00' (thousands + trailing-zero normalization)", () => {
+    expect(findUngroundedClaims("We manage 1,200 units.", ["Portfolio of 1200.00 units."])).toEqual([]);
+  });
+});
+
+describe("findBannedVoicePhrases — M8's own-output voice.dont screen (FIX 4)", () => {
+  it("flags banned dont-phrases present in the generated draft itself", () => {
+    const flags = findBannedVoicePhrases("Our cheap plans deliver pure hype.", ["cheap", "hype"]);
+    expect(flags.map((f) => f.excerpt).sort()).toEqual(["cheap", "hype"]);
+  });
+
+  it("is word-boundary aware (no hit inside a longer word) and dedupes markers", () => {
+    expect(findBannedVoicePhrases("We ship cheaply-made goods.", ["cheap", "cheap"])).toEqual([]);
+  });
+
+  it("returns [] when no banned phrase appears", () => {
+    expect(findBannedVoicePhrases("A calm, factual overview.", ["cheap", "hype"])).toEqual([]);
+  });
+});
+
+describe("evaluateAeoFormatting — direct-answer opening guardrail (R2)", () => {
+  it("flags a hedged/preamble FAQ opening (uses the aeo-audit skill's FAQ check)", () => {
+    const f = evaluateAeoFormatting("faq", "Well, that really depends on many factors we will explore.");
+    expect(f.check).toBe("faq_direct_answer");
+    expect(f.direct).toBe(false);
+    expect(f.reason).not.toBeNull();
+  });
+
+  it("passes a direct FAQ opening", () => {
+    const f = evaluateAeoFormatting("faq", "Yes. Foreign buyers can get a mortgage from most Dubai banks.");
+    expect(f.direct).toBe(true);
+    expect(f.reason).toBeNull();
+  });
+
+  it("applies the analog opening check to blog/pillar", () => {
+    const hedged = evaluateAeoFormatting("blog", "In this article, we will take a look at the buying process.");
+    expect(hedged.check).toBe("opening_directness");
+    expect(hedged.direct).toBe(false);
+
+    const direct = evaluateAeoFormatting("pillar", "The buying process has five clear steps. Here is each one.");
+    expect(direct.check).toBe("opening_directness");
+    expect(direct.direct).toBe(true);
   });
 });
 
