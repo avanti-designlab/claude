@@ -33,7 +33,10 @@
  *    only as a vault ref + SecretsResolver. It is resolved per call, revealed
  *    only into the Authorization header, never stored on the instance, and
  *    never present in any error (errors are composed from status + sanitized
- *    slug only).
+ *    slug only). The site must be connected over HTTPS — an http: base URL is
+ *    refused at construction (the password would cross the wire in cleartext)
+ *    — and every request states `redirect: "error"`, so the Authorization
+ *    header can never be re-sent wherever a redirect points.
  *  - FAILURE HONESTY: 401/403 → credential_rejected; 404 / unexposed meta →
  *    target_missing; HTML-instead-of-JSON (the wp-login redirect classic) →
  *    unexpected_response; other API errors → vendor_failure; transport →
@@ -51,7 +54,11 @@ import {
 } from "@/lib/change-management";
 import type { SecretsResolver } from "@/lib/connectors";
 import type { Json, SiteChangeMethod } from "@/lib/types/db";
-import { safeVendorCode, WriteMethodError } from "../shared/errors";
+import {
+  safeTransportDetail,
+  safeVendorCode,
+  WriteMethodError,
+} from "../shared/errors";
 import {
   basicAuthHeader,
   looksLikeHtml,
@@ -76,6 +83,8 @@ export interface WordPressSitePin {
   /**
    * The WordPress site's base URL (subdirectory installs supported, e.g.
    * `https://client.example.com/blog`). The ONLY place requests ever go.
+   * MUST be https: — the Application Password rides every request as a Basic
+   * Authorization header, so an http: base is refused at construction.
    */
   baseUrl: string;
 }
@@ -116,11 +125,16 @@ export class WordPressAdapter implements WriteMethodAdapter {
         `wordpress: property ${config.site.propertyId} has an unusable base URL ('${config.site.baseUrl}') — reconnect the property with the site's full https address`,
       );
     }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    if (parsed.protocol !== "https:") {
+      // HTTPS is NOT optional (Code Review Major 1): the Application Password
+      // travels as a Basic Authorization header on every request — over http:
+      // it would cross the network in cleartext. (Stock WordPress agrees: it
+      // disables Application Passwords entirely on non-SSL sites.) There is
+      // deliberately no dev-mode opt-out.
       throw new WriteMethodError(
         METHOD,
         "misconfigured",
-        `wordpress: property ${config.site.propertyId} base URL must be http(s), got '${parsed.protocol}'`,
+        `wordpress: property ${config.site.propertyId} must be connected over HTTPS (got '${parsed.protocol}') — this connection authenticates with an application password on every request, and WordPress itself disables application passwords on non-SSL sites; reconnect the property with its https:// address`,
       );
     }
     if (parsed.username || parsed.password) {
@@ -272,6 +286,16 @@ export class WordPressAdapter implements WriteMethodAdapter {
         `wordpress: target url '${target.url}' is not a valid URL`,
       );
     }
+    if (resolved.username || resolved.password) {
+      // Checked BEFORE the origin comparison, and the URL is never echoed —
+      // a userinfo-bearing URL is itself the thing carrying a credential
+      // (consistent with the constructor's non-echo of a userinfo base URL).
+      throw new WriteMethodError(
+        METHOD,
+        "unsupported_operation",
+        `wordpress: the change target's URL embeds credentials (userinfo) — credentials live in the secrets vault (auth_ref), never in a URL; refusing the operation before any request`,
+      );
+    }
     if (resolved.origin !== this.origin) {
       throw new WriteMethodError(
         METHOD,
@@ -313,14 +337,26 @@ export class WordPressAdapter implements WriteMethodAdapter {
     let status: number;
     let text: string;
     try {
-      const res = await this.fetchPort(url, { method, headers, body });
+      // `redirect: "error"` — a write must land at exactly the URL it was
+      // sent to; the port never follows a redirect (see FetchPortInit), so a
+      // redirecting site rejects here and surfaces as network_failure below.
+      const res = await this.fetchPort(url, {
+        method,
+        headers,
+        body,
+        redirect: "error",
+      });
       status = res.status;
       text = await res.text();
     } catch (err) {
+      // The transport detail is WHITELISTED (safeTransportDetail): only a
+      // machine-style code or error name — never err.message, which can carry
+      // arbitrary resolver/proxy/middlebox text.
+      const detail = safeTransportDetail(err);
       throw new WriteMethodError(
         METHOD,
         "network_failure",
-        `wordpress ${what}: could not reach ${this.origin} (${err instanceof Error ? err.message : String(err)})`,
+        `wordpress ${what}: could not reach ${this.origin}${detail ? ` (${detail})` : ""} — the request failed at the transport level (DNS, TLS, timeout, or a refused redirect); check the site's availability and the property's connection`,
       );
     }
     return this.decode(status, text, what);
@@ -411,19 +447,19 @@ export class WordPressAdapter implements WriteMethodAdapter {
 
     if (op.field === "meta") {
       const meta = entity.meta;
+      // PHP-empty-array quirk: a post type with NO meta registered for REST
+      // serializes its empty meta map as `[]` (an empty PHP array becomes a
+      // JSON array, not `{}`). That is a healthy response from a healthy site
+      // — the key is simply not exposed, same diagnosis as a missing key.
+      if (Array.isArray(meta) && meta.length === 0) {
+        throw this.metaKeyNotExposed(op.metaKey, what);
+      }
       if (meta === null || typeof meta !== "object" || Array.isArray(meta)) {
         throw this.unexpectedShape(what, "the REST response exposes no meta object");
       }
       const metaObj = meta as { [k: string]: Json };
       if (!Object.prototype.hasOwnProperty.call(metaObj, op.metaKey)) {
-        // Unregistered meta is a MISSING TARGET, refused before any write: WP
-        // silently drops writes to unregistered keys, which would break both
-        // write honesty and rollback.
-        throw new WriteMethodError(
-          METHOD,
-          "target_missing",
-          `wordpress ${what}: the meta field '${op.metaKey}' is not exposed by this site's REST API — the plugin that owns it (the AEO plugin or the site's SEO plugin) must register it before this fix can be written`,
-        );
+        throw this.metaKeyNotExposed(op.metaKey, what);
       }
       return metaObj[op.metaKey];
     }
@@ -434,6 +470,20 @@ export class WordPressAdapter implements WriteMethodAdapter {
       throw this.unexpectedShape(what, "the REST response has no alt_text field");
     }
     return alt;
+  }
+
+  /**
+   * Unregistered/unexposed meta is a MISSING TARGET: WP silently drops writes
+   * to unregistered keys, which would break both write honesty and rollback.
+   * Raised pre-write on the read path AND post-write on the direct-apply path
+   * (the write's echo not carrying the key means the site dropped it).
+   */
+  private metaKeyNotExposed(metaKey: string, what: string): WriteMethodError {
+    return new WriteMethodError(
+      METHOD,
+      "target_missing",
+      `wordpress ${what}: the meta field '${metaKey}' is not exposed by this site's REST API — the plugin that owns it (the AEO plugin or the site's SEO plugin) must register it before this fix can be written`,
+    );
   }
 
   private unexpectedShape(what: string, why: string): WriteMethodError {

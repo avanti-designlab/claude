@@ -8,6 +8,7 @@
 export {
   WriteMethodError,
   isWriteMethodError,
+  safeTransportDetail,
   safeVendorCode,
   type WriteMethodErrorCode,
   type WriteMethodErrorDetail,

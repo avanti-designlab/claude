@@ -31,4 +31,5 @@ export {
   FakeWordPress,
   type FakeEntitySeed,
   type FakeWordPressSeed,
+  type RegisteredMetaType,
 } from "./fake-wp";

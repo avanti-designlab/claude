@@ -88,3 +88,36 @@ export function safeVendorCode(value: unknown): string | undefined {
     ? value
     : undefined;
 }
+
+/** Machine-style Node/undici error codes (ENOTFOUND, ECONNREFUSED, ETIMEDOUT, ...). */
+const TRANSPORT_CODE = /^[A-Z][A-Z0-9_]{1,31}$/;
+/** A plain identifier-shaped error class name (TypeError, AbortError, ...). */
+const ERROR_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
+
+/**
+ * Reduce a transport-level throw (the fetch itself rejected) to a WHITELISTED
+ * identifier that is safe to compose into an interface-voice message. A
+ * transport error's free-text `message` is NEVER used — DNS resolvers,
+ * proxies, and middleboxes put arbitrary text (hostnames, redirect locations,
+ * proxy banners) in there, and none of it may leak into a WriteMethodError.
+ * Only two shapes survive: a machine-style `code` (Node/undici sets it on the
+ * error or its `cause`: ENOTFOUND, ECONNREFUSED, ETIMEDOUT, ...) or, failing
+ * that, the error's class NAME when it is identifier-shaped and more specific
+ * than plain `Error` (e.g. the TypeError a refused redirect rejects with).
+ */
+export function safeTransportDetail(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined;
+  const code = transportCodeOf(err) ?? transportCodeOf(err.cause);
+  if (code) return code;
+  return err.name !== "Error" && ERROR_NAME.test(err.name)
+    ? err.name
+    : undefined;
+}
+
+function transportCodeOf(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === "string" && TRANSPORT_CODE.test(code)
+    ? code
+    : undefined;
+}

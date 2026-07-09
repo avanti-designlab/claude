@@ -144,7 +144,10 @@ export class ChangeManager {
    * approver) — no write occurs without it. Captures the FRESH live before-state
    * (authoritative rollback baseline), writes `after` via the method adapter,
    * then records the row as 'applied'. A drift between the previewed and live
-   * before-state is surfaced as a non-fatal warning.
+   * before-state is surfaced as a non-fatal warning. Exception: when the live
+   * state already equals this change's own `after` (a retry after a crash
+   * between site write and store update), the persisted previewed before is
+   * KEPT as the rollback baseline — see the QA-1 comment in the body.
    */
   async apply(
     changeId: string,
@@ -176,11 +179,29 @@ export class ChangeManager {
     // Re-read the live before-state at write time; it, not the (possibly stale)
     // preview value, is the authoritative baseline a rollback restores.
     const liveBefore = await adapter.readCurrent(target, adapterCtx);
+    let baseline = liveBefore;
     if (!jsonEqual(liveBefore, previewedBefore)) {
-      warnings.push({
-        code: "drift_detected",
-        message: `live before-state changed since preview at ${target.url} — applying the approved 'after' and re-baselining rollback to the live state`,
-      });
+      if (jsonEqual(liveBefore, after)) {
+        // QA-1: NEVER re-baseline to this change's OWN after-value. If a prior
+        // apply crashed between the site write and the store update (the
+        // documented ordering window), the row is still 'previewed' while the
+        // site already shows `after` — this retry would otherwise adopt our
+        // half-applied write as the "before", erasing the original pre-change
+        // state from the audit row and turning rollback into a verified no-op.
+        // A third party independently setting the exact after-value is
+        // indistinguishable from that crash; keeping the persisted before
+        // stays reversible in BOTH cases, so it is the only safe branch.
+        baseline = previewedBefore;
+        warnings.push({
+          code: "resumed_after_partial_apply",
+          message: `live state at ${target.url} already equals this change's approved 'after' while the row was still previewed — resuming a partially-applied change and keeping the persisted before-state as the rollback baseline`,
+        });
+      } else {
+        warnings.push({
+          code: "drift_detected",
+          message: `live before-state changed since preview at ${target.url} — applying the approved 'after' and re-baselining rollback to the live state`,
+        });
+      }
     }
 
     // ORDERING (deliberate — do NOT reorder): the SITE write happens BEFORE the
@@ -189,7 +210,7 @@ export class ChangeManager {
     // status ('previewed') while the site already shows `after`. That is the
     // safe/idempotent direction: a retry re-applies the SAME `after` (a no-op on
     // the site) and no un-audited 'applied' claim exists until the DB confirms it.
-    await adapter.apply({ target, before: liveBefore, after, ctx: adapterCtx });
+    await adapter.apply({ target, before: baseline, after, ctx: adapterCtx });
 
     const change = await this.store.update(
       changeId,
@@ -198,8 +219,10 @@ export class ChangeManager {
         approvedBy,
         appliedBy: options.appliedBy ?? ctx.actor.id,
         appliedAt: this.clock.now(),
-        // Persist the fresh before as the authoritative rollback baseline.
-        diff: { before: liveBefore, after, target },
+        // Persist the fresh before as the authoritative rollback baseline
+        // (except in the resumed-partial-apply case above, where the persisted
+        // previewed before IS the pre-change state and is kept).
+        diff: { before: baseline, after, target },
       },
       ctx,
     );

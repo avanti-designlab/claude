@@ -21,6 +21,8 @@ export interface RecordedRequest {
   url: string;
   headers: Record<string, string>;
   body?: string;
+  /** The redirect policy the adapter stated (the port contract pins "error"). */
+  redirect: "error";
 }
 
 /** A scripted response producer. Receives the (already journaled) request. */
@@ -68,6 +70,7 @@ export class ScriptedFetch {
       url,
       headers,
       body: init.body,
+      redirect: init.redirect,
     };
     this.requests.push(req);
 

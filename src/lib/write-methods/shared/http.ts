@@ -9,8 +9,9 @@
  *
  * Deliberately narrow: exactly what a REST write method needs (method, headers,
  * string body in; status, headers, text out) — nothing that would tempt an
- * adapter into streaming, redirects-control, or other per-vendor cleverness
- * that the fakes couldn't faithfully reproduce.
+ * adapter into streaming or other per-vendor cleverness that the fakes
+ * couldn't faithfully reproduce. The one transport policy the port DOES carry
+ * is pinned, not configurable: `redirect: "error"` (see {@link FetchPortInit}).
  */
 
 /** The request shape an adapter is allowed to send. */
@@ -18,6 +19,20 @@ export interface FetchPortInit {
   method: "GET" | "POST";
   headers: Record<string, string>;
   body?: string;
+  /**
+   * Redirect policy — REQUIRED, and the only legal value is `"error"`: the
+   * port must NOT follow redirects; a redirect response makes the call
+   * REJECT (WHATWG `redirect: "error"` semantics, which global `fetch`
+   * implements natively). Write methods state this on every request because
+   * a client-site write must land at exactly the URL it was sent to, and a
+   * transparently-followed redirect could re-send the Authorization header
+   * wherever the site points. (undici happens to strip Authorization on
+   * cross-origin redirects, but this port refuses to DEPEND on that
+   * implementation detail.) Adapters surface the resulting rejection as
+   * their typed `network_failure` — an honest "the site did not answer at
+   * the URL we wrote to", never a silently-followed hop.
+   */
+  redirect: "error";
 }
 
 /** The response surface an adapter is allowed to read (a subset of WHATWG Response). */

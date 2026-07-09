@@ -183,7 +183,7 @@ export interface ApplyOptions {
 
 /** Non-fatal observations surfaced to the caller (never swallowed). */
 export interface PipelineWarning {
-  code: "drift_detected" | "alert_emit_failed";
+  code: "drift_detected" | "resumed_after_partial_apply" | "alert_emit_failed";
   message: string;
 }
 

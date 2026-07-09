@@ -409,6 +409,172 @@ describe("failure modes", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Network-failure detail whitelisting (never echo err.message)        */
+/* ------------------------------------------------------------------ */
+
+describe("network failure detail whitelisting", () => {
+  const read = (adapter: WordPressAdapter) =>
+    adapter.readCurrent({ url: PAGE_URL, locator: "wp:post/42/title" }, CTX);
+
+  it("surfaces only a whitelisted code — the transport error's free text (proxy banners, hosts) never leaks", async () => {
+    const { adapter, fake } = makeAdapter();
+    fake.http.failNext(
+      Object.assign(
+        new Error("connect ECONNREFUSED 10.0.0.5:443 via corp-proxy (auth=hunter2)"),
+        { code: "ECONNREFUSED" },
+      ),
+    );
+    const error = await expectFailure(read(adapter), "network_failure");
+    expect(error.message).toContain("https://ggrealty.example");
+    expect(error.message).toContain("ECONNREFUSED");
+    expect(error.message).not.toContain("hunter2");
+    expect(error.message).not.toContain("corp-proxy");
+    expect(error.message).not.toContain("10.0.0.5");
+  });
+
+  it("finds the code on the error's cause (where undici's fetch wraps it)", async () => {
+    const { adapter, fake } = makeAdapter();
+    fake.http.failNext(
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("getaddrinfo ENOTFOUND internal-vpn-host"), {
+          code: "ENOTFOUND",
+        }),
+      }),
+    );
+    const error = await expectFailure(read(adapter), "network_failure");
+    expect(error.message).toContain("ENOTFOUND");
+    expect(error.message).not.toContain("fetch failed");
+    expect(error.message).not.toContain("internal-vpn-host");
+  });
+
+  it("falls back to the error NAME when no code exists (the TypeError a refused redirect rejects with)", async () => {
+    const { adapter, fake } = makeAdapter();
+    fake.http.failNext(
+      new TypeError("Failed to fetch: redirect mode set to error, Location: https://evil.example/next"),
+    );
+    const error = await expectFailure(read(adapter), "network_failure");
+    expect(error.message).toContain("TypeError");
+    expect(error.message).not.toContain("evil.example");
+    expect(error.message).not.toContain("Failed to fetch");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Redirect policy — stated explicitly on every request                */
+/* ------------------------------------------------------------------ */
+
+describe("redirect policy", () => {
+  it("every request the adapter sends states redirect: 'error' — a redirect is never followed", async () => {
+    const { adapter, fake } = makeAdapter();
+    await adapter.readCurrent({ url: PAGE_URL, locator: "wp:post/42/title" }, CTX);
+    await adapter.apply(titleWrite("New Title"));
+    expect(fake.requests.length).toBeGreaterThan(1); // read + write, both pinned
+    for (const req of fake.requests) {
+      expect(req.redirect).toBe("error");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Registered-meta fidelity (real wp/v2 REST behavior)                 */
+/* ------------------------------------------------------------------ */
+
+describe("registered-meta fidelity", () => {
+  it("meta: [] (the PHP empty-array quirk — no registered meta) diagnoses as target_missing with the register-the-key fix, never unexpected_response", async () => {
+    const fake = new FakeWordPress({
+      credential: SECRET,
+      posts: {
+        42: { title: "t", meta: { _aeo_meta_description: "stored but unregistered" } },
+      },
+      registeredMeta: {}, // zero registered keys → real WP serializes meta as []
+    });
+    const { adapter } = makeAdapter({ fetch: fake.port });
+    const error = await expectFailure(
+      adapter.readCurrent(
+        { url: PAGE_URL, locator: "wp:post/42/meta/_aeo_meta_description" },
+        CTX,
+      ),
+      "target_missing",
+    );
+    // The ACCURATE interface-voice diagnosis: the key is not exposed and a
+    // plugin must register it — not a bogus incompatible-WordPress warning.
+    expect(error.message).toContain("_aeo_meta_description");
+    expect(error.message).toContain("not exposed");
+    expect(error.message).toContain("register");
+    expect(error.message).not.toContain("incompatible");
+    // Diagnosed from the read — no write ever attempted.
+    expect(fake.requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  });
+
+  it("direct-apply honesty: a write WP silently drops (unregistered key) is reported target_missing from the write's own echo", async () => {
+    const fake = new FakeWordPress({
+      credential: SECRET,
+      posts: { 42: { title: "t", meta: { _aeo_meta_description: "old" } } },
+      registeredMeta: { _aeo_meta_description: "string" },
+    });
+    const { adapter } = makeAdapter({ fetch: fake.port });
+    const error = await expectFailure(
+      adapter.apply({
+        target: { url: PAGE_URL, locator: "wp:post/42/meta/_unregistered_key" },
+        before: "old",
+        after: "new",
+        ctx: CTX,
+      }),
+      "target_missing",
+    );
+    expect(error.message).toContain("_unregistered_key");
+    expect(error.message).toContain("register");
+    // The POST happened (real WP answers 200 while dropping the key)...
+    expect(fake.requests.filter((r) => r.method === "POST")).toHaveLength(1);
+    // ...but the adapter refused to claim success, and the site truly has no key.
+    expect(fake.post(42).meta).not.toHaveProperty("_unregistered_key");
+    expect(fake.post(42).meta._aeo_meta_description).toBe("old"); // untouched sibling
+  });
+
+  it("a registered-type mismatch fails 400 rest_invalid_param → vendor_failure with status + slug, site untouched", async () => {
+    const fake = new FakeWordPress({
+      credential: SECRET,
+      posts: { 42: { title: "t", meta: { _aeo_word_count: 100 } } },
+      registeredMeta: { _aeo_word_count: "number" },
+    });
+    const { adapter } = makeAdapter({ fetch: fake.port });
+    const error = await expectFailure(
+      adapter.apply({
+        target: { url: PAGE_URL, locator: "wp:post/42/meta/_aeo_word_count" },
+        before: 100,
+        after: "not-a-number",
+        ctx: CTX,
+      }),
+      "vendor_failure",
+    );
+    expect(error.httpStatus).toBe(400);
+    expect(error.vendorCode).toBe("rest_invalid_param");
+    // The envelope's free-text message is never trusted into ours.
+    expect(error.message).not.toContain("Invalid parameter");
+    expect(fake.post(42).meta._aeo_word_count).toBe(100);
+  });
+
+  it("a registered key still round-trips byte-exact under whitelist mode", async () => {
+    const fake = new FakeWordPress({
+      credential: SECRET,
+      posts: { 42: { title: "t", meta: { _aeo_meta_description: "old desc" } } },
+      registeredMeta: { _aeo_meta_description: "string" },
+    });
+    const { adapter } = makeAdapter({ fetch: fake.port });
+    const target = {
+      url: PAGE_URL,
+      locator: "wp:post/42/meta/_aeo_meta_description",
+    };
+    await expect(adapter.readCurrent(target, CTX)).resolves.toBe("old desc");
+    const write: AdapterWrite = { target, before: "old desc", after: "new desc", ctx: CTX };
+    await adapter.apply(write);
+    expect(fake.post(42).meta._aeo_meta_description).toBe("new desc");
+    await adapter.revert(write);
+    expect(fake.post(42).meta._aeo_meta_description).toBe("old desc");
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Multi-tenant discipline — pinned property + pinned origin           */
 /* ------------------------------------------------------------------ */
 
@@ -449,6 +615,33 @@ describe("site pinning", () => {
     expect(fake.requests).toHaveLength(0);
   });
 
+  it("refuses a userinfo-bearing target URL pre-network WITHOUT echoing it (same- and cross-origin alike)", async () => {
+    const { adapter, fake } = makeAdapter();
+    for (const url of [
+      "https://wp-admin:sekrit-target@ggrealty.example/pricing", // pinned origin
+      "https://wp-admin:sekrit-target@evil.example/pricing", // foreign origin
+    ]) {
+      const error = await expectFailure(
+        adapter.apply({
+          ...titleWrite("New"),
+          target: { url, locator: "wp:post/42/title" },
+        }),
+        "unsupported_operation",
+      );
+      // The URL is the thing carrying a credential — never echoed, on any surface.
+      expect(error.message).toContain("embeds credentials");
+      expect(error.message).not.toContain("sekrit-target");
+      expect(error.message).not.toContain("wp-admin");
+      expect(error.message).not.toContain(url);
+      // Also refused on the read path, pre-network.
+      await expectFailure(
+        adapter.readCurrent({ url, locator: "wp:post/42/title" }, CTX),
+        "unsupported_operation",
+      );
+    }
+    expect(fake.requests).toHaveLength(0);
+  });
+
   it("accepts same-origin absolute and relative target URLs; requests are built ONLY from the pinned base", async () => {
     const { adapter, fake } = makeAdapter();
     await adapter.readCurrent(
@@ -477,6 +670,7 @@ describe("site pinning", () => {
     for (const bad of [
       "not a url",
       "ftp://ggrealty.example",
+      "http://ggrealty.example", // cleartext — the app password would egress unencrypted
       "https://user:pass@ggrealty.example", // creds belong in the vault
       "https://ggrealty.example/?p=1",
       "https://ggrealty.example/#x",
@@ -498,6 +692,30 @@ describe("site pinning", () => {
       credsError = err;
     }
     expect((credsError as WriteMethodError).message).not.toContain("sekrit-pass");
+  });
+
+  it("refuses an http: base URL at construction — the application password never travels cleartext (no dev opt-out)", () => {
+    const resolver = makeResolver();
+    const fake = makeFake();
+    let thrown: unknown;
+    try {
+      new WordPressAdapter({
+        site: { ...SITE, baseUrl: "http://ggrealty.example" },
+        secrets: resolver,
+        authRef: "vault://wp/prop-1",
+        fetch: fake.port,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(WriteMethodError);
+    const error = thrown as WriteMethodError;
+    expect(error.code).toBe("misconfigured");
+    // Interface-voice: the operator is told to reconnect over HTTPS.
+    expect(error.message).toContain("HTTPS");
+    expect(error.message).toContain("https://");
+    // Constructor refusal means zero requests could ever carry the credential.
+    expect(fake.requests).toHaveLength(0);
   });
 });
 

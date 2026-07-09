@@ -142,6 +142,63 @@ describe("apply through the pipeline — live before-capture", () => {
     expect(fake.post(1).title).toBe(ORIGINAL_TITLES[1]);
   });
 
+  it("never adopts the change's OWN after-value as the rollback baseline (QA-1): resumed_after_partial_apply surfaced, persisted before kept, rollback restores the original", async () => {
+    // The live site already shows the approved after-value at apply time —
+    // either a prior apply crashed between the site write and the store
+    // update (the documented retry path) or a third party set the identical
+    // value; the two are indistinguishable. Re-baselining to the live read
+    // here would persist diff.before === diff.after, erase the original
+    // pre-change state from the audit row, and turn rollback into a verified
+    // no-op. The pipeline must keep the persisted previewed before instead.
+    const fake = new FakeWordPress({
+      credential: SECRET,
+      posts: { 1: { title: "New Title", content: "<p>Body one</p>" } },
+    });
+    const secrets: SecretsResolver = {
+      resolve: async () => new VendorCredential(SECRET),
+    };
+    const adapter = new WordPressAdapter({
+      site: {
+        tenantId: "t1",
+        clientId: "c1",
+        propertyId: "prop-1",
+        baseUrl: "https://ggrealty.example",
+      },
+      secrets,
+      authRef: "vault://wp/prop-1",
+      fetch: fake.port,
+    });
+    const clock = steppingClock("2026-07-09T10:00:00.000Z");
+    const store = new InMemoryChangeStore({ clock });
+    const manager = new ChangeManager({
+      store,
+      adapters: new MapAdapterRegistry([adapter]),
+      clock,
+    });
+
+    // Previewed before = the true original; live already equals the after.
+    const preview = await manager.preview(titleChange(1, "New Title"), CTX);
+    const outcome = await manager.apply(preview.change.id, APPROVAL, CTX);
+
+    // Surfaced explicitly — and distinctly from generic drift.
+    expect(outcome.warnings.map((w) => w.code)).toEqual([
+      "resumed_after_partial_apply",
+    ]);
+    expect(outcome.change.status).toBe("applied");
+    // THE baseline contract: the original pre-change state, never our own after.
+    expect(outcome.change.diff.before).toBe(ORIGINAL_TITLES[1]);
+    expect(outcome.change.diff.after).toBe("New Title");
+    expect(fake.post(1).title).toBe("New Title");
+
+    // One-click rollback restores the pre-change state — reversibility held.
+    await manager.rollback(
+      outcome.change.id,
+      { reason: "operator: undo resumed change" },
+      CTX,
+    );
+    expect(fake.post(1).title).toBe(ORIGINAL_TITLES[1]);
+  });
+
   it("leaves the row 'previewed' and the site untouched when the write fails — retryable, no silent half-state", async () => {
     const { fake, manager, store } = setup();
     const preview = await manager.preview(titleChange(1, "New Title"), CTX);

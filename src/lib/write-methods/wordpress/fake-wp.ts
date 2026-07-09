@@ -12,6 +12,10 @@
  *    (wrong/missing → 401 `incorrect_password`).
  *  - Unknown entity → 404 `rest_post_invalid_id`; unknown route → 404
  *    `rest_no_route`.
+ *  - Registered-meta fidelity (opt-in via `registeredMeta`): only registered
+ *    keys are rendered, ZERO registered keys renders `meta: []` (the PHP
+ *    empty-array quirk), writes to unregistered keys are silently ignored,
+ *    and a registered-type mismatch fails 400 `rest_invalid_param`.
  *
  * Fault injection: login-redirect HTML mode (the classic), one-shot write
  * failures with any status/slug, a write mutator (kses-style content
@@ -38,12 +42,37 @@ export interface FakeEntitySeed {
   meta?: Record<string, Json>;
 }
 
+/** The JSON `type` a registered meta key was registered with (show_in_rest). */
+export type RegisteredMetaType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "array"
+  | "object";
+
 export interface FakeWordPressSeed {
   /** Expected raw Basic credential pair, e.g. `gg-operator:xxxx xxxx ...`. */
   credential: string;
   posts?: Record<number, FakeEntitySeed>;
   pages?: Record<number, FakeEntitySeed>;
   media?: Record<number, { altText: string }>;
+  /**
+   * Registered-meta fidelity mode (real-WP `register_post_meta` behavior).
+   * When set, the fake behaves like a site with exactly these meta keys
+   * registered for REST, per key with its registered JSON type:
+   *  - the rendered `meta` contains ONLY registered keys (unregistered seeded
+   *    keys exist in storage but are invisible via REST);
+   *  - ZERO registered keys renders `meta` as `[]` — the PHP-empty-array
+   *    quirk (an empty PHP assoc array JSON-serializes as an array, not `{}`);
+   *  - writes to UNREGISTERED keys are SILENTLY IGNORED (real WP drops them
+   *    without an error — the write "succeeds" and echoes an entity that does
+   *    not carry the key);
+   *  - a write whose value mismatches the registered type fails the WHOLE
+   *    request with 400 `rest_invalid_param` (no state change).
+   * When omitted (legacy mode), every seeded key is rendered and any key is
+   * writable — the pre-fidelity behavior existing tests rely on.
+   */
+  registeredMeta?: Record<string, RegisteredMetaType>;
 }
 
 interface StoredContentEntity {
@@ -67,12 +96,14 @@ export class FakeWordPress {
 
   private readonly credential: string;
   private readonly entities = new Map<string, StoredEntity>();
+  private readonly registeredMeta?: Record<string, RegisteredMetaType>;
   private loginRedirect = false;
   private pendingWriteFailure: FetchPortResponse | null = null;
   private writeMutator: ((value: string) => string) | null = null;
 
   constructor(seed: FakeWordPressSeed) {
     this.credential = seed.credential;
+    this.registeredMeta = seed.registeredMeta;
     for (const [id, e] of Object.entries(seed.posts ?? {})) {
       this.entities.set(`posts/${id}`, {
         kind: "content",
@@ -192,13 +223,18 @@ export class FakeWordPress {
         this.pendingWriteFailure = null;
         return failure;
       }
-      this.applyUpdate(entity, req.body ?? "{}");
+      const rejected = this.applyUpdate(entity, req.body ?? "{}");
+      if (rejected) return rejected;
     }
 
     return jsonResponse(200, this.render(Number(match[2]), entity));
   }
 
-  private applyUpdate(entity: StoredEntity, bodyText: string): void {
+  /** Merge an update into the entity; a validation failure rejects the WHOLE request. */
+  private applyUpdate(
+    entity: StoredEntity,
+    bodyText: string,
+  ): FetchPortResponse | null {
     const body = JSON.parse(bodyText) as { [k: string]: Json };
     const store = (value: Json): Json =>
       this.writeMutator && typeof value === "string"
@@ -209,17 +245,46 @@ export class FakeWordPress {
       if (typeof body.alt_text === "string") {
         entity.altText = store(body.alt_text) as string;
       }
-      return;
+      return null;
     }
+
+    const metaUpdate =
+      body.meta !== null && typeof body.meta === "object" && !Array.isArray(body.meta)
+        ? (body.meta as Record<string, Json>)
+        : undefined;
+
+    // Registered-meta fidelity: type validation happens BEFORE anything
+    // mutates (real WP validates params, then applies) — a mismatch fails the
+    // whole request with the rest_invalid_param envelope and no state change.
+    if (metaUpdate && this.registeredMeta) {
+      for (const [k, v] of Object.entries(metaUpdate)) {
+        const registeredType = this.registeredMeta[k];
+        if (registeredType && !matchesMetaType(v, registeredType)) {
+          return jsonResponse(400, {
+            code: "rest_invalid_param",
+            message: "Invalid parameter(s): meta",
+            data: {
+              status: 400,
+              params: { meta: `meta.${k} is not of type ${registeredType}.` },
+            },
+          });
+        }
+      }
+    }
+
     if (typeof body.title === "string") entity.title = store(body.title) as string;
     if (typeof body.content === "string") {
       entity.content = store(body.content) as string;
     }
-    if (body.meta !== null && typeof body.meta === "object" && !Array.isArray(body.meta)) {
-      for (const [k, v] of Object.entries(body.meta)) {
+    if (metaUpdate) {
+      for (const [k, v] of Object.entries(metaUpdate)) {
+        // Whitelist mode: a write to an UNREGISTERED key is silently ignored,
+        // exactly like real WP — no error, no storage, an echo without the key.
+        if (this.registeredMeta && !(k in this.registeredMeta)) continue;
         entity.meta[k] = store(v);
       }
     }
+    return null;
   }
 
   private render(id: number, entity: StoredEntity): Json {
@@ -230,8 +295,24 @@ export class FakeWordPress {
       id,
       title: { raw: entity.title, rendered: entity.title },
       content: { raw: entity.content, rendered: entity.content },
-      meta: { ...entity.meta },
+      meta: this.renderMeta(entity),
     };
+  }
+
+  /** The REST view of an entity's meta, honoring registered-meta fidelity. */
+  private renderMeta(entity: StoredContentEntity): Json {
+    if (!this.registeredMeta) return { ...entity.meta }; // legacy mode
+    const keys = Object.keys(this.registeredMeta);
+    // The PHP-empty-array quirk: a post type with NO registered meta
+    // serializes its empty meta map as `[]`, not `{}`.
+    if (keys.length === 0) return [];
+    const rendered: Record<string, Json> = {};
+    for (const key of keys) {
+      rendered[key] = Object.prototype.hasOwnProperty.call(entity.meta, key)
+        ? entity.meta[key]
+        : metaTypeDefault(this.registeredMeta[key]);
+    }
+    return rendered;
   }
 
   private contentEntity(key: string): {
@@ -244,5 +325,37 @@ export class FakeWordPress {
       throw new Error(`FakeWordPress: no content entity at ${key}`);
     }
     return { title: e.title, content: e.content, meta: { ...e.meta } };
+  }
+}
+
+/** Does a JSON value satisfy a registered meta type? (WP's param validation.) */
+function matchesMetaType(value: Json, type: RegisteredMetaType): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number";
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+}
+
+/** REST default for a registered-but-never-written meta key (fresh per render). */
+function metaTypeDefault(type: RegisteredMetaType): Json {
+  switch (type) {
+    case "string":
+      return "";
+    case "number":
+      return 0;
+    case "boolean":
+      return false;
+    case "array":
+      return [];
+    case "object":
+      return {};
   }
 }
