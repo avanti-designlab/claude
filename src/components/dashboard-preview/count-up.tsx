@@ -9,6 +9,15 @@
  * FINAL value instantly — the animation is flavor, never a gate on content.
  * Ease-out cubic over ~950ms, matching the resolve moment's feel.
  *
+ * Two run kinds (design review, 2026-07-09, Minor 6):
+ *  - FIRST mount: 0 → target after the entrance delay — the approved preview
+ *    choreography, unchanged.
+ *  - RETARGET: the target changed under a LIVE component (e.g.
+ *    router.refresh() reconciling fresh counts after "Generate plan"). The
+ *    number animates from the value already on screen, with NO entrance
+ *    delay — never a replay from 0 (a momentary false zero) followed by
+ *    dead air.
+ *
  * `CountUpValue` accepts the already-formatted display string (e.g. "3,412",
  * "#2", "+16", "4.8") and re-formats each animation frame with the source's
  * own grouping/decimals, so the resolved frame is byte-identical to the input.
@@ -17,25 +26,71 @@
 import * as React from "react";
 import { useReducedMotion } from "@/components/moments";
 
+/** How one animation run starts (see `countUpRun`). */
+export interface CountUpRun {
+  /** The value the run animates from. */
+  from: number;
+  /** How long to hold at `from` before animating (ms). */
+  delayMs: number;
+}
+
 /**
- * Animate 0 → target; returns `target` immediately under reduced motion/SSR.
- * `delay` (ms) holds at 0 before starting — the entrance choreography uses it
- * so a tile's number resolves AFTER the tile has landed (`counterDelayMs`).
- * Under reduced motion the delay is ignored: final state, instantly.
+ * Decide a run's start point and delay — pure, unit-tested. `prevTarget` is
+ * the target of the previous run, or null before any run. The first mount
+ * keeps the preview contract (from 0, holding through the entrance delay);
+ * note a strict-mode effect replay re-runs with prevTarget === target and
+ * must ALSO resolve as a first mount, so "retarget" means the target
+ * actually CHANGED. A retarget starts from `shownNow` — the value currently
+ * painted, which is mid-flight when a refresh lands during an animation —
+ * with no delay.
+ */
+export function countUpRun(
+  prevTarget: number | null,
+  target: number,
+  shownNow: number,
+  entranceDelayMs: number
+): CountUpRun {
+  const retarget = prevTarget !== null && prevTarget !== target;
+  return retarget
+    ? { from: shownNow, delayMs: 0 }
+    : { from: 0, delayMs: Math.max(0, entranceDelayMs) };
+}
+
+/**
+ * Animate to `target`; returns `target` immediately under reduced motion/SSR.
+ * `delay` (ms) holds before the FIRST run — the entrance choreography uses it
+ * so a tile's number resolves AFTER the tile has landed (`counterDelayMs`);
+ * retargets skip it (see `countUpRun`). Under reduced motion both the delay
+ * and the animation are ignored: final state, instantly.
  */
 export function useCountUp(target: number, duration = 950, delay = 0): number {
   const reduced = useReducedMotion();
   const [shown, setShown] = React.useState(0);
+  // What is currently painted (state, mirrored for effect reads) and the
+  // previous run's target — the inputs that make a retarget start where the
+  // last run left off instead of replaying from 0.
+  const shownRef = React.useRef(0);
+  const prevTargetRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    if (reduced) return; // final state is derived below; nothing to animate
+    if (reduced) {
+      // Final state is derived below; keep the refs truthful so a later
+      // switch to motion doesn't animate from a stale point.
+      shownRef.current = target;
+      prevTargetRef.current = target;
+      return;
+    }
+    const run = countUpRun(prevTargetRef.current, target, shownRef.current, delay);
+    prevTargetRef.current = target;
     let raf = 0;
-    const start = performance.now() + Math.max(0, delay);
+    const start = performance.now() + run.delayMs;
     // Ease-out cubic — decisive then settling, same curve as the gauge.
     const ease = (t: number) => 1 - Math.pow(1 - t, 3);
     const tick = (now: number) => {
       const t = Math.min(1, Math.max(0, (now - start) / duration));
-      setShown(target * ease(t));
+      const value = run.from + (target - run.from) * ease(t);
+      shownRef.current = value;
+      setShown(value);
       if (t < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

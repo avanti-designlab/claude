@@ -34,7 +34,7 @@ import { StepProperties, type PropertyDraft } from "./step-properties";
 import { StepAssembling } from "./step-assembling";
 import { StepPlan } from "./step-plan";
 import { ClientNameField } from "./client-name-field";
-import { toSaveState, type SaveState } from "./save-outcome";
+import { SAVE_UNREACHABLE, toSaveState, type SaveState } from "./save-outcome";
 import { VERTICAL_META } from "./onboarding-copy";
 
 const STEPS: OnboardingStepMeta[] = [
@@ -53,10 +53,6 @@ const nextDraftId = (prefix: string) => `${prefix}-${(draftSeq += 1)}`;
 function verticalLabel(vertical: SeedVertical | null): string {
   return VERTICAL_META.find((entry) => entry.id === vertical)?.label ?? "";
 }
-
-/** Interface-voice fallback when the action call itself fails to round-trip. */
-const SAVE_UNREACHABLE =
-  "We couldn’t reach the server. Check your connection and try again — nothing was created.";
 
 /**
  * Mode-aware on-hero foregrounds (working brand v1): the hero bubble is a
@@ -141,12 +137,14 @@ export function OnboardingFlow() {
     setProperties((prev) => prev.filter((p) => p.id !== id));
 
   // Save (the real write) ----------------------------------------------
-  // Fired on leaving step 3, and again from step 4's retry after an error
-  // (the action's failure contract: nothing was created). The assembling
-  // beat covers the await; steps 4–5 render the returned, persisted plan.
-  // Every attempt in this run sends the SAME `runKey` — that is the whole
-  // point: if the failure was a lost response, the retry recovers the saved
-  // client (idempotent replay) instead of creating a second one.
+  // Fired on leaving step 3, and again from step 4's retry after an error.
+  // A reported error does NOT mean nothing was written — a lost response
+  // leaves the save's fate unknown. The assembling beat covers the await;
+  // steps 4–5 render the returned, persisted plan. Every attempt in this run
+  // sends the SAME `runKey` — that is the whole point: if the failure was a
+  // lost response, the retry replays into the same row, recovering the saved
+  // client (and, after edits via Back, reconciling it to the edited values —
+  // the action's update-through replay) instead of creating a second one.
   const startSave = () => {
     if (!vertical || save.phase === "saving") return;
     setSave({ phase: "saving" });
@@ -162,8 +160,9 @@ export function OnboardingFlow() {
   };
 
   // Once the write is in flight or landed, the inputs are history — Back
-  // would invite a duplicate client. Start over begins a fresh one; a failed
-  // save (nothing created) reopens Back for edits.
+  // would invite a duplicate client. Start over begins a fresh one; a
+  // REPORTED failure reopens Back for edits — safe even if the save actually
+  // landed, because the retry replays the same key and reconciles the row.
   const saveLocked =
     step >= 4 && (save.phase === "saving" || save.phase === "saved");
 

@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ShareOfVoice, type ShareOfVoiceEntry } from "@/components/charts";
+import { APP_HOME } from "@/components/app-shell/nav";
 import type { CreatedClient, CreatedPlan } from "@/lib/clients/actions";
 import type { RoadmapTask } from "@/lib/types/roadmap";
 import { cn } from "@/lib/theme/utils";
@@ -198,9 +199,19 @@ function PlanlessState({
             `${client.name} is saved to your workspace. A plan activates once this vertical's playbook ships — your prioritized, channel-weighted roadmap lands here the moment it opens.`}
         </p>
       </div>
-      <Button asChild size="sm" variant="outline">
-        <Link href="/clients">View clients</Link>
-      </Button>
+      {planWarning ? (
+        // Plan-write-failed: the CTA points at the FIX — the dashboard's
+        // Generate-plan control lives on this client's card (design review,
+        // 2026-07-09, Major 2). APP_HOME is the dashboard.
+        <Button asChild size="sm" variant="outline">
+          <Link href={APP_HOME}>Go to your dashboard</Link>
+        </Button>
+      ) : (
+        // No-playbook: nothing to fix — the clients list is the destination.
+        <Button asChild size="sm" variant="outline">
+          <Link href="/clients">View clients</Link>
+        </Button>
+      )}
     </div>
   );
 }

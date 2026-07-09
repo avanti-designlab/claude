@@ -20,6 +20,9 @@ import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 import {
   isSettled,
   planOutcome,
+  SAVE_ERROR_HEADING,
+  SAVE_UNREACHABLE,
+  saveErrorBody,
   shouldReveal,
   toSaveState,
   type SaveState,
@@ -134,5 +137,39 @@ describe("shouldReveal (assembling beat covers the real await)", () => {
   it("an idle save never reveals (nothing to show)", () => {
     expect(isSettled({ phase: "idle" })).toBe(false);
     expect(shouldReveal(true, true, { phase: "idle" })).toBe(false);
+  });
+});
+
+describe("SAVE_UNREACHABLE (honest lost-response copy — Code Review 2026-07-09, Major 1)", () => {
+  it("never claims nothing was created (a lost response can hide a landed save)", () => {
+    expect(SAVE_UNREACHABLE).not.toMatch(/nothing was created/i);
+  });
+
+  it("says what we know: unconfirmed, retry-safe, no duplicates — in interface voice", () => {
+    expect(SAVE_UNREACHABLE).toBe(
+      "We couldn’t confirm the save — check your connection and try again. If it already went through, retrying won’t create a duplicate."
+    );
+    // Typographic apostrophes only (doc 06 §6 interface voice).
+    expect(SAVE_UNREACHABLE).not.toContain("'");
+  });
+});
+
+describe("saveErrorBody (step-4 error-panel heading dedupe)", () => {
+  it("trims the heading sentence from server strings that open with it", () => {
+    expect(
+      saveErrorBody(
+        `${SAVE_ERROR_HEADING}. Check your connection and try again.`
+      )
+    ).toBe("Check your connection and try again.");
+  });
+
+  it("renders other server errors verbatim (e.g. permissions)", () => {
+    const message = "Only an agency admin can onboard clients.";
+    expect(saveErrorBody(message)).toBe(message);
+  });
+
+  it("renders SAVE_UNREACHABLE verbatim — the new copy no longer opens with the heading and must never be truncated", () => {
+    expect(SAVE_UNREACHABLE.startsWith(SAVE_ERROR_HEADING)).toBe(false);
+    expect(saveErrorBody(SAVE_UNREACHABLE)).toBe(SAVE_UNREACHABLE);
   });
 });

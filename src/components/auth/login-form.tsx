@@ -100,7 +100,16 @@ export function LoginForm() {
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm text-negative">
+        // Body-size error text needs 4.5:1 (WCAG 1.4.3), but `text-negative`
+        // alone is only 3:1-gated by the palette policy — light mode wears
+        // the designer-approved ink-mix (identical-pattern sweep, design
+        // review 2026-07-09 Major 4; measured on both chrome layers of both
+        // reachable palettes in
+        // src/app/(app)/dashboard/error-text-contrast.test.ts).
+        <p
+          role="alert"
+          className="text-sm text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
+        >
           {error}
         </p>
       ) : null}

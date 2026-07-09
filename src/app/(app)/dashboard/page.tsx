@@ -28,19 +28,22 @@ import {
   WashPill,
 } from "@/components/dashboard-preview";
 import { counterDelayMs, Entrance } from "@/components/moments";
+import { getClaims } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { verticalLabel } from "@/lib/clients/format";
 import {
   CLIENT_STATUSES,
   type ClientRow,
   type ClientStatus,
+  type JwtRole,
   type PlanRow,
   TASK_STATUSES,
   type TaskRow,
   type TaskStatus,
 } from "@/lib/types/db";
-import { isLiveVertical } from "./generate-plan-outcome";
+import { isLiveVertical, planRowVariant } from "./generate-plan-outcome";
 import { GeneratePlanRow } from "./generate-plan-row";
+import { StatusAnnouncer } from "./status-announcer";
 import { PendingGauge, PendingModuleCard } from "./pending-module";
 import {
   type RecentTask,
@@ -417,7 +420,13 @@ function HonestyFooter() {
 }
 
 export default async function DashboardPage() {
-  const result = await loadDashboard();
+  // The caller's verified role gates WHICH plan row each client card gets
+  // (planRowVariant): `regeneratePlanForClient` is agency_admin-only, so only
+  // that role sees the Generate-plan control — anyone else would collect a
+  // permission error on every press. The layout already gated the session;
+  // a null claim here fails closed (no control), never a 500.
+  const [result, claims] = await Promise.all([loadDashboard(), getClaims()]);
+  const role: JwtRole | null = claims?.role ?? null;
 
   /* ------------------------------------------------------------------ */
   /* Degraded: env unset or a query failed — never a 500.                */
@@ -630,6 +639,11 @@ export default async function DashboardPage() {
       {/* Clients — the real content: status, vertical, locations, and each
           client's latest plan + task load. */}
       <section className="flex flex-col gap-4">
+        {/* Persistent polite live region for the cards' Generate-plan
+            successes. It sits OUTSIDE the card grid at a stable position, so
+            router.refresh() reconciliation preserves it while the row that
+            announced unmounts — see status-announcer.tsx for the mechanics. */}
+        <StatusAnnouncer />
         <Entrance
           step={6}
           className="flex flex-wrap items-end justify-between gap-4"
@@ -651,6 +665,18 @@ export default async function DashboardPage() {
               : 0;
             const plan = latestPlanByClient.get(client.id);
             const taskLoad = taskCountsByClient.get(client.id);
+            // Which Plan row this card gets (pure, unit-tested): a healthy
+            // plan's version; the Generate-plan control for agency_admin on a
+            // live vertical when the client is plan-less OR holds a zero-task
+            // residue plan (the tolerated partial-failure state — the
+            // action's supersede path is idempotent and clears it); else the
+            // quiet "None yet".
+            const planVariant = planRowVariant({
+              role,
+              vertical: client.vertical,
+              hasPlan: Boolean(plan),
+              taskCount: taskLoad?.total ?? 0,
+            });
             return (
               <Entrance key={client.id} step={7 + index}>
                 <Card className="h-full gap-3 py-5">
@@ -676,7 +702,11 @@ export default async function DashboardPage() {
                       </span>
                     </div>
                     <dl className="flex flex-col gap-1.5 border-t border-border pt-3 text-xs">
-                      {plan ? (
+                      {planVariant === "generate" ? (
+                        // The regeneration control (idempotent server action
+                        // — a retry can never duplicate a plan).
+                        <GeneratePlanRow clientId={client.id} />
+                      ) : planVariant === "version" && plan ? (
                         <div className="flex items-center justify-between gap-2">
                           <dt className="text-muted">Plan</dt>
                           <dd
@@ -686,18 +716,23 @@ export default async function DashboardPage() {
                             {plan.playbook_version}
                           </dd>
                         </div>
-                      ) : isLiveVertical(client.vertical) ? (
-                        // Live vertical, no plan: the regeneration control
-                        // (idempotent server action — a retry can never
-                        // duplicate a plan).
-                        <GeneratePlanRow clientId={client.id} />
                       ) : (
-                        // Dormant vertical: no button — a plan activates when
-                        // this vertical's playbook ships, and the onboarding
-                        // copy already said so.
+                        // No plan and no control: a dormant vertical (any
+                        // role) or a live one seen by a role that can't run
+                        // the action. The dormant row carries its why the
+                        // same way the version dd does — a native title.
                         <div className="flex items-center justify-between gap-2">
                           <dt className="text-muted">Plan</dt>
-                          <dd className="text-muted">None yet</dd>
+                          <dd
+                            className="text-muted"
+                            title={
+                              isLiveVertical(client.vertical)
+                                ? undefined
+                                : "A plan activates when this industry’s playbook goes live."
+                            }
+                          >
+                            None yet
+                          </dd>
                         </div>
                       )}
                       <div className="flex items-center justify-between gap-2">

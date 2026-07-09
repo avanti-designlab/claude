@@ -11,7 +11,9 @@
  * OnboardingPlanReveal (the sanctioned moment). Under reduced motion the
  * timer is skipped — the panel waits statically, then the final state renders
  * instantly. A failed save renders the server's interface-voice error with a
- * retry; nothing was created, so Back (in the flow footer) stays open too.
+ * retry; Back (in the flow footer) reopens too — the retry replays the same
+ * idempotency key, so even a save that silently landed is recovered (and
+ * reconciled to any edits), never duplicated.
  */
 
 import * as React from "react";
@@ -20,14 +22,23 @@ import { Button } from "@/components/ui/button";
 import { OnboardingPlanReveal, useReducedMotion } from "@/components/moments";
 import { cn } from "@/lib/theme/utils";
 import { IMPACT_LABEL } from "./onboarding-copy";
-import { planOutcome, shouldReveal, type SaveState } from "./save-outcome";
+import {
+  planOutcome,
+  SAVE_ERROR_HEADING,
+  saveErrorBody,
+  shouldReveal,
+  type SaveState,
+} from "./save-outcome";
 
 export interface StepAssemblingProps {
   /** The in-flight / settled server write (client + plan persistence). */
   save: SaveState;
   /** Advance to the full plan. */
   onContinue: () => void;
-  /** Re-fire the save after an error (nothing was created). */
+  /**
+   * Re-fire the save after an error. Same idempotency key every attempt: a
+   * lost-response save that actually landed is recovered, not duplicated.
+   */
   onRetry: () => void;
 }
 
@@ -75,13 +86,6 @@ function AssemblingPanel({ reduced }: { reduced: boolean }) {
   );
 }
 
-/**
- * The error panel's heading. The connection-failure server string opens with
- * this exact sentence, so the panel trims it from the body instead of saying
- * it twice; other server errors (e.g. permissions) render verbatim.
- */
-const SAVE_ERROR_HEADING = "We couldn’t save this client";
-
 function SaveErrorPanel({
   message,
   onRetry,
@@ -89,9 +93,10 @@ function SaveErrorPanel({
   message: string;
   onRetry: () => void;
 }) {
-  const body = message.startsWith(`${SAVE_ERROR_HEADING}.`)
-    ? message.slice(SAVE_ERROR_HEADING.length + 1).trim()
-    : message;
+  // Heading + dedupe live in save-outcome.ts (pure, unit-tested): server
+  // strings opening with the heading sentence are trimmed; everything else —
+  // including the client-side SAVE_UNREACHABLE fallback — renders verbatim.
+  const body = saveErrorBody(message);
   return (
     <div
       role="alert"

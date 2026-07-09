@@ -10,6 +10,7 @@
 
 import type { RegeneratePlanResult } from "@/lib/plans/actions";
 import { ACTIVE_VERTICALS } from "@/lib/playbooks";
+import type { JwtRole } from "@/lib/types/db";
 
 /**
  * Gate 1a mirror for the client cards — the same source onboarding's
@@ -20,6 +21,44 @@ import { ACTIVE_VERTICALS } from "@/lib/playbooks";
  */
 export function isLiveVertical(vertical: string): boolean {
   return (ACTIVE_VERTICALS as readonly string[]).includes(vertical);
+}
+
+/** What a client card's Plan row renders. */
+export type PlanRowVariant =
+  /** The "Generate plan" control (the recovery UI). */
+  | "generate"
+  /** The plan's playbook-version row. */
+  | "version"
+  /** The quiet "None yet" row. */
+  | "none";
+
+/**
+ * Which Plan row a client card gets (one decision, unit-tested):
+ *
+ *  - A HEALTHY plan (row exists AND it produced tasks) shows its version.
+ *  - Otherwise the client needs a (re)generation — plan-less, or the
+ *    documented tolerated partial-failure state: a zero-task residue plan
+ *    (design review, 2026-07-09, Major 3). The control renders only when the
+ *    caller can actually use it: `regeneratePlanForClient` is agency_admin-
+ *    only, so any other role would collect a permission error on every press
+ *    (Code Review minor 4) — they keep the quiet row instead. The vertical
+ *    must also be LIVE (a button can't hurry a dormant playbook). The
+ *    action's supersede path is idempotent and handles residue plans.
+ *  - Everyone else: the version row if a (residue) plan exists, else "None
+ *    yet". `role` is null when no verified claim is readable — fail closed,
+ *    no control.
+ */
+export function planRowVariant(args: {
+  role: JwtRole | null;
+  vertical: string;
+  hasPlan: boolean;
+  taskCount: number;
+}): PlanRowVariant {
+  if (args.hasPlan && args.taskCount > 0) return "version";
+  if (args.role === "agency_admin" && isLiveVertical(args.vertical)) {
+    return "generate";
+  }
+  return args.hasPlan ? "version" : "none";
 }
 
 /** Interface-voice fallback when the action call itself fails to round-trip. */
