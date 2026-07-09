@@ -7,13 +7,22 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { ResolvePort } from "@/lib/intelligence/crawl";
 import { SEED_PLAYBOOKS } from "@/lib/playbooks";
 import { htmlResponse, ScriptedFetch, textResponse } from "@/lib/write-methods/shared/http-harness";
-import { auditProperty } from "./engine";
+import { auditProperty, type PropertyAuditInput } from "./engine";
 
 const ORIGIN = "https://client.example";
 const CRAWLED_AT = "2026-07-01T00:00:00.000Z";
 const PLAYBOOK = SEED_PLAYBOOKS["real-estate"];
+
+/** The scripted client host resolves to a public IP — the egress guard passes. */
+const resolvePublic: ResolvePort = async () => [{ address: "93.184.216.34", family: 4 }];
+
+/** auditProperty with the SSRF egress resolver defaulted to a public answer. */
+function auditProp(opts: Omit<PropertyAuditInput, "resolvePort"> & { resolvePort?: ResolvePort }) {
+  return auditProperty({ resolvePort: resolvePublic, ...opts });
+}
 
 function exact(url: string): RegExp {
   return new RegExp(`^${url.replace(/[.+?^${}()|[\]\\]/g, "\\$&")}$`);
@@ -51,7 +60,7 @@ function scriptGapSite(): ScriptedFetch {
 
 describe("auditProperty — the M2 wrap around the frozen skill", () => {
   it("feeds the crawl output to the skill and returns its scored result verbatim", async () => {
-    const { audit, coverage, site } = await auditProperty({
+    const { audit, coverage, site } = await auditProp({
       fetchPort: scriptGapSite().port,
       startUrl: ORIGIN,
       playbook: PLAYBOOK,
@@ -84,7 +93,7 @@ describe("auditProperty — the M2 wrap around the frozen skill", () => {
 
   it("passes the caller's canonical entity through to the skill's input", async () => {
     const entity = { name: "Gable & Grove Realty" };
-    const { site } = await auditProperty({
+    const { site } = await auditProp({
       fetchPort: scriptGapSite().port,
       startUrl: ORIGIN,
       playbook: PLAYBOOK,
@@ -96,7 +105,7 @@ describe("auditProperty — the M2 wrap around the frozen skill", () => {
 
   it("is deterministic end-to-end: two runs over identical responses are byte-identical", async () => {
     const run = () =>
-      auditProperty({
+      auditProp({
         fetchPort: scriptGapSite().port,
         startUrl: ORIGIN,
         playbook: PLAYBOOK,
@@ -110,7 +119,7 @@ describe("auditProperty — the M2 wrap around the frozen skill", () => {
     const fetchPort = new ScriptedFetch();
     fetchPort.on("GET", exact(`${ORIGIN}/robots.txt`), () => textResponse(503, "boom"));
     fetchPort.on("GET", exact(`${ORIGIN}/llms.txt`), () => textResponse(503, "boom"));
-    const { coverage, site } = await auditProperty({
+    const { coverage, site } = await auditProp({
       fetchPort: fetchPort.port,
       startUrl: ORIGIN,
       playbook: PLAYBOOK,

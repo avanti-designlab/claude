@@ -3,12 +3,13 @@
 import { AuthorizationError, requireAuth, requireOperator } from "@/lib/auth/guards";
 import { isUuidV4 } from "@/lib/clients/validate";
 import type { CrawlCoverage } from "@/lib/intelligence/crawl";
+import { hostIsBlockedLiteral } from "@/lib/intelligence/crawl";
 import { ACTIVE_VERTICALS, getPlaybook } from "@/lib/playbooks";
 import type { AuditResult } from "@/lib/skills/aeo-audit";
 import { createClient } from "@/lib/supabase/server";
 import type { SeedVertical } from "@/lib/types/playbook";
 import { auditProperty } from "./engine";
-import { liveFetchPort } from "./live-fetch";
+import { liveFetchPort, liveResolvePort } from "./live-fetch";
 import { logAuditFailure, persistAudit, readAuditHistory } from "./persist";
 import type { AuditHistoryEntry } from "./rows";
 
@@ -164,6 +165,7 @@ export async function runPropertyAudit(input: {
   try {
     const result = await auditProperty({
       fetchPort: liveFetchPort(),
+      resolvePort: liveResolvePort(),
       startUrl: property.url,
       playbook,
       crawledAt: new Date().toISOString(),
@@ -202,14 +204,24 @@ export async function runPropertyAudit(input: {
   }
 }
 
-/** The crawler needs an absolute http(s) URL — anything else is not a crawl target. */
+/**
+ * The crawler needs an absolute http(s) URL — anything else is not a crawl
+ * target. Also rejects a synchronously-recognizable internal host (an IP
+ * literal in a blocked range, or `localhost`) up front, so an obvious SSRF
+ * target is `not_crawlable` before we ever build a crawl (defense in depth —
+ * the crawler's egress guard closes the DNS-resolving case too, recording
+ * `blocked_address`). No DNS here: this is the synchronous pre-check only.
+ */
 function isCrawlableUrl(url: string): boolean {
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+    parsed = new URL(url);
   } catch {
     return false;
   }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (hostIsBlockedLiteral(parsed.hostname)) return false;
+  return true;
 }
 
 /* ------------------------------------------------------------------ */

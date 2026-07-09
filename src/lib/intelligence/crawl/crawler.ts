@@ -21,13 +21,27 @@
  *  - REDIRECT/ERROR HONESTY. The port pins `redirect: "error"`; a URL that
  *    redirects or fails is recorded as a per-page failure with its reason —
  *    the crawler never follows a hop and never silently drops a page.
- *  - DETERMINISTIC. BFS in discovery order; `crawledAt` is caller-supplied;
- *    no wall-clock, no randomness — same scripted responses, same output.
+ *  - SSRF-SAFE. Every fetch (the very first robots.txt/llms.txt read AND every
+ *    page) passes the egress guard (egress-guard.ts) FIRST: an IP-literal or
+ *    resolved-to-internal host (loopback, link-local, RFC1918, cloud metadata,
+ *    IPv6 ULA…) is refused pre-fetch. A blocked START host crawls nothing and
+ *    records the uniform `blocked_address` reason. DNS is resolved via the
+ *    INJECTED `resolvePort` (memoized per host within a crawl) — same
+ *    zero-live-dependency discipline as the FetchPort.
+ *  - TIME-BOUNDED. `wallClockBudgetMs` ends the crawl early once exceeded;
+ *    unreached queued URLs are recorded as `budget_exhausted`. The per-request
+ *    timeout is applied at the live-fetch seam (the port carries no signal).
+ *  - DETERMINISTIC within budget. BFS in discovery order; `crawledAt` is
+ *    caller-supplied; no randomness. The only clock input is the wall-clock
+ *    budget (a safety valve): any crawl that completes within budget — the
+ *    normal case — is byte-identical across runs. `now` is injectable so the
+ *    budget path is exercised deterministically in tests.
  */
 
 import type { CrawledPage, CrawledSite } from "@/lib/skills/aeo-audit";
 import { isBotAllowed } from "@/lib/skills/aeo-audit";
 import type { FetchPort, FetchPortResponse } from "@/lib/write-methods/shared";
+import { checkEgressHost, type ResolvePort } from "./egress-guard";
 import { extractDoc } from "./extract";
 import {
   AUDIT_CRAWLER_BOT,
@@ -41,11 +55,20 @@ import {
 
 export interface CrawlInput {
   fetchPort: FetchPort;
+  /**
+   * Injected DNS resolver for the SSRF egress guard — REQUIRED, no insecure
+   * default (production wires node dns behind the live-fetch seam; tests pass a
+   * fake). A crawler that could skip the resolve check would silently lose
+   * SSRF protection on DNS hostnames.
+   */
+  resolvePort: ResolvePort;
   /** Absolute http(s) URL of the property (callers validate before invoking). */
   startUrl: string;
   /** ISO timestamp for `site.crawledAt` — caller-supplied (determinism). */
   crawledAt: string;
   bounds?: Partial<CrawlBounds>;
+  /** Injectable clock for the wall-clock budget. Default: `Date.now`. */
+  now?: () => number;
 }
 
 /**
@@ -100,12 +123,19 @@ function resolveLink(href: string, pageUrl: string, origin: string): ResolvedLin
 /* ------------------------------------------------------------------ */
 
 interface FetchTextOutcome {
-  kind: "ok" | "rejected" | "http_error" | "too_large" | "not_html";
+  kind: "ok" | "rejected" | "http_error" | "too_large" | "not_html" | "blocked";
   status?: number;
   body?: string;
   contentType?: string | null;
   lastModifiedHeader?: string | null;
 }
+
+/** Uniform, non-leaking note for an egress-blocked target (see PageFailureReason). */
+const BLOCKED_ADDRESS_DETAIL =
+  "This address could not be verified as a public host (loopback, private, link-local, or cloud-metadata range) — refused before any connection by the SSRF egress guard.";
+
+const BUDGET_EXHAUSTED_DETAIL =
+  "Crawl wall-clock budget reached before this URL was fetched — reported so a time-truncated crawl is never mistaken for a complete one.";
 
 /** Sanitize a header token for the coverage record (bounded, media-type only). */
 function mediaType(contentType: string | null): string {
@@ -150,6 +180,29 @@ async function fetchText(
   }
   if (body.length > maxChars) return { kind: "too_large", status, contentType };
   return { kind: "ok", status, body, contentType, lastModifiedHeader: response.headers.get("last-modified") };
+}
+
+/**
+ * Egress-guarded fetch: run the SSRF check on the URL's host BEFORE touching
+ * the port. A blocked host returns `{ kind: "blocked" }` with NO port call — no
+ * connection, so nothing to leak. `resolve` is the per-crawl memoized resolver,
+ * so a same-origin crawl resolves its host exactly once.
+ */
+async function guardedFetch(
+  port: FetchPort,
+  resolve: ResolvePort,
+  url: string,
+  maxChars: number,
+  opts: { requireHtml: boolean },
+): Promise<FetchTextOutcome> {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return { kind: "rejected" };
+  }
+  if (!(await checkEgressHost(host, resolve))) return { kind: "blocked" };
+  return fetchText(port, url, maxChars, opts);
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +270,8 @@ function buildPage(
 
 export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
   const bounds: CrawlBounds = { ...DEFAULT_CRAWL_BOUNDS, ...input.bounds };
+  const now = input.now ?? Date.now;
+  const startedAt = now();
   let start: URL;
   try {
     start = new URL(input.startUrl);
@@ -227,11 +282,42 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
     throw new Error("crawlSite: startUrl must be an absolute http(s) URL");
   }
   const origin = start.origin;
+  const startCanonical = canonicalUrl(start);
 
-  // robots.txt first — the crawl obeys it or says why it could not.
-  const robotsOutcome = await fetchText(input.fetchPort, `${origin}/robots.txt`, bounds.maxPageBytes, {
+  // Per-crawl DNS memo: the egress guard resolves each host once, so a
+  // same-origin crawl (every fetch shares the start host) does a single lookup.
+  const resolveCache = new Map<string, Promise<Awaited<ReturnType<ResolvePort>>>>();
+  const resolveMemo: ResolvePort = (host) => {
+    let pending = resolveCache.get(host);
+    if (pending === undefined) {
+      pending = input.resolvePort(host);
+      resolveCache.set(host, pending);
+    }
+    return pending;
+  };
+
+  // robots.txt first — this is ALSO the first egress check on the property
+  // host. A blocked host stops here: fetch nothing, record the start URL under
+  // the uniform `blocked_address` reason (no status leak), crawl nothing.
+  const robotsOutcome = await guardedFetch(input.fetchPort, resolveMemo, `${origin}/robots.txt`, bounds.maxPageBytes, {
     requireHtml: false,
   });
+  if (robotsOutcome.kind === "blocked") {
+    return {
+      site: { baseUrl: origin, crawledAt: input.crawledAt, pages: [], robotsTxt: null, llmsTxt: null },
+      coverage: {
+        attempted: 1,
+        crawled: 0,
+        pages: [
+          { url: startCanonical, depth: 0, status: "failed", reason: "blocked_address", detail: BLOCKED_ADDRESS_DETAIL },
+        ],
+        robotsTxtStatus: "unreachable",
+        llmsTxtStatus: "unreachable",
+        frontierTruncated: false,
+        offOriginRefused: 0,
+      },
+    };
+  }
   let robotsTxt: string | null = null;
   let robotsTxtStatus: CrawlCoverage["robotsTxtStatus"];
   let robotsUnavailable = false;
@@ -248,7 +334,7 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
     robotsUnavailable = true;
   }
 
-  const llmsOutcome = await fetchText(input.fetchPort, `${origin}/llms.txt`, bounds.maxPageBytes, {
+  const llmsOutcome = await guardedFetch(input.fetchPort, resolveMemo, `${origin}/llms.txt`, bounds.maxPageBytes, {
     requireHtml: false,
   });
   const llmsTxt = llmsOutcome.kind === "ok" ? (llmsOutcome.body ?? "") : null;
@@ -264,12 +350,20 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
   const offOriginSeen = new Set<string>();
   /** True when a discovered link was NOT followed because of maxDepth. */
   let depthTruncated = false;
+  /** True when the crawl ended early on the wall-clock budget. */
+  let budgetExhausted = false;
 
-  const startCanonical = canonicalUrl(start);
   const queue: Array<{ url: string; depth: number }> = [{ url: startCanonical, depth: 0 }];
   const seen = new Set<string>([startCanonical]);
 
   while (queue.length > 0 && outcomes.length < bounds.maxPages) {
+    // Wall-clock budget: end the crawl before starting another fetch once the
+    // budget is spent. Remaining queued URLs are drained below as
+    // `budget_exhausted` — never silently dropped.
+    if (now() - startedAt >= bounds.wallClockBudgetMs) {
+      budgetExhausted = true;
+      break;
+    }
     const { url, depth } = queue.shift()!;
     const path = new URL(url).pathname;
 
@@ -294,7 +388,20 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
       continue;
     }
 
-    const fetched = await fetchText(input.fetchPort, url, bounds.maxPageBytes, { requireHtml: true });
+    const fetched = await guardedFetch(input.fetchPort, resolveMemo, url, bounds.maxPageBytes, { requireHtml: true });
+    if (fetched.kind === "blocked") {
+      // Defense in depth: a same-origin crawl can only reach the already-vetted
+      // start host, but if a URL's host ever resolves to a blocked address it is
+      // recorded uniformly and never fetched.
+      outcomes.push({
+        url,
+        depth,
+        status: "failed",
+        reason: "blocked_address",
+        detail: BLOCKED_ADDRESS_DETAIL,
+      });
+      continue;
+    }
     if (fetched.kind === "rejected") {
       outcomes.push({
         url,
@@ -360,6 +467,16 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
       }
       seen.add(link);
       queue.push({ url: link, depth: depth + 1 });
+    }
+  }
+
+  // Budget hit mid-crawl: record the queued-but-unreached URLs honestly (still
+  // respecting maxPages, so `attempted` never exceeds its cap; anything left
+  // beyond that surfaces as frontier truncation below).
+  if (budgetExhausted) {
+    while (queue.length > 0 && outcomes.length < bounds.maxPages) {
+      const { url, depth } = queue.shift()!;
+      outcomes.push({ url, depth, status: "failed", reason: "budget_exhausted", detail: BUDGET_EXHAUSTED_DETAIL });
     }
   }
 

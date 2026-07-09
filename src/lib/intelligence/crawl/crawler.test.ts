@@ -9,11 +9,24 @@
 
 import { describe, expect, it } from "vitest";
 import { htmlResponse, jsonResponse, ScriptedFetch, textResponse } from "@/lib/write-methods/shared/http-harness";
-import { crawlSite } from "./crawler";
+import { crawlSite, type CrawlInput } from "./crawler";
+import type { ResolvePort } from "./egress-guard";
 import { AUDIT_CRAWLER_USER_AGENT } from "./types";
 
 const ORIGIN = "https://site.test";
 const CRAWLED_AT = "2026-07-01T00:00:00.000Z";
+
+/** Every scripted host resolves to one public IP unless a test overrides it. */
+const resolvePublic: ResolvePort = async () => [{ address: "93.184.216.34", family: 4 }];
+
+/**
+ * crawlSite with the SSRF egress resolver defaulted to a public answer, so the
+ * existing scripted hosts (site.test, …) crawl exactly as before. Tests that
+ * exercise the guard pass their own `resolvePort`.
+ */
+function crawl(opts: Omit<CrawlInput, "resolvePort"> & { resolvePort?: ResolvePort }) {
+  return crawlSite({ resolvePort: resolvePublic, ...opts });
+}
 
 /** Anchor a route to one exact URL (substring matching would over-match "/"). */
 function exact(url: string): RegExp {
@@ -61,7 +74,7 @@ function scriptHealthySite(): ScriptedFetch {
 describe("crawlSite — happy path, dedup, and the skill-input shape", () => {
   it("crawls same-origin pages breadth-first and fills the aeo-audit CrawledSite contract", async () => {
     const fetchPort = scriptHealthySite();
-    const { site, coverage } = await crawlSite({
+    const { site, coverage } = await crawl({
       fetchPort: fetchPort.port,
       startUrl: ORIGIN,
       crawledAt: CRAWLED_AT,
@@ -91,7 +104,7 @@ describe("crawlSite — happy path, dedup, and the skill-input shape", () => {
 
   it("sends an honest bot User-Agent and pins redirect:'error' on every request", async () => {
     const fetchPort = scriptHealthySite();
-    await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     expect(fetchPort.requests.length).toBeGreaterThan(0);
     for (const req of fetchPort.requests) {
       expect(req.method).toBe("GET");
@@ -101,15 +114,15 @@ describe("crawlSite — happy path, dedup, and the skill-input shape", () => {
   });
 
   it("is deterministic: identical scripted responses → byte-identical CrawlResult", async () => {
-    const runA = await crawlSite({ fetchPort: scriptHealthySite().port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
-    const runB = await crawlSite({ fetchPort: scriptHealthySite().port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const runA = await crawl({ fetchPort: scriptHealthySite().port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const runB = await crawl({ fetchPort: scriptHealthySite().port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     expect(JSON.stringify(runA)).toBe(JSON.stringify(runB));
   });
 
   it("rejects a non-http(s) start URL outright", async () => {
     const fetchPort = new ScriptedFetch();
     for (const bad of ["not a url", "ftp://site.test", "javascript:alert(1)"]) {
-      await expect(crawlSite({ fetchPort: fetchPort.port, startUrl: bad, crawledAt: CRAWLED_AT })).rejects.toThrow(
+      await expect(crawl({ fetchPort: fetchPort.port, startUrl: bad, crawledAt: CRAWLED_AT })).rejects.toThrow(
         /absolute http\(s\) URL/,
       );
     }
@@ -123,7 +136,7 @@ describe("crawlSite — off-origin refusal (never fetched, honestly counted)", (
     // NOTE: evil.test / evil2.test / sub.site.test / http://site.test are NOT
     // scripted — if the crawler ever fetched one, ScriptedFetch would throw
     // and this test would fail loudly.
-    const { coverage } = await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const { coverage } = await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     for (const req of fetchPort.requests) {
       expect(req.url.startsWith(`${ORIGIN}/`)).toBe(true);
     }
@@ -135,7 +148,7 @@ describe("crawlSite — off-origin refusal (never fetched, honestly counted)", (
 describe("crawlSite — robots.txt respect", () => {
   it("honors a path block for AEO-AuditBot: recorded, never fetched", async () => {
     const fetchPort = scriptHealthySite();
-    const { site, coverage } = await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const { site, coverage } = await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     const blocked = coverage.pages.find((p) => p.url === `${ORIGIN}/private`);
     expect(blocked).toMatchObject({ status: "failed", reason: "robots_disallowed" });
     expect(fetchPort.requests.some((r) => r.url.includes("/private"))).toBe(false);
@@ -149,7 +162,7 @@ describe("crawlSite — robots.txt respect", () => {
     fetchPort.on("GET", exact(`${ORIGIN}/robots.txt`), () => textResponse(404, "not found"));
     fetchPort.on("GET", exact(`${ORIGIN}/llms.txt`), () => textResponse(404, "not found"));
     fetchPort.on("GET", exact(`${ORIGIN}/`), () => htmlResponse(200, `<title>t</title><p>body text</p>`));
-    const { site, coverage } = await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const { site, coverage } = await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     expect(coverage.robotsTxtStatus).toBe("absent");
     expect(coverage.llmsTxtStatus).toBe("absent");
     expect(site.robotsTxt).toBeNull();
@@ -162,7 +175,7 @@ describe("crawlSite — robots.txt respect", () => {
     fetchPort.on("GET", exact(`${ORIGIN}/robots.txt`), () => textResponse(503, "boom"));
     fetchPort.on("GET", exact(`${ORIGIN}/llms.txt`), () => textResponse(404, "not found"));
     // The start page is deliberately NOT scripted: fetching it would throw.
-    const { site, coverage } = await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const { site, coverage } = await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     expect(coverage.robotsTxtStatus).toBe("unreachable");
     expect(coverage.crawled).toBe(0);
     expect(coverage.pages).toEqual([
@@ -198,7 +211,7 @@ describe("crawlSite — per-page failure honesty (redirects, errors, size, media
   }
 
   it("records http_error / fetch_failed / too_large / not_html per page — nothing silently dropped", async () => {
-    const { site, coverage } = await crawlSite({
+    const { site, coverage } = await crawl({
       fetchPort: scriptFailureSite().port,
       startUrl: ORIGIN,
       crawledAt: CRAWLED_AT,
@@ -225,7 +238,7 @@ describe("crawlSite — per-page failure honesty (redirects, errors, size, media
       headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "text/html" : null) },
       text: async () => `<p>${"x".repeat(5_000)}</p>`,
     }));
-    const { site, coverage } = await crawlSite({
+    const { site, coverage } = await crawl({
       fetchPort: fetchPort.port,
       startUrl: ORIGIN,
       crawledAt: CRAWLED_AT,
@@ -250,7 +263,7 @@ describe("crawlSite — bounds", () => {
 
   it("maxPages is a hard cap on ATTEMPTED urls; the cut frontier is reported", async () => {
     const fetchPort = scriptWideSite(10);
-    const { coverage } = await crawlSite({
+    const { coverage } = await crawl({
       fetchPort: fetchPort.port,
       startUrl: ORIGIN,
       crawledAt: CRAWLED_AT,
@@ -270,7 +283,7 @@ describe("crawlSite — bounds", () => {
     fetchPort.on("GET", exact(`${ORIGIN}/`), () => htmlResponse(200, `<a href="/a">a</a>`));
     fetchPort.on("GET", exact(`${ORIGIN}/a`), () => htmlResponse(200, `<a href="/b">b</a>`));
     // /b is NOT scripted: fetching it would throw — depth cap must prevent that.
-    const { coverage } = await crawlSite({
+    const { coverage } = await crawl({
       fetchPort: fetchPort.port,
       startUrl: ORIGIN,
       crawledAt: CRAWLED_AT,
@@ -282,8 +295,121 @@ describe("crawlSite — bounds", () => {
 
   it("a full crawl of a small site reports NO truncation", async () => {
     const fetchPort = scriptWideSite(2);
-    const { coverage } = await crawlSite({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    const { coverage } = await crawl({ fetchPort: fetchPort.port, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
     expect(coverage.attempted).toBe(3);
     expect(coverage.frontierTruncated).toBe(false);
+  });
+});
+
+describe("crawlSite — SSRF egress guard (blocked hosts are never fetched)", () => {
+  /** A resolver that MUST NOT run: literal/localhost hosts are decided pre-DNS. */
+  const resolveThrows: ResolvePort = async () => {
+    throw new Error("resolver must not run for an IP-literal or localhost host");
+  };
+
+  it("refuses every literal internal start URL PRE-DNS: zero fetches, blocked_address, nothing crawled", async () => {
+    // Cloud metadata, loopback (name + v4 + v6), RFC1918. All are IP literals or
+    // the reserved localhost name → caught synchronously, resolver never called.
+    const literals = [
+      "http://169.254.169.254/latest/meta-data/",
+      "http://localhost",
+      "http://127.0.0.1",
+      "http://[::1]",
+      "http://10.0.0.5",
+      "http://192.168.1.1",
+    ];
+    for (const startUrl of literals) {
+      const noFetch = new ScriptedFetch();
+      const { site, coverage } = await crawl({
+        fetchPort: noFetch.port,
+        resolvePort: resolveThrows,
+        startUrl,
+        crawledAt: CRAWLED_AT,
+      });
+      // Nothing left the box: the guard blocked before any port call.
+      expect(noFetch.requests).toEqual([]);
+      expect(coverage.crawled).toBe(0);
+      expect(site.pages).toEqual([]);
+      expect(coverage.pages).toHaveLength(1);
+      expect(coverage.pages[0]).toMatchObject({ status: "failed", reason: "blocked_address" });
+    }
+  });
+
+  it("refuses a DNS hostname that RESOLVES to an internal address (no fetch, blocked_address)", async () => {
+    const resolveToBlocked: ResolvePort = async () => [{ address: "10.0.0.5", family: 4 }];
+    const noFetch = new ScriptedFetch();
+    const { site, coverage } = await crawl({
+      fetchPort: noFetch.port,
+      resolvePort: resolveToBlocked,
+      startUrl: "http://internal.corp.example/",
+      crawledAt: CRAWLED_AT,
+    });
+    expect(noFetch.requests).toEqual([]); // resolved-to-internal → never fetched
+    expect(coverage.crawled).toBe(0);
+    expect(site.pages).toEqual([]);
+    expect(coverage.pages[0]).toMatchObject({ status: "failed", reason: "blocked_address" });
+  });
+
+  it("blocks a host that resolves to a MIX of public and internal addresses (any-blocked wins)", async () => {
+    const resolveMixed: ResolvePort = async () => [{ address: "93.184.216.34" }, { address: "127.0.0.1" }];
+    const noFetch = new ScriptedFetch();
+    const { coverage } = await crawl({
+      fetchPort: noFetch.port,
+      resolvePort: resolveMixed,
+      startUrl: "http://rebind.example/",
+      crawledAt: CRAWLED_AT,
+    });
+    expect(noFetch.requests).toEqual([]);
+    expect(coverage.pages[0]).toMatchObject({ status: "failed", reason: "blocked_address" });
+  });
+
+  it("NO false positive: a public host resolving to a public IP crawls normally", async () => {
+    const { site, coverage } = await crawl({
+      fetchPort: scriptHealthySite().port,
+      resolvePort: resolvePublic,
+      startUrl: ORIGIN,
+      crawledAt: CRAWLED_AT,
+    });
+    expect(coverage.crawled).toBe(2);
+    expect(site.pages.map((p) => p.url)).toEqual([`${ORIGIN}/`, `${ORIGIN}/about`]);
+  });
+
+  it("resolves the origin host exactly ONCE per crawl (memoized across every fetch)", async () => {
+    let resolveCalls = 0;
+    const counting: ResolvePort = async () => {
+      resolveCalls += 1;
+      return [{ address: "93.184.216.34", family: 4 }];
+    };
+    // robots + llms + 2 pages all share the same host → a single DNS lookup.
+    await crawl({ fetchPort: scriptHealthySite().port, resolvePort: counting, startUrl: ORIGIN, crawledAt: CRAWLED_AT });
+    expect(resolveCalls).toBe(1);
+  });
+});
+
+describe("crawlSite — wall-clock budget (time-truncated crawls stay honest)", () => {
+  /** Returns each value in turn, then sticks on the last — a deterministic clock. */
+  function steppingClock(values: number[]): () => number {
+    let i = 0;
+    return () => values[Math.min(i++, values.length - 1)];
+  }
+
+  it("ends the crawl once the budget is spent and records unreached URLs as budget_exhausted", async () => {
+    // now() calls: [startedAt, iter-1 check, iter-2 check]. Home fetches under
+    // budget; before /about (and /private) the budget is blown → they drain as
+    // budget_exhausted rather than being silently dropped.
+    const now = steppingClock([0, 0, 999_999]);
+    const { site, coverage } = await crawl({
+      fetchPort: scriptHealthySite().port,
+      startUrl: ORIGIN,
+      crawledAt: CRAWLED_AT,
+      now,
+    });
+    expect(coverage.crawled).toBe(1);
+    expect(site.pages.map((p) => p.url)).toEqual([`${ORIGIN}/`]);
+    const budgeted = coverage.pages
+      .filter((p) => p.reason === "budget_exhausted")
+      .map((p) => p.url)
+      .sort();
+    expect(budgeted).toEqual([`${ORIGIN}/about`, `${ORIGIN}/private`].sort());
   });
 });

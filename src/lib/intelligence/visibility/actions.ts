@@ -267,6 +267,10 @@ export async function runVisibilityTracking(input: {
   }
 
   const runAt = new Date().toISOString();
+  // WIRING NOTE: sampleVisibility retries failed samples with a REAL backoff
+  // timer (sampler.ts), so a full run can sleep for seconds — this action must
+  // be dispatched as a background/scheduled job, never awaited inside an
+  // interactive request. (Code Review accepted the real timer on that basis.)
   const run = await sampleVisibility(provider, querySet.queries, { runAt });
   const coverage = runCoverage(run);
   if (coverage.failed > 0) {

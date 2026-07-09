@@ -38,7 +38,14 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth/session", () => ({ getClaims: getClaimsMock }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
-vi.mock("./live-fetch", () => ({ liveFetchPort: () => fetchPortMock }));
+// The live resolver is stubbed to a public answer so the REAL crawler's SSRF
+// egress guard passes for the scripted (public) test host. The guard's blocked
+// paths are pinned exhaustively at the crawler level (crawler.test.ts); here we
+// pin the action's synchronous pre-check (isCrawlableUrl) instead.
+vi.mock("./live-fetch", () => ({
+  liveFetchPort: () => fetchPortMock,
+  liveResolvePort: () => async () => [{ address: "93.184.216.34", family: 4 }],
+}));
 
 /* ------------------------------------------------------------------ */
 /* fixtures                                                            */
@@ -186,6 +193,19 @@ describe("runPropertyAudit — property/client resolution", () => {
     setup({ properties: { select: { data: { ...PROPERTY_ROW, url: "ftp://x" } } } });
     const result = await runPropertyAudit({ propertyId: PROPERTY_ID });
     expect(result).toMatchObject({ ok: false, reason: "not_crawlable" });
+  });
+
+  it("a website property pointed at an internal address is not_crawlable PRE-CRAWL (SSRF pre-check)", async () => {
+    // A stored property URL aimed at cloud metadata / loopback is refused by the
+    // synchronous isCrawlableUrl guard — no crawl, no fetch, no resolve.
+    for (const url of ["http://169.254.169.254/latest/meta-data/", "http://localhost", "http://127.0.0.1", "http://10.0.0.5"]) {
+      fetchPortMock.mockReset();
+      const fake = setup({ properties: { select: { data: { ...PROPERTY_ROW, url } } } });
+      const result = await runPropertyAudit({ propertyId: PROPERTY_ID });
+      expect(result).toMatchObject({ ok: false, reason: "not_crawlable" });
+      expect(fetchPortMock).not.toHaveBeenCalled();
+      expect(fake.inserts).toEqual([]);
+    }
   });
 
   it("dormant vertical: no_playbook, no crawl (Gate 1a)", async () => {

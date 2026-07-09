@@ -244,7 +244,10 @@ export function deriveQuerySet(
         : [{ prompt: instantiate(entry.prompt, clientName, null), market: null }];
 
     for (const variant of variants) {
-      const key = `${variant.prompt.toLowerCase()} ${variant.market ?? ""}`;
+      // Dedup identity: case-insensitive prompt + market, JSON-encoded so the
+      // two fields can never collide across a separator (no delimiter to inject,
+      // and no raw control-byte separator — keep the source text-clean).
+      const key = JSON.stringify([variant.prompt.toLowerCase(), variant.market ?? ""]);
       if (seenQueries.has(key)) continue;
       seenQueries.add(key);
       queries.push({

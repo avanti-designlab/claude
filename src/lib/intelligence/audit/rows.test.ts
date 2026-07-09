@@ -27,7 +27,13 @@ async function runEngine() {
   fetchPort.on("GET", exact(`${ORIGIN}/`), () =>
     htmlResponse(200, `<title>Home</title><h1>Advisory</h1><p>${"Real copy here. ".repeat(6)}</p>`),
   );
-  return auditProperty({ fetchPort: fetchPort.port, startUrl: ORIGIN, playbook: PLAYBOOK, crawledAt: CRAWLED_AT });
+  return auditProperty({
+    fetchPort: fetchPort.port,
+    resolvePort: async () => [{ address: "93.184.216.34" }],
+    startUrl: ORIGIN,
+    playbook: PLAYBOOK,
+    crawledAt: CRAWLED_AT,
+  });
 }
 
 const IDS = {

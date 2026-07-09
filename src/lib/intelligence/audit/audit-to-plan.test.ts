@@ -37,7 +37,13 @@ async function runEngine(): Promise<PropertyAuditResult> {
   fetchPort.on("GET", exact(`${ORIGIN}/about`), () =>
     htmlResponse(200, `<h1>About</h1><p>${"Team background and credentials. ".repeat(5)}</p><a href="/">home</a>`),
   );
-  return auditProperty({ fetchPort: fetchPort.port, startUrl: ORIGIN, playbook: PLAYBOOK, crawledAt: CRAWLED_AT });
+  return auditProperty({
+    fetchPort: fetchPort.port,
+    resolvePort: async () => [{ address: "93.184.216.34" }],
+    startUrl: ORIGIN,
+    playbook: PLAYBOOK,
+    crawledAt: CRAWLED_AT,
+  });
 }
 
 describe("audit → plan merge (real generatePlan, real audit-merge)", () => {

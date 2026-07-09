@@ -24,7 +24,7 @@ export const AUDIT_CRAWLER_BOT = "AEO-AuditBot";
 export const AUDIT_CRAWLER_USER_AGENT = `Mozilla/5.0 (compatible; ${AUDIT_CRAWLER_BOT}/1.0)`;
 
 /**
- * Crawl bounds. All three are hard caps — the crawler NEVER exceeds them.
+ * Crawl bounds. Every field is a hard limit — the crawler NEVER exceeds them.
  * Defaults are doc-silent engineering choices (doc 02/05 give no crawl
  * budget); sized for the small-business sites the seed verticals serve and
  * flagged for ratification alongside the other aeo-audit launch thresholds
@@ -43,12 +43,31 @@ export interface CrawlBounds {
    * missing-schema/missing-content findings.
    */
   maxPageBytes: number;
+  /**
+   * Overall wall-clock budget for the whole crawl, in ms. Checked between page
+   * fetches: once exceeded, the crawl ends early and every unreached queued URL
+   * is recorded honestly as `budget_exhausted` (never silently dropped). Bounds
+   * total time even when many pages each answer slowly — the pages/depth/byte
+   * caps bound WORK, this bounds TIME. ⚑ Doc-silent default (see below).
+   */
+  wallClockBudgetMs: number;
 }
+
+/**
+ * Per-request timeout, in ms — applied at the LIVE fetch seam
+ * (`audit/live-fetch.ts`, via `AbortSignal.timeout`) because the injected
+ * FetchPort contract carries no signal and is out of this module's scope.
+ * Bounds a single hung request (undici's own default is ~300s, far too long
+ * for an interactive audit). ⚑ Doc-silent default, flagged for ratification
+ * with the crawl bounds above.
+ */
+export const REQUEST_TIMEOUT_MS = 15_000;
 
 export const DEFAULT_CRAWL_BOUNDS: CrawlBounds = {
   maxPages: 30,
   maxDepth: 3,
   maxPageBytes: 1_500_000,
+  wallClockBudgetMs: 120_000,
 };
 
 /** Why a URL could not be crawled — every reason is stated, never swallowed. */
@@ -69,7 +88,22 @@ export type PageFailureReason =
   /** The response declared a non-HTML content type. */
   | "not_html"
   /** The body exceeds `maxPageBytes` — refused whole, never truncated. */
-  | "too_large";
+  | "too_large"
+  /**
+   * The URL's host is (or resolves to) a non-public address — loopback,
+   * link-local, RFC1918/CGNAT, cloud metadata, IPv6 ULA/link-local, etc. The
+   * SSRF egress guard refused it PRE-FETCH, so there is no connection, no
+   * status, and no connect-refused-vs-response distinction to leak: every
+   * blocked address gets this one uniform reason regardless of what (if
+   * anything) listens behind it.
+   */
+  | "blocked_address"
+  /**
+   * The crawl hit its wall-clock budget before reaching this queued URL. Not a
+   * failure of the page — a bound on the crawl. Reported so a time-truncated
+   * crawl can never masquerade as a complete one.
+   */
+  | "budget_exhausted";
 
 /** One attempted URL, in crawl order. */
 export interface PageOutcome {

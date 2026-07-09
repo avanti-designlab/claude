@@ -29,10 +29,15 @@ import type {
 import { runAudit } from "@/lib/skills/aeo-audit";
 import type { Playbook } from "@/lib/types/playbook";
 import type { FetchPort } from "@/lib/write-methods/shared";
-import { crawlSite, type CrawlBounds, type CrawlCoverage } from "@/lib/intelligence/crawl";
+import { crawlSite, type CrawlBounds, type CrawlCoverage, type ResolvePort } from "@/lib/intelligence/crawl";
 
 export interface PropertyAuditInput {
   fetchPort: FetchPort;
+  /**
+   * Injected DNS resolver for the crawler's SSRF egress guard — REQUIRED
+   * (production wires node dns behind the live-fetch seam; tests pass a fake).
+   */
+  resolvePort: ResolvePort;
   /** Absolute http(s) URL of the property (callers validate before invoking). */
   startUrl: string;
   /** The client's loaded vertical playbook — the rubric weights follow it. */
@@ -61,6 +66,7 @@ export interface PropertyAuditResult {
 export async function auditProperty(input: PropertyAuditInput): Promise<PropertyAuditResult> {
   const { site, coverage } = await crawlSite({
     fetchPort: input.fetchPort,
+    resolvePort: input.resolvePort,
     startUrl: input.startUrl,
     crawledAt: input.crawledAt,
     bounds: input.bounds,

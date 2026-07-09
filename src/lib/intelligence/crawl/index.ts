@@ -10,6 +10,13 @@
 
 export { crawlSite, RENDER_VISIBLE_MIN_WORDS, type CrawlInput } from "./crawler";
 export {
+  checkEgressHost,
+  hostIsBlockedLiteral,
+  isBlockedAddress,
+  type ResolvedAddress,
+  type ResolvePort,
+} from "./egress-guard";
+export {
   extractDoc,
   MAX_ATTR_CHARS,
   MAX_H1S,
@@ -26,6 +33,7 @@ export {
   AUDIT_CRAWLER_BOT,
   AUDIT_CRAWLER_USER_AGENT,
   DEFAULT_CRAWL_BOUNDS,
+  REQUEST_TIMEOUT_MS,
   type CrawlBounds,
   type CrawlCoverage,
   type CrawlResult,
