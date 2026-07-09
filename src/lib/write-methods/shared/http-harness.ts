@@ -29,7 +29,7 @@ export interface RecordedRequest {
 export type ScriptedHandler = (req: RecordedRequest) => FetchPortResponse;
 
 interface ScriptedRoute {
-  method: "GET" | "POST" | "PATCH" | "*";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "*";
   match: string | RegExp;
   handler: ScriptedHandler;
 }
@@ -45,7 +45,7 @@ export class ScriptedFetch {
    * tested against the full request URL; first registered match wins.
    */
   on(
-    method: "GET" | "POST" | "PATCH" | "*",
+    method: "GET" | "POST" | "PATCH" | "PUT" | "*",
     match: string | RegExp,
     handler: ScriptedHandler,
   ): this {

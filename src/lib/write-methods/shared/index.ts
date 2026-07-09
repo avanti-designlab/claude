@@ -25,6 +25,8 @@ export {
   type ParsedJson,
 } from "./http";
 
+export { refuseBaseUrl } from "./refuse";
+
 export {
   ScriptedFetch,
   jsonResponse,

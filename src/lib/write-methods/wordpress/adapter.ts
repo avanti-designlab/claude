@@ -65,6 +65,7 @@ import {
   tryParseJson,
   type FetchPort,
 } from "../shared/http";
+import { refuseBaseUrl } from "../shared/refuse";
 import {
   assertReversibleValue,
   describeOperation,
@@ -115,18 +116,22 @@ export class WordPressAdapter implements WriteMethodAdapter {
   private readonly fetchPort: FetchPort;
 
   constructor(config: WordPressAdapterConfig) {
+    // EVERY base-URL refusal below goes through the shared refuse-without-echo
+    // helper (carried item (α) from the 1.3 gates): a base URL is exactly where
+    // a pasted credential lands (`?token=...`, `#access_token=...`, userinfo,
+    // or a malformed paste that still embeds a secret), so no branch composes
+    // its own message and none may repeat the configured value or any parsed
+    // piece of it. The class of "this refusal echoes the URL" bugs dies here.
+    const pid = config.site.propertyId;
     let parsed: URL;
     try {
       parsed = new URL(config.site.baseUrl);
     } catch {
-      // Never echo the unparseable URL (carried item (i) from the 1.3 wp gate):
-      // a MALFORMED URL can still carry a credential substring (e.g. a missing
-      // colon in `http//user:secret@site.com`), so it is refused without being
-      // repeated — consistent with the userinfo branches below.
-      throw new WriteMethodError(
+      throw refuseBaseUrl(
         METHOD,
-        "misconfigured",
-        `wordpress: property ${config.site.propertyId} has an unusable base URL (the value is not echoed here because a malformed URL can embed credentials) — reconnect the property with the site's full https address`,
+        pid,
+        "has a base URL that could not be parsed as a URL",
+        "reconnect the property with the site's full https:// address",
       );
     }
     if (parsed.protocol !== "https:") {
@@ -135,25 +140,27 @@ export class WordPressAdapter implements WriteMethodAdapter {
       // it would cross the network in cleartext. (Stock WordPress agrees: it
       // disables Application Passwords entirely on non-SSL sites.) There is
       // deliberately no dev-mode opt-out.
-      throw new WriteMethodError(
+      throw refuseBaseUrl(
         METHOD,
-        "misconfigured",
-        `wordpress: property ${config.site.propertyId} must be connected over HTTPS (got '${parsed.protocol}') — this connection authenticates with an application password on every request, and WordPress itself disables application passwords on non-SSL sites; reconnect the property with its https:// address`,
+        pid,
+        "must be connected over HTTPS — this method authenticates with an application password on every request, and WordPress itself disables application passwords on non-SSL sites",
+        "reconnect the property with its https:// address",
       );
     }
     if (parsed.username || parsed.password) {
-      // Never echo the URL back — it is the thing carrying the credential.
-      throw new WriteMethodError(
+      throw refuseBaseUrl(
         METHOD,
-        "misconfigured",
-        `wordpress: property ${config.site.propertyId} base URL embeds credentials — credentials live in the secrets vault (auth_ref), never in a URL`,
+        pid,
+        "has a base URL that embeds credentials (userinfo) — credentials live in the secrets vault (auth_ref), never in a URL",
+        "reconnect the property with a credential-free https:// address",
       );
     }
     if (parsed.search || parsed.hash) {
-      throw new WriteMethodError(
+      throw refuseBaseUrl(
         METHOD,
-        "misconfigured",
-        `wordpress: property ${config.site.propertyId} base URL must not carry a query or fragment ('${config.site.baseUrl}')`,
+        pid,
+        "has a base URL that carries a query or fragment — a query string is exactly where a pasted token ends up",
+        "reconnect the property with the site's bare https:// address",
       );
     }
     this.site = config.site;

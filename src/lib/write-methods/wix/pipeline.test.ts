@@ -1,17 +1,26 @@
 /**
- * WebflowAdapter driven by the REAL change-management pipeline (doc 04 §2)
+ * WixAdapter driven by the REAL change-management pipeline (doc 04 §2)
  * — the integration proof the 1.3 gate cares about:
  *
- *  - APPLY captures the byte-exact live STAGED before-state through
- *    readCurrent and persists it as `site_changes.diff.before`; the write is
- *    staged-only — the PUBLISHED site is byte-untouched by apply AND rollback
- *    (going live stays with the pipeline's explicit publish flow);
+ *  - APPLY captures the byte-exact LIVE before-state through readCurrent and
+ *    persists it as `site_changes.diff.before`; the write is LIVE-IMMEDIATE —
+ *    Wix has no staged layer, so the live site holds the after-value the
+ *    moment apply returns, which is exactly why `applied_at` is a SOUND
+ *    correlation timestamp for MONITOR on this method (unlike Webflow);
  *  - ROLLBACK restores that captured before-state on the site, byte-exact,
- *    via the same adapter (one action, status → 'reverted');
+ *    via the same adapter (one action, status → 'reverted') — with no publish
+ *    gate in front of the live site, before-capture + verified revert is the
+ *    entire safety story, and these tests treat it that way;
  *  - a failed write — including an honest 429 — leaves the row 'previewed'
- *    and the site untouched (retryable by re-running the SAME action, which
- *    is exactly what the rate_limited contract documents);
- *  - rollback under adversity: a token rotated mid-revert and a
+ *    and the site untouched (retryable by re-running the SAME action); a 429
+ *    on the REVERT direction leaves the row 'applied' (never a false
+ *    'reverted' claim) — both directions pinned;
+ *  - the QA-1 crash window holds THROUGH THIS ADAPTER: a store crash after
+ *    the site write leaves the row 'previewed' while the LIVE site already
+ *    shows the after; the retry keeps the persisted before as the rollback
+ *    baseline (resumed_after_partial_apply) and rollback still restores the
+ *    true original;
+ *  - rollback under adversity: a key rotated mid-revert and a
  *    server-normalized restore both leave the row 'applied' (never a false
  *    'reverted' claim, never silent divergence);
  *  - BATCH partial apply is reported exactly (applied prefix / failed member /
@@ -20,7 +29,7 @@
  *  - the §4 onboarding no-op verify works — and names an HTML-interstitial
  *    site honestly.
  *
- * All HTTP is the injected FakeWebflow — no network.
+ * All HTTP is the injected FakeWix — no network.
  */
 
 import { describe, expect, it } from "vitest";
@@ -29,23 +38,30 @@ import {
   InMemoryChangeStore,
   MapAdapterRegistry,
   steppingClock,
+  type ChangePatch,
+  type ChangeStore,
   type DesiredChange,
+  type NewPreviewedChange,
   type TenantContext,
 } from "@/lib/change-management";
 import { VendorCredential, type SecretsResolver } from "@/lib/connectors";
+import type { SiteChangeRow } from "@/lib/types/db";
 import { isWriteMethodError } from "../shared/errors";
-import { WebflowAdapter } from "./adapter";
-import { FakeWebflow } from "./fake-webflow";
-import { webflowLocators } from "./target";
+import { WixAdapter } from "./adapter";
+import { FakeWix } from "./fake-wix";
+import { wixLocators } from "./target";
 
-const SECRET = "wf-pat-4bCdEfGh.5ecret.T0ken";
+const SECRET = "IST.wix-api-key.4bCdEfGh.5ecretT0ken";
 const SECRET_B64 = Buffer.from(SECRET, "utf8").toString("base64");
 
-const wfid = (tail: string) => tail.padStart(24, "0");
-const SITE_ID = wfid("c0ffee");
-const PAGE_ID = wfid("9a9e1");
-const COLLECTION_ID = wfid("c011");
-const ITEM_IDS = [wfid("17e1"), wfid("17e2"), wfid("17e3")] as const;
+const SITE_ID = "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9";
+const PAGE_ID = "c1dmp";
+const COLLECTION_ID = "Listings";
+const ITEM_IDS = [
+  "11111111-aaaa-4bbb-8ccc-dddddddddd01",
+  "11111111-aaaa-4bbb-8ccc-dddddddddd02",
+  "11111111-aaaa-4bbb-8ccc-dddddddddd03",
+] as const;
 
 const CTX: TenantContext = {
   tenantId: "t1",
@@ -60,23 +76,56 @@ const ORIGINAL_SUMMARIES: Record<string, string> = {
   [ITEM_IDS[2]]: "Casa Tres summary",
 };
 
+/**
+ * A ChangeStore wrapper whose next update() throws AFTER the underlying
+ * store is left untouched — the DB-crash-mid-apply window (QA-1). Delegation
+ * only; the real InMemoryChangeStore (with its CHECK/RLS emulation) does all
+ * actual work.
+ */
+class CrashingStore implements ChangeStore {
+  private failNextUpdate = false;
+  constructor(private readonly inner: InMemoryChangeStore) {}
+  crashOnNextUpdate(): void {
+    this.failNextUpdate = true;
+  }
+  insertPreviewed(input: NewPreviewedChange, ctx: TenantContext) {
+    return this.inner.insertPreviewed(input, ctx);
+  }
+  insertPreviewedBatch(inputs: NewPreviewedChange[], ctx: TenantContext) {
+    return this.inner.insertPreviewedBatch(inputs, ctx);
+  }
+  getById(id: string, ctx: TenantContext) {
+    return this.inner.getById(id, ctx);
+  }
+  update(
+    id: string,
+    patch: ChangePatch,
+    ctx: TenantContext,
+  ): Promise<SiteChangeRow> {
+    if (this.failNextUpdate) {
+      this.failNextUpdate = false;
+      throw new Error("qa-1 window: database unavailable during row update");
+    }
+    return this.inner.update(id, patch, ctx);
+  }
+}
+
 function setup() {
-  const fake = new FakeWebflow({
-    token: SECRET,
+  const fake = new FakeWix({
+    apiKey: SECRET,
     siteId: SITE_ID,
     pages: {
       [PAGE_ID]: {
         name: "Listings",
-        seo: { title: ORIGINAL_SEO_TITLE, description: "Old description" },
+        seoData: { title: ORIGINAL_SEO_TITLE, description: "Old description" },
       },
     },
     collections: {
       [COLLECTION_ID]: {
-        fields: ["summary"],
         items: Object.fromEntries(
           ITEM_IDS.map((id, i) => [
             id,
-            { name: `Casa ${i + 1}`, slug: `casa-${i + 1}`, summary: ORIGINAL_SUMMARIES[id] },
+            { name: `Casa ${i + 1}`, summary: ORIGINAL_SUMMARIES[id] },
           ]),
         ),
       },
@@ -85,7 +134,7 @@ function setup() {
   const secrets: SecretsResolver = {
     resolve: async () => new VendorCredential(SECRET),
   };
-  const adapter = new WebflowAdapter({
+  const adapter = new WixAdapter({
     site: {
       tenantId: "t1",
       clientId: "c1",
@@ -93,17 +142,18 @@ function setup() {
       siteId: SITE_ID,
     },
     secrets,
-    authRef: "vault://webflow/prop-1",
+    authRef: "vault://wix/prop-1",
     fetch: fake.port,
   });
   const clock = steppingClock("2026-07-09T10:00:00.000Z");
-  const store = new InMemoryChangeStore({ clock });
+  const inner = new InMemoryChangeStore({ clock });
+  const store = new CrashingStore(inner);
   const manager = new ChangeManager({
     store,
     adapters: new MapAdapterRegistry([adapter]),
     clock,
   });
-  return { fake, manager, store };
+  return { fake, manager, store, peek: (id: string) => inner.peek(id) };
 }
 
 function seoTitleChange(after: string, before?: string): DesiredChange {
@@ -111,11 +161,11 @@ function seoTitleChange(after: string, before?: string): DesiredChange {
     tenantId: "t1",
     clientId: "c1",
     propertyId: "prop-1",
-    method: "webflow",
+    method: "wix",
     changeType: "title",
     target: {
       url: "https://ggrealty.example/listings",
-      locator: webflowLocators.pageSeoTitle(PAGE_ID),
+      locator: wixLocators.pageSeoTitle(PAGE_ID),
     },
     before: before ?? ORIGINAL_SEO_TITLE,
     after,
@@ -127,19 +177,19 @@ function summaryChange(itemId: string, after: string): DesiredChange {
     tenantId: "t1",
     clientId: "c1",
     propertyId: "prop-1",
-    method: "webflow",
+    method: "wix",
     changeType: "content",
     target: {
       url: `https://ggrealty.example/listing/${itemId}`,
-      locator: webflowLocators.itemField(COLLECTION_ID, itemId, "summary"),
+      locator: wixLocators.dataField(COLLECTION_ID, itemId, "summary"),
     },
     before: ORIGINAL_SUMMARIES[itemId],
     after,
   };
 }
 
-describe("apply through the pipeline — live before-capture, staged-only writes", () => {
-  it("captures the byte-exact staged before-state, applies the after, persists both — and the PUBLISHED site is byte-untouched", async () => {
+describe("apply through the pipeline — live before-capture, live-immediate writes", () => {
+  it("captures the byte-exact live before-state, applies the after, persists both — and the LIVE site holds the change the moment apply returns", async () => {
     const { fake, manager } = setup();
     const after = "San Diego Homes for Sale | GG Realty";
 
@@ -149,16 +199,10 @@ describe("apply through the pipeline — live before-capture, staged-only writes
 
     const outcome = await manager.apply(preview.change.id, APPROVAL, CTX);
     expect(outcome.warnings).toEqual([]); // preview matched live → no drift
-    // STAGED holds the change...
-    expect(fake.page(PAGE_ID).seo.title).toBe(after);
-    // ...while the LIVE (published) site is byte-identical to before the
-    // apply, and no publish/live endpoint was ever called: this method never
-    // publishes — going live is the pipeline's explicit publish flow.
-    expect(fake.livePage(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    for (const req of fake.requests) {
-      expect(req.url).not.toContain("publish");
-      expect(req.url).not.toMatch(/\/live(\?|$)/);
-    }
+    // LIVE-IMMEDIATE: there is no staged layer between this assertion and the
+    // client's visitors — what the fake holds now is what the site serves.
+    // MONITOR correlation against applied_at is sound for exactly this reason.
+    expect(fake.page(PAGE_ID).seoData.title).toBe(after);
     // The audit row carries the byte-exact before + after + target — a
     // one-click rollback is executable from this row alone.
     expect(outcome.change.diff).toEqual({
@@ -166,31 +210,31 @@ describe("apply through the pipeline — live before-capture, staged-only writes
       after,
       target: {
         url: "https://ggrealty.example/listings",
-        locator: `webflow:page/${PAGE_ID}/seo.title`,
+        locator: `wix:page/${PAGE_ID}/seo.title`,
       },
     });
     expect(outcome.change.status).toBe("applied");
   });
 
   it("leaves the row 'previewed' and the site untouched when the write fails — retryable, no silent half-state", async () => {
-    const { fake, manager, store } = setup();
+    const { fake, manager, peek } = setup();
     const preview = await manager.preview(seoTitleChange("New Title"), CTX);
     fake.failNextWriteWith(500);
 
     await expect(manager.apply(preview.change.id, APPROVAL, CTX)).rejects.toSatisfy(
       (err) => isWriteMethodError(err) && err.code === "vendor_failure",
     );
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    expect(store.peek(preview.change.id)?.status).toBe("previewed");
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(peek(preview.change.id)?.status).toBe("previewed");
 
     // Retry succeeds against the same row.
     const retry = await manager.apply(preview.change.id, APPROVAL, CTX);
     expect(retry.change.status).toBe("applied");
-    expect(fake.page(PAGE_ID).seo.title).toBe("New Title");
+    expect(fake.page(PAGE_ID).seoData.title).toBe("New Title");
   });
 
   it("a 429 mid-apply is honest: rate_limited, row stays 'previewed', site untouched — and re-running the SAME action succeeds", async () => {
-    const { fake, manager, store } = setup();
+    const { fake, manager, peek } = setup();
     const preview = await manager.preview(seoTitleChange("New Title"), CTX);
     fake.rateLimitNext(30);
 
@@ -201,18 +245,55 @@ describe("apply through the pipeline — live before-capture, staged-only writes
         err.retryAfterSeconds === 30,
     );
     // The operation was NOT performed — exactly what the contract documents.
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    expect(store.peek(preview.change.id)?.status).toBe("previewed");
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(peek(preview.change.id)?.status).toBe("previewed");
 
     // The retry contract: the same action, re-run — nothing retried itself.
     const retry = await manager.apply(preview.change.id, APPROVAL, CTX);
     expect(retry.change.status).toBe("applied");
-    expect(fake.page(PAGE_ID).seo.title).toBe("New Title");
+    expect(fake.page(PAGE_ID).seoData.title).toBe("New Title");
+  });
+
+  it("QA-1 crash window through this adapter: a store crash after the LIVE site write keeps the persisted before as the rollback baseline on retry", async () => {
+    // On a live-immediate method this window matters MORE than anywhere else:
+    // between the crash and the retry, the LIVE site is already serving the
+    // after-value while the row still reads 'previewed'. The retry's live
+    // re-read equals this change's own after — the manager must keep the
+    // persisted previewed before (never adopt our own half-applied write as
+    // the baseline), or rollback becomes a verified no-op.
+    const { fake, manager, store, peek } = setup();
+    const preview = await manager.preview(seoTitleChange("New Title"), CTX);
+
+    store.crashOnNextUpdate();
+    await expect(
+      manager.apply(preview.change.id, APPROVAL, CTX),
+    ).rejects.toThrowError(/database unavailable/);
+    // The documented ordering consequence: site written, row not yet updated.
+    expect(fake.page(PAGE_ID).seoData.title).toBe("New Title");
+    expect(peek(preview.change.id)?.status).toBe("previewed");
+
+    // Retry: surfaced distinctly, baseline kept, never our own after-value.
+    const outcome = await manager.apply(preview.change.id, APPROVAL, CTX);
+    expect(outcome.warnings.map((w) => w.code)).toEqual([
+      "resumed_after_partial_apply",
+    ]);
+    expect(outcome.change.status).toBe("applied");
+    expect(outcome.change.diff.before).toBe(ORIGINAL_SEO_TITLE);
+    expect(outcome.change.diff.after).toBe("New Title");
+
+    // One-click rollback restores the TRUE pre-change state on the live site.
+    await manager.rollback(
+      outcome.change.id,
+      { reason: "operator: undo resumed change" },
+      CTX,
+    );
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(peek(outcome.change.id)?.status).toBe("reverted");
   });
 });
 
 describe("rollback through the pipeline — byte-exact restore, one action", () => {
-  it("restores the captured before-state exactly via the same adapter; live site untouched throughout", async () => {
+  it("restores the captured before-state exactly via the same adapter", async () => {
     const { fake, manager } = setup();
     const preview = await manager.preview(
       seoTitleChange("San Diego Homes for Sale | GG Realty"),
@@ -226,11 +307,9 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
       { reason: "operator: change regressed CTR" },
       CTX,
     );
-    // Byte-exact: the STAGED site now holds EXACTLY the captured before-state.
-    expect(fake.page(PAGE_ID).seo.title).toBe(capturedBefore);
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    // The published site never moved in either direction.
-    expect(fake.livePage(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
+    // Byte-exact: the LIVE site now holds EXACTLY the captured before-state.
+    expect(fake.page(PAGE_ID).seoData.title).toBe(capturedBefore);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
     expect(reverted.change.status).toBe("reverted");
     expect(reverted.change.reverted_reason).toBe("operator: change regressed CTR");
 
@@ -239,55 +318,16 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
     const patches = fake.requests.filter((r) => r.method === "PATCH");
     expect(patches).toHaveLength(2);
     expect(patches.map((p) => p.url)).toEqual([
-      `https://api.webflow.com/v2/pages/${PAGE_ID}`,
-      `https://api.webflow.com/v2/pages/${PAGE_ID}`,
+      `https://www.wixapis.com/site-pages/v1/pages/${PAGE_ID}`,
+      `https://www.wixapis.com/site-pages/v1/pages/${PAGE_ID}`,
     ]);
     expect(JSON.parse(patches[1].body ?? "")).toEqual({
-      seo: { title: capturedBefore },
+      page: { seoData: { title: capturedBefore } },
     });
   });
 
-  it("a token rotated mid-revert leaves the row 'applied' (never a false 'reverted' claim); reconnecting completes the rollback", async () => {
-    const { fake, manager, store } = setup();
-    const preview = await manager.preview(seoTitleChange("New Title"), CTX);
-    const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
-
-    // The client rotates/revokes the API token between apply and rollback.
-    fake.rotateToken("wf-pat-rotated-away");
-    await expect(
-      manager.rollback(applied.change.id, { reason: "undo" }, CTX),
-    ).rejects.toSatisfy(
-      (err) => isWriteMethodError(err) && err.code === "credential_rejected",
-    );
-    expect(store.peek(applied.change.id)?.status).toBe("applied");
-    expect(fake.page(PAGE_ID).seo.title).toBe("New Title");
-
-    // Property reconnected (token valid again) → the retry completes it.
-    fake.rotateToken(SECRET);
-    await manager.rollback(applied.change.id, { reason: "undo" }, CTX);
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    expect(store.peek(applied.change.id)?.status).toBe("reverted");
-  });
-
-  it("a deleted item discovered at rollback time fails honestly (target_missing) and the row stays 'applied'", async () => {
-    const { fake, manager, store } = setup();
-    const preview = await manager.preview(
-      summaryChange(ITEM_IDS[1], "New summary"),
-      CTX,
-    );
-    const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
-
-    fake.removeItem(COLLECTION_ID, ITEM_IDS[1]);
-    await expect(
-      manager.rollback(applied.change.id, { reason: "undo" }, CTX),
-    ).rejects.toSatisfy(
-      (err) => isWriteMethodError(err) && err.code === "target_missing",
-    );
-    expect(store.peek(applied.change.id)?.status).toBe("applied");
-  });
-
-  it("a 429 mid-revert is honest: rate_limited, the row STAYS 'applied' (never a false 'reverted'), the site keeps the after — re-running the SAME rollback completes it", async () => {
-    const { fake, manager, store } = setup();
+  it("a 429 mid-revert is honest: rate_limited, the row STAYS 'applied' (never a false 'reverted'), the live site keeps the after — the same rollback completes later", async () => {
+    const { fake, manager, peek } = setup();
     const preview = await manager.preview(seoTitleChange("New Title"), CTX);
     const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
 
@@ -300,19 +340,57 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
         err.code === "rate_limited" &&
         err.retryAfterSeconds === 45,
     );
-    // Row-status truth on the revert direction: the revert did NOT happen, so
-    // the row stays 'applied' and the site still holds the after-value.
-    expect(store.peek(applied.change.id)?.status).toBe("applied");
-    expect(fake.page(PAGE_ID).seo.title).toBe("New Title");
+    // Row-status truth on the revert direction: the revert did NOT happen.
+    expect(peek(applied.change.id)?.status).toBe("applied");
+    expect(fake.page(PAGE_ID).seoData.title).toBe("New Title");
 
     // Window passes → the same one-click action completes.
     await manager.rollback(applied.change.id, { reason: "undo" }, CTX);
-    expect(store.peek(applied.change.id)?.status).toBe("reverted");
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(peek(applied.change.id)?.status).toBe("reverted");
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
+  });
+
+  it("a key rotated mid-revert leaves the row 'applied' (never a false 'reverted' claim); reconnecting completes the rollback", async () => {
+    const { fake, manager, peek } = setup();
+    const preview = await manager.preview(seoTitleChange("New Title"), CTX);
+    const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
+
+    // The account rotates/revokes the API key between apply and rollback.
+    fake.rotateKey("IST.rotated-away");
+    await expect(
+      manager.rollback(applied.change.id, { reason: "undo" }, CTX),
+    ).rejects.toSatisfy(
+      (err) => isWriteMethodError(err) && err.code === "credential_rejected",
+    );
+    expect(peek(applied.change.id)?.status).toBe("applied");
+    expect(fake.page(PAGE_ID).seoData.title).toBe("New Title");
+
+    // Property reconnected (key valid again) → the retry completes it.
+    fake.rotateKey(SECRET);
+    await manager.rollback(applied.change.id, { reason: "undo" }, CTX);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(peek(applied.change.id)?.status).toBe("reverted");
+  });
+
+  it("a deleted item discovered at rollback time fails honestly (target_missing) and the row stays 'applied'", async () => {
+    const { fake, manager, peek } = setup();
+    const preview = await manager.preview(
+      summaryChange(ITEM_IDS[1], "New summary"),
+      CTX,
+    );
+    const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
+
+    fake.removeItem(COLLECTION_ID, ITEM_IDS[1]);
+    await expect(
+      manager.rollback(applied.change.id, { reason: "undo" }, CTX),
+    ).rejects.toSatisfy(
+      (err) => isWriteMethodError(err) && err.code === "target_missing",
+    );
+    expect(peek(applied.change.id)?.status).toBe("applied");
   });
 
   it("a server-normalized restore is reported write_verification_failed — the row stays 'applied', divergence is never silent", async () => {
-    const { fake, manager, store } = setup();
+    const { fake, manager, peek } = setup();
     const preview = await manager.preview(
       summaryChange(ITEM_IDS[0], "New tight summary"),
       CTX,
@@ -320,9 +398,9 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
     const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
     expect(fake.item(COLLECTION_ID, ITEM_IDS[0]).summary).toBe("New tight summary");
 
-    // Between apply and rollback the vendor starts normalizing writes (the
-    // slug-normalization class); the captured before-state has double spaces,
-    // so the restore comes back altered.
+    // Between apply and rollback the vendor starts normalizing writes; the
+    // captured before-state has double spaces, so the restore comes back
+    // altered — on the LIVE site, which is why it must never be silent.
     fake.mutateWrites((v) => v.replace(/\s+/g, " "));
     await expect(
       manager.rollback(applied.change.id, { reason: "undo" }, CTX),
@@ -332,7 +410,7 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
     // Honesty over tidiness: the row is NOT 'reverted' (the site does not
     // hold the captured before-state — it holds the normalized variant), and
     // nothing pretended otherwise.
-    expect(store.peek(applied.change.id)?.status).toBe("applied");
+    expect(peek(applied.change.id)?.status).toBe("applied");
     expect(fake.item(COLLECTION_ID, ITEM_IDS[0]).summary).toBe(
       "Casa Uno: a summary with odd spacing",
     );
@@ -341,7 +419,7 @@ describe("rollback through the pipeline — byte-exact restore, one action", () 
 
 describe("batch partial apply — exact reporting, prefix rollback", () => {
   it("stops at the failed member, reports applied/failed/not-attempted exactly, and the applied prefix rolls back", async () => {
-    const { fake, manager } = setup();
+    const { fake, manager, peek } = setup();
     const batch = await manager.previewBatch(
       [
         summaryChange(ITEM_IDS[0], "One | GG Realty"),
@@ -368,8 +446,14 @@ describe("batch partial apply — exact reporting, prefix rollback", () => {
     expect(failedError.code).toBe("target_missing");
     expect(report.notAttempted).toEqual([batch.members[2].change.id]);
 
-    // The site reflects exactly that: member 1 applied, member 3 untouched
-    // (not even a request naming it), member 2 unwritable.
+    // Row-status truth: only the prefix reads 'applied'; the failed member
+    // and the never-attempted tail stay 'previewed' (retryable).
+    expect(peek(batch.members[0].change.id)?.status).toBe("applied");
+    expect(peek(batch.members[1].change.id)?.status).toBe("previewed");
+    expect(peek(batch.members[2].change.id)?.status).toBe("previewed");
+
+    // The LIVE site reflects exactly that: member 1 applied, member 3
+    // untouched (not even a request naming it), member 2 unwritable.
     expect(fake.item(COLLECTION_ID, ITEM_IDS[0]).summary).toBe("One | GG Realty");
     expect(fake.item(COLLECTION_ID, ITEM_IDS[2]).summary).toBe(
       ORIGINAL_SUMMARIES[ITEM_IDS[2]],
@@ -386,59 +470,6 @@ describe("batch partial apply — exact reporting, prefix rollback", () => {
     expect(fake.item(COLLECTION_ID, ITEM_IDS[0]).summary).toBe(
       ORIGINAL_SUMMARIES[ITEM_IDS[0]],
     );
-    // And the published items never moved at any point.
-    for (const id of ITEM_IDS) {
-      expect(fake.liveItem(COLLECTION_ID, id).summary).toBe(ORIGINAL_SUMMARIES[id]);
-    }
-  });
-
-  it("a 429 mid-batch pins row-status truth per member: applied prefix 'applied', the rate-limited member stays 'previewed', the tail untouched — and a re-run continues the SAME batch", async () => {
-    const { fake, manager, store } = setup();
-    const batch = await manager.previewBatch(
-      [
-        summaryChange(ITEM_IDS[0], "One | GG Realty"),
-        summaryChange(ITEM_IDS[1], "Two | GG Realty"),
-        summaryChange(ITEM_IDS[2], "Three | GG Realty"),
-      ],
-      CTX,
-    );
-    // Member 1 already applied by an earlier run (it is skipped without an
-    // adapter call), so the armed rate limit hits member 2's FIRST request.
-    await manager.apply(batch.members[0].change.id, APPROVAL, CTX);
-    fake.rateLimitNext(30);
-
-    const report = await manager.applyBatch(batch, APPROVAL, CTX);
-    expect(report.complete).toBe(false);
-    expect(report.previouslyApplied).toEqual([batch.members[0].change.id]);
-    expect(report.failed?.changeId).toBe(batch.members[1].change.id);
-    const failedError = report.failed?.error;
-    expect(isWriteMethodError(failedError) && failedError.code).toBe(
-      "rate_limited",
-    );
-    expect(report.notAttempted).toEqual([batch.members[2].change.id]);
-
-    // Row-status truth mid-batch: the 429'd member did NOT happen — it stays
-    // 'previewed' (retryable), exactly like the never-attempted tail; only the
-    // prefix reads 'applied'. The site agrees byte-for-byte.
-    expect(store.peek(batch.members[0].change.id)?.status).toBe("applied");
-    expect(store.peek(batch.members[1].change.id)?.status).toBe("previewed");
-    expect(store.peek(batch.members[2].change.id)?.status).toBe("previewed");
-    expect(fake.item(COLLECTION_ID, ITEM_IDS[1]).summary).toBe(
-      ORIGINAL_SUMMARIES[ITEM_IDS[1]],
-    );
-
-    // The window passes → re-running the SAME batch continues where it
-    // stopped: nothing re-applies, the remaining members complete.
-    const rerun = await manager.applyBatch(batch, APPROVAL, CTX);
-    expect(rerun.complete).toBe(true);
-    expect(rerun.previouslyApplied).toEqual([batch.members[0].change.id]);
-    expect(rerun.applied.map((a) => a.change.id)).toEqual([
-      batch.members[1].change.id,
-      batch.members[2].change.id,
-    ]);
-    for (const member of batch.members) {
-      expect(store.peek(member.change.id)?.status).toBe("applied");
-    }
   });
 });
 
@@ -449,20 +480,22 @@ describe("connection verify + credential containment at the pipeline level", () 
       {
         clientId: "c1",
         propertyId: "prop-1",
-        method: "webflow",
+        method: "wix",
         target: {
           url: "https://ggrealty.example/listings",
-          locator: webflowLocators.pageSeoTitle(PAGE_ID),
+          locator: wixLocators.pageSeoTitle(PAGE_ID),
         },
       },
       CTX,
     );
     expect(result).toEqual({
-      method: "webflow",
+      method: "wix",
       ok: true,
       detail: "read access verified",
     });
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
+    expect(
+      fake.requests.filter((r) => r.method === "PATCH" || r.method === "PUT"),
+    ).toHaveLength(0);
   });
 
   it("verifyConnection names an HTML-interstitial site honestly (and safely)", async () => {
@@ -472,10 +505,10 @@ describe("connection verify + credential containment at the pipeline level", () 
       {
         clientId: "c1",
         propertyId: "prop-1",
-        method: "webflow",
+        method: "wix",
         target: {
           url: "https://ggrealty.example/listings",
-          locator: webflowLocators.pageSeoTitle(PAGE_ID),
+          locator: wixLocators.pageSeoTitle(PAGE_ID),
         },
       },
       CTX,
@@ -486,12 +519,12 @@ describe("connection verify + credential containment at the pipeline level", () 
   });
 
   it("no persisted site_changes row ever contains the credential (raw or base64)", async () => {
-    const { manager, store } = setup();
+    const { manager, peek } = setup();
     const preview = await manager.preview(seoTitleChange("New Title"), CTX);
     const applied = await manager.apply(preview.change.id, APPROVAL, CTX);
     await manager.rollback(applied.change.id, { reason: "leak sweep" }, CTX);
 
-    const row = JSON.stringify(store.peek(preview.change.id));
+    const row = JSON.stringify(peek(preview.change.id));
     expect(row).not.toContain(SECRET);
     expect(row).not.toContain(SECRET_B64);
   });

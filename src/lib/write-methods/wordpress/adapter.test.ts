@@ -745,6 +745,46 @@ describe("site pinning", () => {
     // Constructor refusal means zero requests could ever carry the credential.
     expect(fake.requests).toHaveLength(0);
   });
+
+  it("NO base-URL refusal branch ever echoes the configured URL — a ?token=... base URL stays out of every operator-facing error (carried item (α): the class, not one branch)", () => {
+    const resolver = makeResolver();
+    const fake = makeFake();
+    // One credential-bearing base URL per constructor refusal branch: query,
+    // fragment, userinfo, non-https (with a token in tow), and the malformed
+    // paste that still embeds a secret. If ANY branch interpolates the URL —
+    // the bug the query/fragment branch shipped with — this sweep goes red.
+    const hostileBases = [
+      "https://ggrealty.example/?token=sekrit-echo-probe", // query (THE fixed branch)
+      "https://ggrealty.example/#access_token=sekrit-echo-probe", // fragment
+      "https://sekrit-echo-probe:sekrit-echo-probe@ggrealty.example", // userinfo
+      "http://ggrealty.example/?token=sekrit-echo-probe", // cleartext + token
+      "ftp://ggrealty.example/?token=sekrit-echo-probe", // wrong scheme + token
+      "http//wp-admin:sekrit-echo-probe@ggrealty.example?token=sekrit-echo-probe", // unparseable
+    ];
+    for (const bad of hostileBases) {
+      let thrown: unknown;
+      try {
+        new WordPressAdapter({
+          site: { ...SITE, baseUrl: bad },
+          secrets: resolver,
+          authRef: "vault://wp/prop-1",
+          fetch: fake.port,
+        });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(WriteMethodError);
+      const error = thrown as WriteMethodError;
+      expect(error.code).toBe("misconfigured");
+      // The refusal never repeats the URL, the token, or the query string.
+      expect(error.message).not.toContain(bad);
+      expect(error.message).not.toContain("sekrit-echo-probe");
+      expect(error.message).not.toContain("token=");
+      // And every branch explains WHY the value is withheld, in one voice.
+      expect(error.message).toContain("not echoed here");
+    }
+    expect(fake.requests).toHaveLength(0);
+  });
 });
 
 /* ------------------------------------------------------------------ */

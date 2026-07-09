@@ -16,8 +16,12 @@
 
 /** The request shape an adapter is allowed to send. */
 export interface FetchPortInit {
-  /** PATCH exists for partial-update APIs (Webflow/Wix-style); nothing wider. */
-  method: "GET" | "POST" | "PATCH";
+  /**
+   * PATCH exists for partial-update APIs (Webflow-style); PUT for full-replace
+   * update APIs (Wix Data's Update Data Item); nothing wider — no DELETE, no
+   * HEAD, nothing a write method has no business sending.
+   */
+  method: "GET" | "POST" | "PATCH" | "PUT";
   headers: Record<string, string>;
   body?: string;
   /**

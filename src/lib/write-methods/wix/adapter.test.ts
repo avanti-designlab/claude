@@ -1,24 +1,27 @@
 /**
- * WebflowAdapter unit suite — mocked HTTP only (the FetchPort is injected;
+ * WixAdapter unit suite — mocked HTTP only (the FetchPort is injected;
  * no test touches a network).
  *
  * Proves the adapter-level safety contract:
- *  - reads capture the byte-exact STAGED field; writes install exactly one
- *    field, verify the site stored it byte-exact, and NEVER publish — the
- *    live site stays byte-identical through every apply and revert;
+ *  - reads capture the byte-exact LIVE field; writes install exactly one
+ *    field and verify the site stored it byte-exact — on the Wix Data
+ *    full-replace surface the verification ALSO covers every sibling field
+ *    the write re-carried, so a write can never silently alter data it was
+ *    not approved to change;
  *  - every failure mode maps to the typed WriteMethodError contract with
  *    interface-voice messages (401/403, 404, 429 + Retry-After whitelisting,
  *    the HTML-interstitial classic, non-JSON, 5xx, network);
- *  - plan-time rejection: unsupported operations, non-restorable values, and
- *    mirrored Open Graph fields never reach a write;
+ *  - plan-time rejection: unsupported operations (system fields, app
+ *    collections), non-restorable values, unset-inherits page fields, and
+ *    absent/explicitly-null data fields never reach a write;
  *  - multi-tenant discipline: the adapter is pinned to one property AND one
- *    Webflow site — mismatched contexts are refused pre-network, and targets
- *    are proven to belong to the pinned site at the API level BEFORE any
- *    write (page siteId echo; collection membership in the pinned site's own
- *    list); the API host itself is pinned outright;
+ *    Wix site — mismatched contexts are refused pre-network, and the pinned
+ *    `wix-site-id` header (never anything derived from a target) scopes every
+ *    request, so the pin IS the isolation boundary; the API host itself is
+ *    pinned outright;
  *  - credentials: resolved per call from the vault seam, egress ONLY via the
- *    Bearer Authorization header, leak through no error/log/serialization
- *    surface (the 1.2 leak-check discipline).
+ *    bare Authorization header (no Basic/Bearer scheme), leak through no
+ *    error/log/serialization surface (the 1.2 leak-check discipline).
  */
 
 import util from "node:util";
@@ -31,26 +34,21 @@ import {
 } from "@/lib/connectors";
 import type { Json } from "@/lib/types/db";
 import { WriteMethodError, type WriteMethodErrorCode } from "../shared/errors";
-import { bearerAuthHeader } from "../shared/http";
 import { ScriptedFetch, textResponse } from "../shared/http-harness";
-import { WebflowAdapter, type WebflowAdapterConfig } from "./adapter";
-import { FakeWebflow } from "./fake-webflow";
-import { webflowLocators } from "./target";
+import { WixAdapter, type WixAdapterConfig } from "./adapter";
+import { FakeWix } from "./fake-wix";
+import { wixLocators } from "./target";
 
-const SECRET = "wf-pat-4bCdEfGh.5ecret.T0ken";
+const SECRET = "IST.wix-api-key.4bCdEfGh.5ecretT0ken";
 const SECRET_B64 = Buffer.from(SECRET, "utf8").toString("base64");
 
-/** Webflow ids are 24 lowercase hex chars; pad hex-safe mnemonics with zeros. */
-const wfid = (tail: string) => tail.padStart(24, "0");
-const SITE_ID = wfid("c0ffee");
-const OTHER_SITE_ID = wfid("baddad");
-const PAGE_ID = wfid("9a9e1");
-const MIRRORED_PAGE_ID = wfid("9a9e2");
-const FOREIGN_PAGE_ID = wfid("9a9e3");
-const COLLECTION_ID = wfid("c011");
-const FOREIGN_COLLECTION_ID = wfid("c012");
-const ITEM_ID = wfid("17e1");
-const FOREIGN_ITEM_ID = wfid("17e2");
+const SITE_ID = "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9";
+const OTHER_SITE_ID = "ffffffff-0000-1111-2222-333344445555";
+const PAGE_ID = "c1dmp";
+const UNSET_PAGE_ID = "about1";
+const COLLECTION_ID = "Listings";
+const ITEM_ID = "8d2e1f0a-3b68-4f07-9aa4-b5c8d2e1f0a3";
+const NULL_FIELD_ITEM_ID = "9e3f2a1b-4c79-4a18-8bb5-c6d9e3f2a1b4";
 
 const SITE = {
   tenantId: "t1",
@@ -67,7 +65,6 @@ const PAGE_URL = "https://ggrealty.example/listings";
 
 const ORIGINAL_SEO_TITLE = "Homes for Sale in San Diego";
 const ORIGINAL_SEO_DESC = "Browse San Diego listings, updated daily.";
-const ORIGINAL_OG_TITLE = "GG Realty — San Diego Homes";
 const ORIGINAL_SUMMARY = "Old listing summary";
 const FAQ_SCHEMA: Json = { "@type": "FAQPage" };
 
@@ -87,55 +84,46 @@ function makeResolver(secret = SECRET) {
 }
 
 function makeFake() {
-  return new FakeWebflow({
-    token: SECRET,
+  return new FakeWix({
+    apiKey: SECRET,
     siteId: SITE_ID,
     pages: {
       [PAGE_ID]: {
         name: "Listings",
-        seo: { title: ORIGINAL_SEO_TITLE, description: ORIGINAL_SEO_DESC },
-        // Seeded OG values → mirror flags default OFF (owner disabled them).
-        openGraph: { title: ORIGINAL_OG_TITLE, description: "OG description" },
+        seoData: { title: ORIGINAL_SEO_TITLE, description: ORIGINAL_SEO_DESC },
       },
-      [MIRRORED_PAGE_ID]: {
+      [UNSET_PAGE_ID]: {
         name: "About",
-        seo: { title: "About GG Realty" },
-        // openGraph unseeded → BOTH mirror flags default ON (Webflow's default).
-      },
-      [FOREIGN_PAGE_ID]: {
-        siteId: OTHER_SITE_ID,
-        name: "Another client's page",
-        seo: { title: "Not ours" },
+        // description omitted → UNSET: the page inherits the site's SEO
+        // pattern for it (the derived-value state the adapter must refuse).
+        seoData: { title: "About GG Realty" },
       },
     },
     collections: {
       [COLLECTION_ID]: {
-        fields: ["summary", "faq-schema", "beds"],
         items: {
           [ITEM_ID]: {
             name: "Casa Uno",
-            slug: "casa-uno",
             summary: ORIGINAL_SUMMARY,
-            "faq-schema": FAQ_SCHEMA,
+            faqSchema: FAQ_SCHEMA,
             beds: 3,
           },
+          // An EXPLICITLY-null field — distinct from absent on Wix Data, but
+          // indistinguishable in the persisted diff, so it must be refused.
+          [NULL_FIELD_ITEM_ID]: { name: "Casa Dos", agentNote: null },
         },
-      },
-      [FOREIGN_COLLECTION_ID]: {
-        siteId: OTHER_SITE_ID,
-        items: { [FOREIGN_ITEM_ID]: { summary: "another client's item" } },
       },
     },
   });
 }
 
-function makeAdapter(overrides: Partial<WebflowAdapterConfig> = {}) {
+function makeAdapter(overrides: Partial<WixAdapterConfig> = {}) {
   const fake = makeFake();
   const resolver = makeResolver();
-  const adapter = new WebflowAdapter({
+  const adapter = new WixAdapter({
     site: SITE,
     secrets: resolver,
-    authRef: "vault://webflow/prop-1",
+    authRef: "vault://wix/prop-1",
     fetch: fake.port,
     ...overrides,
   });
@@ -147,7 +135,7 @@ function seoTitleWrite(
   before: Json = ORIGINAL_SEO_TITLE,
 ): AdapterWrite {
   return {
-    target: { url: PAGE_URL, locator: webflowLocators.pageSeoTitle(PAGE_ID) },
+    target: { url: PAGE_URL, locator: wixLocators.pageSeoTitle(PAGE_ID) },
     before,
     after,
     ctx: CTX,
@@ -158,7 +146,7 @@ function summaryWrite(after: Json, before: Json = ORIGINAL_SUMMARY): AdapterWrit
   return {
     target: {
       url: PAGE_URL,
-      locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "summary"),
+      locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "summary"),
     },
     before,
     after,
@@ -179,64 +167,55 @@ async function expectFailure(
   expect(thrown).toBeInstanceOf(WriteMethodError);
   const error = thrown as WriteMethodError;
   expect(error.code).toBe(code);
-  expect(error.method).toBe("webflow");
+  expect(error.method).toBe("wix");
   return error;
 }
 
-/** No adapter call may ever touch a publish or live endpoint. */
-function expectNoPublishTraffic(fake: FakeWebflow): void {
-  for (const req of fake.requests) {
-    expect(req.url).not.toContain("publish");
-    expect(req.url).not.toMatch(/\/live(\?|$)/);
-  }
-}
-
 /* ------------------------------------------------------------------ */
-/* readCurrent — byte-exact STAGED capture                             */
+/* readCurrent — byte-exact LIVE capture                               */
 /* ------------------------------------------------------------------ */
 
 describe("readCurrent", () => {
-  it("reads the staged seo.title from the pinned host with vault-resolved Bearer auth", async () => {
+  it("reads the live seo.title from the pinned host with vault-resolved BARE-key auth + the pinned wix-site-id header", async () => {
     const { adapter, fake, resolver } = makeAdapter();
     const value = await adapter.readCurrent(
-      { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+      { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
       CTX,
     );
     expect(value).toBe(ORIGINAL_SEO_TITLE);
 
-    // Exactly one request, to the pinned API host, Bearer-authed, no-redirect.
+    // Exactly one request, to the pinned API host, site-scoped, no-redirect.
     expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0].method).toBe("GET");
     expect(fake.requests[0].url).toBe(
-      `https://api.webflow.com/v2/pages/${PAGE_ID}`,
+      `https://www.wixapis.com/site-pages/v1/pages/${PAGE_ID}`,
     );
-    expect(fake.requests[0].headers.authorization).toBe(bearerAuthHeader(SECRET));
+    // Wix API keys are sent BARE — no Basic/Bearer scheme.
+    expect(fake.requests[0].headers.authorization).toBe(SECRET);
+    expect(fake.requests[0].headers["wix-site-id"]).toBe(SITE_ID);
     expect(fake.requests[0].redirect).toBe("error");
     // The vault seam was hit at call time, tenant-scoped.
     expect(resolver.calls).toEqual([
       {
-        authRef: "vault://webflow/prop-1",
+        authRef: "vault://wix/prop-1",
         scope: { tenantId: "t1", clientId: "c1" },
       },
     ]);
   });
 
-  it("reads og fields (mirror off) and item fields of any JSON shape", async () => {
-    const { adapter } = makeAdapter();
-    await expect(
-      adapter.readCurrent(
-        { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/og.title` },
-        CTX,
-      ),
-    ).resolves.toBe(ORIGINAL_OG_TITLE);
+  it("reads data-item fields of any JSON shape via the collection-scoped item route", async () => {
+    const { adapter, fake } = makeAdapter();
     await expect(
       adapter.readCurrent(summaryWrite("x").target, CTX),
     ).resolves.toBe(ORIGINAL_SUMMARY);
+    expect(fake.requests[0].url).toBe(
+      `https://www.wixapis.com/wix-data/v2/items/${ITEM_ID}?dataCollectionId=${COLLECTION_ID}`,
+    );
     await expect(
       adapter.readCurrent(
         {
           url: PAGE_URL,
-          locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "faq-schema"),
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "faqSchema"),
         },
         CTX,
       ),
@@ -245,152 +224,170 @@ describe("readCurrent", () => {
       adapter.readCurrent(
         {
           url: PAGE_URL,
-          locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "beds"),
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "beds"),
         },
         CTX,
       ),
     ).resolves.toBe(3);
   });
 
-  it("proves collection membership through the PINNED site's own list before touching an item", async () => {
+  it("refuses an UNSET page field — its value derives from the site's SEO pattern and could never be restored", async () => {
     const { adapter, fake } = makeAdapter();
-    await adapter.readCurrent(summaryWrite("x").target, CTX);
-    expect(fake.requests.map((r) => r.url)).toEqual([
-      `https://api.webflow.com/v2/sites/${SITE_ID}/collections`,
-      `https://api.webflow.com/v2/collections/${COLLECTION_ID}/items/${ITEM_ID}`,
-    ]);
-  });
-
-  it("refuses a MIRRORED og field as unsupported_operation — the value is derived and the flag cannot round-trip", async () => {
-    const { adapter, fake } = makeAdapter();
-    const error = await expectFailure(
-      adapter.readCurrent(
-        { url: PAGE_URL, locator: `webflow:page/${MIRRORED_PAGE_ID}/og.title` },
-        CTX,
-      ),
-      "unsupported_operation",
-    );
-    expect(error.message).toContain("MIRRORS");
-    expect(error.message).toContain("titleCopied");
-    expect(error.message).toContain("write the SEO title instead");
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
-  });
-
-  it("refuses an UNSET (null) page field — a state rollback could not restore is caught at plan time", async () => {
-    const { adapter } = makeAdapter();
     const error = await expectFailure(
       adapter.readCurrent(
         {
           url: PAGE_URL,
-          locator: `webflow:page/${MIRRORED_PAGE_ID}/seo.description`,
+          locator: `wix:page/${UNSET_PAGE_ID}/seo.description`,
         },
         CTX,
       ),
       "invalid_value",
     );
-    expect(error.message).toContain("unset");
-    expect(error.message).toContain("byte-exact");
+    expect(error.message).toContain("inherits the site's SEO pattern");
+    expect(fake.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
   });
 
-  it("refuses an absent item field as target_missing (no such field, or never valued — Webflow omits unset fields)", async () => {
+  it("refuses an absent data field as target_missing (no such field, or never valued)", async () => {
     const { adapter, fake } = makeAdapter();
     const error = await expectFailure(
       adapter.readCurrent(
         {
           url: PAGE_URL,
-          locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "floor-plan"),
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "floorPlan"),
         },
         CTX,
       ),
       "target_missing",
     );
-    expect(error.message).toContain("floor-plan");
+    expect(error.message).toContain("floorPlan");
     expect(error.message).toContain("unset");
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
+    expect(fake.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+  });
+
+  it("refuses an EXPLICITLY-null data field — indistinguishable from absent in the persisted diff, so unverifiable", async () => {
+    const { adapter } = makeAdapter();
+    const error = await expectFailure(
+      adapter.readCurrent(
+        {
+          url: PAGE_URL,
+          locator: wixLocators.dataField(
+            COLLECTION_ID,
+            NULL_FIELD_ITEM_ID,
+            "agentNote",
+          ),
+        },
+        CTX,
+      ),
+      "invalid_value",
+    );
+    expect(error.message).toContain("null");
+    expect(error.message).toContain("refused before any write");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* apply / revert — one verified STAGED field write, never a publish   */
+/* apply / revert — one verified LIVE field write                      */
 /* ------------------------------------------------------------------ */
 
 describe("apply", () => {
-  it("PATCHes exactly one page field after a pre-write site check, verifies the echo, and never touches the LIVE site", async () => {
+  it("PATCHes exactly one page SEO key after a fresh pre-write read, and verifies the echo byte-exact", async () => {
     const { adapter, fake } = makeAdapter();
     const after = "San Diego Homes for Sale | GG Realty";
     await adapter.apply(seoTitleWrite(after));
 
-    // Pre-write pin verification (GET) then the write (PATCH) — nothing else.
+    // Pre-write live-state read (GET) then the write (PATCH) — nothing else.
     expect(fake.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
-      `GET https://api.webflow.com/v2/pages/${PAGE_ID}`,
-      `PATCH https://api.webflow.com/v2/pages/${PAGE_ID}`,
+      `GET https://www.wixapis.com/site-pages/v1/pages/${PAGE_ID}`,
+      `PATCH https://www.wixapis.com/site-pages/v1/pages/${PAGE_ID}`,
     ]);
-    // Exactly one field in the update body — never a broader entity write.
+    // Exactly one key in the merge-PATCH — never a broader page write.
     expect(JSON.parse(fake.requests[1].body ?? "")).toEqual({
-      seo: { title: after },
+      page: { seoData: { title: after } },
     });
-    // STAGED updated; untouched siblings stay untouched.
-    expect(fake.page(PAGE_ID).seo.title).toBe(after);
-    expect(fake.page(PAGE_ID).seo.description).toBe(ORIGINAL_SEO_DESC);
-    // STAGED-vs-PUBLISHED fidelity: the live site is byte-identical, and no
-    // publish/live endpoint was ever called.
-    expect(fake.livePage(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    expectNoPublishTraffic(fake);
+    // LIVE-IMMEDIATE: the accepted write IS the live site; the untouched
+    // sibling stays untouched.
+    expect(fake.page(PAGE_ID).seoData.title).toBe(after);
+    expect(fake.page(PAGE_ID).seoData.description).toBe(ORIGINAL_SEO_DESC);
   });
 
-  it("writes a CMS item field (schema JSON-LD) under the single fieldData key", async () => {
+  it("writes a data field via the full-replace PUT: system fields stripped from the body, every sibling re-carried byte-exact", async () => {
     const { adapter, fake } = makeAdapter();
+    const before = fake.itemSystem(COLLECTION_ID, ITEM_ID);
     const jsonLd: Json = { "@context": "https://schema.org", "@type": "FAQPage" };
     await adapter.apply({
       target: {
         url: PAGE_URL,
-        locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "faq-schema"),
+        locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "faqSchema"),
       },
       before: FAQ_SCHEMA,
       after: jsonLd,
       ctx: CTX,
     });
-    const patch = fake.requests.find((r) => r.method === "PATCH");
-    expect(patch?.url).toBe(
-      `https://api.webflow.com/v2/collections/${COLLECTION_ID}/items/${ITEM_ID}`,
-    );
-    expect(JSON.parse(patch?.body ?? "")).toEqual({
-      fieldData: { "faq-schema": jsonLd },
+
+    const put = fake.requests.find((r) => r.method === "PUT");
+    expect(put?.url).toBe(`https://www.wixapis.com/wix-data/v2/items/${ITEM_ID}`);
+    const body = JSON.parse(put?.body ?? "") as {
+      dataCollectionId: string;
+      dataItem: { data: Record<string, Json> };
+    };
+    expect(body.dataCollectionId).toBe(COLLECTION_ID);
+    // The full-replace body carries the fresh-read siblings + the one swapped
+    // field — and NO server-managed system fields.
+    expect(body.dataItem.data).toEqual({
+      name: "Casa Uno",
+      summary: ORIGINAL_SUMMARY,
+      faqSchema: jsonLd,
+      beds: 3,
     });
-    expect(fake.item(COLLECTION_ID, ITEM_ID)["faq-schema"]).toEqual(jsonLd);
-    // Untouched siblings + the live item stay untouched.
-    expect(fake.item(COLLECTION_ID, ITEM_ID).summary).toBe(ORIGINAL_SUMMARY);
-    expect(fake.liveItem(COLLECTION_ID, ITEM_ID)["faq-schema"]).toEqual(FAQ_SCHEMA);
-    expectNoPublishTraffic(fake);
+    expect(Object.keys(body.dataItem.data).some((k) => k.startsWith("_"))).toBe(
+      false,
+    );
+    // Stored: target updated, siblings byte-identical.
+    expect(fake.item(COLLECTION_ID, ITEM_ID)).toEqual({
+      name: "Casa Uno",
+      summary: ORIGINAL_SUMMARY,
+      faqSchema: jsonLd,
+      beds: 3,
+    });
+    // The server-managed _updatedDate advanced — and the write still verified
+    // (system fields are excluded from verification by design).
+    expect(fake.itemSystem(COLLECTION_ID, ITEM_ID)._updatedDate).not.toBe(
+      before._updatedDate,
+    );
   });
 
   it("reports write_verification_failed when the site stores a normalized value (server-side rewriting)", async () => {
     const { adapter, fake } = makeAdapter();
-    // Simulate server-side normalization (whitespace collapsing, the same
-    // class as slug normalization — which the grammar refuses outright).
     fake.mutateWrites((v) => v.replace(/\s+/g, " ").trim());
     const error = await expectFailure(
       adapter.apply(summaryWrite("A  double-spaced   summary ")),
       "write_verification_failed",
     );
     expect(error.message).toContain("stored a different value");
+    expect(error.message).toContain("LIVE");
   });
 
-  it("refuses a mirrored og write PRE-WRITE — the PATCH is never sent", async () => {
+  it("reports write_verification_failed when a SIBLING the full-replace re-carried comes back altered — a side effect is never silent", async () => {
     const { adapter, fake } = makeAdapter();
-    await expectFailure(
+    // The target is a NUMBER (unmutated); the string siblings hit server-side
+    // normalization when stored. The target echo matches byte-exact — only
+    // the sibling verification can catch that this write altered data it was
+    // never approved to change.
+    fake.mutateWrites((v) => v.toUpperCase());
+    const error = await expectFailure(
       adapter.apply({
         target: {
           url: PAGE_URL,
-          locator: webflowLocators.pageOgTitle(MIRRORED_PAGE_ID),
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "beds"),
         },
-        before: "About GG Realty",
-        after: "New OG Title",
+        before: 3,
+        after: 4,
         ctx: CTX,
       }),
-      "unsupported_operation",
+      "write_verification_failed",
     );
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
+    expect(error.message).toContain("OTHER fields");
+    expect(error.message).toContain("not approved to change");
   });
 
   it("rejects a non-restorable BEFORE pre-network — rollback impossibility never reaches the site", async () => {
@@ -401,12 +398,12 @@ describe("apply", () => {
     expect(fake.requests).toHaveLength(0);
   });
 
-  it("rejects unsupported operations pre-network (item slug field, page name, publish)", async () => {
+  it("rejects unsupported operations pre-network (system field, app collection, page rename)", async () => {
     const { adapter, fake } = makeAdapter();
     for (const locator of [
-      webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "slug"),
-      `webflow:page/${PAGE_ID}/title`,
-      `webflow:site/${SITE_ID}/publish`,
+      `wix:data/${COLLECTION_ID}/${ITEM_ID}/field/_owner`,
+      `wix:data/Stores/Products/${ITEM_ID}/field/price`,
+      `wix:page/${PAGE_ID}/name`,
     ]) {
       await expectFailure(
         adapter.apply({
@@ -420,24 +417,59 @@ describe("apply", () => {
     }
     expect(fake.requests).toHaveLength(0);
   });
+
+  it("refuses to install a FIRST-EVER value on an unset page field pre-write — the PATCH is never sent", async () => {
+    const { adapter, fake } = makeAdapter();
+    await expectFailure(
+      adapter.apply({
+        target: {
+          url: PAGE_URL,
+          locator: wixLocators.pageSeoDescription(UNSET_PAGE_ID),
+        },
+        before: "A description the crawl thought it saw",
+        after: "New description",
+        ctx: CTX,
+      }),
+      "invalid_value",
+    );
+    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
+    // The unset field stayed unset.
+    expect(fake.page(UNSET_PAGE_ID).seoData.description).toBeUndefined();
+  });
+
+  it("refuses to write an ABSENT data field pre-write — the PUT is never sent (defense in depth under the pipeline's own gate)", async () => {
+    const { adapter, fake } = makeAdapter();
+    await expectFailure(
+      adapter.apply({
+        target: {
+          url: PAGE_URL,
+          locator: wixLocators.dataField(COLLECTION_ID, ITEM_ID, "floorPlan"),
+        },
+        before: "old",
+        after: "new",
+        ctx: CTX,
+      }),
+      "target_missing",
+    );
+    expect(fake.requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+    expect(fake.item(COLLECTION_ID, ITEM_ID)).not.toHaveProperty("floorPlan");
+  });
 });
 
 describe("revert", () => {
-  it("restores the captured before-state byte-exact through the same surface — live site still untouched", async () => {
+  it("restores the captured before-state byte-exact through the same surface", async () => {
     const { adapter, fake } = makeAdapter();
     const write = seoTitleWrite("San Diego Homes for Sale | GG Realty");
     await adapter.apply(write);
-    expect(fake.page(PAGE_ID).seo.title).toBe(write.after);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(write.after);
 
     await adapter.revert(write);
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
     const patches = fake.requests.filter((r) => r.method === "PATCH");
     expect(patches).toHaveLength(2);
     expect(JSON.parse(patches[1].body ?? "")).toEqual({
-      seo: { title: ORIGINAL_SEO_TITLE },
+      page: { seoData: { title: ORIGINAL_SEO_TITLE } },
     });
-    expect(fake.livePage(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-    expectNoPublishTraffic(fake);
   });
 
   it("fails loudly (write_verification_failed) when the restore would not be byte-exact — the row must stay applied", async () => {
@@ -451,105 +483,40 @@ describe("revert", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* The OG mirror write window — the POST-write flag check (carried β)  */
-/* ------------------------------------------------------------------ */
-
-describe("OG mirror flipped inside the write window", () => {
-  const ogTitleWrite = (after: Json): AdapterWrite => ({
-    target: { url: PAGE_URL, locator: webflowLocators.pageOgTitle(PAGE_ID) },
-    before: ORIGINAL_OG_TITLE,
-    after,
-    ctx: CTX,
-  });
-
-  it("catches the flip even when the written value EQUALS the SEO value — byte-compare passes, ONLY the post-write flag check can call it a failed write", async () => {
-    const { adapter, fake } = makeAdapter();
-    // The nastiest shape of the race: the approved after-value happens to
-    // equal the page's SEO title (a perfectly plausible fix — aligning the OG
-    // title with the SEO title). The owner flips the mirror ON between the
-    // adapter's pre-write flag check and the PATCH; Webflow ACCEPTS AND
-    // IGNORES the write and the echo shows the mirrored value — which IS the
-    // value we sent, so jsonEqual passes. If the post-write flag branch were
-    // deleted, this write would be reported as a success the site never
-    // stored. The flag check is the only thing standing.
-    fake.flipMirrorOnNextPatch(PAGE_ID, "title");
-    const error = await expectFailure(
-      adapter.apply(ogTitleWrite(ORIGINAL_SEO_TITLE)),
-      "write_verification_failed",
-    );
-    expect(error.message).toContain("mirroring");
-    expect(error.message).toContain("titleCopied");
-    // The underlying OG value was never changed by the ignored write.
-    fake.setMirror(PAGE_ID, "title", false);
-    expect(fake.page(PAGE_ID).openGraph.title).toBe(ORIGINAL_OG_TITLE);
-    expect(fake.livePage(PAGE_ID).openGraph.title).toBe(ORIGINAL_OG_TITLE);
-  });
-
-  it("catches the flip when the written value differs from the SEO value (the echo shows the mirror, not the write)", async () => {
-    const { adapter, fake } = makeAdapter();
-    fake.flipMirrorOnNextPatch(PAGE_ID, "title");
-    const error = await expectFailure(
-      adapter.apply(ogTitleWrite("New OG Title")),
-      "write_verification_failed",
-    );
-    expect(error.message).toContain("mirroring");
-    fake.setMirror(PAGE_ID, "title", false);
-    expect(fake.page(PAGE_ID).openGraph.title).toBe(ORIGINAL_OG_TITLE);
-  });
-
-  it("a mirror flipped ON between apply and revert refuses the revert PRE-write; toggled back off, the same revert completes", async () => {
-    const { adapter, fake } = makeAdapter();
-    const write = ogTitleWrite("New OG Title");
-    await adapter.apply(write);
-    expect(fake.page(PAGE_ID).openGraph.title).toBe("New OG Title");
-
-    // The owner turns the mirror on after our apply. The revert's value is
-    // now un-installable (derived) — refused before any PATCH leaves.
-    fake.setMirror(PAGE_ID, "title", true);
-    await expectFailure(adapter.revert(write), "unsupported_operation");
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(1);
-
-    // Mirror back off → the same revert restores the captured before-state.
-    fake.setMirror(PAGE_ID, "title", false);
-    await adapter.revert(write);
-    expect(fake.page(PAGE_ID).openGraph.title).toBe(ORIGINAL_OG_TITLE);
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /* Failure honesty — the typed error contract                          */
 /* ------------------------------------------------------------------ */
 
 describe("failure modes", () => {
-  const readTitle = (adapter: WebflowAdapter) =>
+  const readTitle = (adapter: WixAdapter) =>
     adapter.readCurrent(
-      { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+      { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
       CTX,
     );
 
-  it("401 → credential_rejected (rotated/revoked token), with the vendor slug", async () => {
+  it("401 → credential_rejected (rotated/revoked key), with the NESTED vendor slug sanitized out of the envelope", async () => {
     const { adapter, fake } = makeAdapter();
-    fake.rotateToken("wf-pat-rotated-away");
+    fake.rotateKey("IST.rotated-away");
     const error = await expectFailure(readTitle(adapter), "credential_rejected");
     expect(error.httpStatus).toBe(401);
-    expect(error.vendorCode).toBe("unauthorized");
+    expect(error.vendorCode).toBe("UNAUTHENTICATED");
     expect(error.message).toContain("reconnect the property");
   });
 
-  it("403 → credential_rejected (missing scopes, not identity)", async () => {
+  it("403 → credential_rejected (missing permissions, not identity)", async () => {
     const { adapter, fake } = makeAdapter();
-    fake.failNextWith(403, "missing_scopes");
+    fake.failNextWith(403, "PERMISSION_DENIED");
     const error = await expectFailure(readTitle(adapter), "credential_rejected");
     expect(error.httpStatus).toBe(403);
-    expect(error.vendorCode).toBe("missing_scopes");
+    expect(error.vendorCode).toBe("PERMISSION_DENIED");
   });
 
-  it("404 → target_missing (deleted since the audit)", async () => {
+  it("404 → target_missing (deleted since the audit), scoped to the pinned site", async () => {
     const { adapter, fake } = makeAdapter();
     fake.removePage(PAGE_ID);
     const error = await expectFailure(readTitle(adapter), "target_missing");
     expect(error.httpStatus).toBe(404);
-    expect(error.vendorCode).toBe("resource_not_found");
+    expect(error.vendorCode).toBe("PAGE_NOT_FOUND");
+    expect(error.message).toContain("connected Wix site");
   });
 
   it("HTML instead of JSON (a CDN/WAF interstitial) → unexpected_response, named honestly, body never echoed", async () => {
@@ -560,7 +527,6 @@ describe("failure modes", () => {
       "unexpected_response",
     );
     expect(error.message).toContain("HTML page instead of an API response");
-    // The interstitial's markup/content never leaks into the message.
     expect(error.message).not.toContain("<html");
     expect(error.message).not.toContain("Checking your browser");
     expect(error.message).not.toContain("Just a moment");
@@ -578,37 +544,16 @@ describe("failure modes", () => {
 
   it("5xx with an error envelope → vendor_failure carrying status + sanitized slug only, site untouched", async () => {
     const { adapter, fake } = makeAdapter();
-    fake.failNextWriteWith(500, "internal_error");
+    fake.failNextWriteWith(500, "INTERNAL_ERROR");
     const error = await expectFailure(
       adapter.apply(seoTitleWrite("New")),
       "vendor_failure",
     );
     expect(error.httpStatus).toBe(500);
-    expect(error.vendorCode).toBe("internal_error");
+    expect(error.vendorCode).toBe("INTERNAL_ERROR");
     // The envelope's free-text message is NOT trusted into ours.
     expect(error.message).not.toContain("The request failed");
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
-  });
-
-  it("400 validation (a field the collection does not declare) → vendor_failure, no state change", async () => {
-    const { adapter, fake } = makeAdapter();
-    // Bypass the read path's absence check by scripting a direct write: the
-    // membership check passes, the PATCH itself is rejected by validation.
-    const error = await expectFailure(
-      adapter.apply({
-        target: {
-          url: PAGE_URL,
-          locator: webflowLocators.itemField(COLLECTION_ID, ITEM_ID, "not-a-field"),
-        },
-        before: "old",
-        after: "new",
-        ctx: CTX,
-      }),
-      "vendor_failure",
-    );
-    expect(error.httpStatus).toBe(400);
-    expect(error.vendorCode).toBe("validation_error");
-    expect(fake.item(COLLECTION_ID, ITEM_ID)).not.toHaveProperty("not-a-field");
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
   });
 
   it("transport failure → network_failure naming the pinned host, detail whitelisted", async () => {
@@ -620,7 +565,7 @@ describe("failure modes", () => {
       ),
     );
     const error = await expectFailure(readTitle(adapter), "network_failure");
-    expect(error.message).toContain("https://api.webflow.com");
+    expect(error.message).toContain("https://www.wixapis.com");
     expect(error.message).toContain("ECONNREFUSED");
     expect(error.message).not.toContain("hunter2");
     expect(error.message).not.toContain("10.0.0.5");
@@ -632,9 +577,9 @@ describe("failure modes", () => {
 /* ------------------------------------------------------------------ */
 
 describe("rate limiting", () => {
-  const readTitle = (adapter: WebflowAdapter) =>
+  const readTitle = (adapter: WixAdapter) =>
     adapter.readCurrent(
-      { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+      { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
       CTX,
     );
 
@@ -643,7 +588,7 @@ describe("rate limiting", () => {
     fake.rateLimitNext(30);
     const error = await expectFailure(readTitle(adapter), "rate_limited");
     expect(error.httpStatus).toBe(429);
-    expect(error.vendorCode).toBe("too_many_requests");
+    expect(error.vendorCode).toBe("RATE_LIMIT_EXCEEDED");
     expect(error.retryAfterSeconds).toBe(30);
     expect(error.message).toContain("NOT performed");
     expect(error.message).toContain("~30s");
@@ -664,8 +609,10 @@ describe("rate limiting", () => {
     const { adapter, fake } = makeAdapter();
     fake.rateLimitNext(60);
     await expectFailure(adapter.apply(seoTitleWrite("New")), "rate_limited");
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
-    expect(fake.page(PAGE_ID).seo.title).toBe(ORIGINAL_SEO_TITLE);
+    expect(
+      fake.requests.filter((r) => r.method === "PATCH" || r.method === "PUT"),
+    ).toHaveLength(0);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
   });
 });
 
@@ -686,7 +633,7 @@ describe("site pinning", () => {
       const { adapter, fake } = makeAdapter();
       await expectFailure(
         adapter.readCurrent(
-          { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+          { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
           ctx,
         ),
         "property_mismatch",
@@ -703,66 +650,58 @@ describe("site pinning", () => {
     },
   );
 
-  it("refuses a page belonging to ANOTHER Webflow site (cross_site_target) — on read, and pre-write on apply", async () => {
+  it("scopes EVERY request to the pinned site: the wix-site-id header always carries the construction pin — the locator has no site slot to override it", async () => {
     const { adapter, fake } = makeAdapter();
-    const target = {
-      url: PAGE_URL,
-      locator: webflowLocators.pageSeoTitle(FOREIGN_PAGE_ID),
-    };
-    await expectFailure(adapter.readCurrent(target, CTX), "cross_site_target");
-    await expectFailure(
-      adapter.apply({ target, before: "Not ours", after: "Ours now", ctx: CTX }),
-      "cross_site_target",
-    );
-    // The pre-write pin check refused BEFORE any PATCH left.
-    expect(fake.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
-    // And the foreign page is untouched.
-    expect(fake.page(FOREIGN_PAGE_ID).seo.title).toBe("Not ours");
+    await adapter.apply(seoTitleWrite("New Title"));
+    await adapter.apply(summaryWrite("New summary"));
+    expect(fake.requests.length).toBeGreaterThanOrEqual(4);
+    for (const req of fake.requests) {
+      expect(req.headers["wix-site-id"]).toBe(SITE_ID);
+    }
   });
 
-  it("refuses a collection that is not in the PINNED site's own list — the foreign collection is never even requested", async () => {
-    const { adapter, fake } = makeAdapter();
-    const target = {
-      url: PAGE_URL,
-      locator: webflowLocators.itemField(
-        FOREIGN_COLLECTION_ID,
-        FOREIGN_ITEM_ID,
-        "summary",
-      ),
-    };
-    await expectFailure(adapter.readCurrent(target, CTX), "cross_site_target");
-    await expectFailure(
-      adapter.apply({ target, before: "a", after: "b", ctx: CTX }),
-      "cross_site_target",
+  it("an adapter pinned to a DIFFERENT site cannot see this site's content — the pin (not the target) scopes the request, and the write never lands", async () => {
+    // The account API key could reach every site in the account; the pin is
+    // the isolation boundary. Pinning the adapter to another site id proves
+    // the header travels from the pin: the fake's site is not visible inside
+    // that scope, so the read/write fails honestly and nothing is written.
+    const fake = makeFake();
+    const resolver = makeResolver();
+    const adapter = new WixAdapter({
+      site: { ...SITE, siteId: OTHER_SITE_ID },
+      secrets: resolver,
+      authRef: "vault://wix/prop-1",
+      fetch: fake.port,
+    });
+    const error = await expectFailure(
+      adapter.apply(seoTitleWrite("Ours now")),
+      "target_missing",
     );
-    // Membership was checked against the PINNED site's list only; no request
-    // ever named the foreign collection or item.
-    for (const req of fake.requests) {
-      expect(req.url).toBe(
-        `https://api.webflow.com/v2/sites/${SITE_ID}/collections`,
-      );
-    }
-    expect(fake.item(FOREIGN_COLLECTION_ID, FOREIGN_ITEM_ID).summary).toBe(
-      "another client's item",
-    );
+    expect(error.vendorCode).toBe("SITE_NOT_FOUND");
+    // The request that left carried the PIN, not anything target-derived.
+    expect(fake.requests[0].headers["wix-site-id"]).toBe(OTHER_SITE_ID);
+    expect(
+      fake.requests.filter((r) => r.method === "PATCH" || r.method === "PUT"),
+    ).toHaveLength(0);
+    expect(fake.page(PAGE_ID).seoData.title).toBe(ORIGINAL_SEO_TITLE);
   });
 
   it("refuses a userinfo-bearing target URL pre-network WITHOUT echoing it", async () => {
     const { adapter, fake } = makeAdapter();
-    const url = "https://wf-admin:sekrit-target@ggrealty.example/listings";
+    const url = "https://wix-admin:sekrit-target@ggrealty.example/listings";
     const error = await expectFailure(
       adapter.apply({
         ...seoTitleWrite("New"),
-        target: { url, locator: webflowLocators.pageSeoTitle(PAGE_ID) },
+        target: { url, locator: wixLocators.pageSeoTitle(PAGE_ID) },
       }),
       "unsupported_operation",
     );
     expect(error.message).toContain("embeds credentials");
     expect(error.message).not.toContain("sekrit-target");
-    expect(error.message).not.toContain("wf-admin");
+    expect(error.message).not.toContain("wix-admin");
     await expectFailure(
       adapter.readCurrent(
-        { url, locator: webflowLocators.pageSeoTitle(PAGE_ID) },
+        { url, locator: wixLocators.pageSeoTitle(PAGE_ID) },
         CTX,
       ),
       "unsupported_operation",
@@ -775,7 +714,7 @@ describe("site pinning", () => {
     const url = "http://u:sekrit-url@"; // absolute scheme, empty host → unparseable
     const error = await expectFailure(
       adapter.readCurrent(
-        { url, locator: webflowLocators.pageSeoTitle(PAGE_ID) },
+        { url, locator: wixLocators.pageSeoTitle(PAGE_ID) },
         CTX,
       ),
       "unsupported_operation",
@@ -785,29 +724,32 @@ describe("site pinning", () => {
     expect(fake.requests).toHaveLength(0);
   });
 
-  it("pins the API host outright: any custom base URL that is not https://api.webflow.com is refused at construction, never echoed", () => {
+  it("pins the API host outright: any custom base URL that is not https://www.wixapis.com is refused at construction, never echoed", () => {
     const resolver = makeResolver();
     const fake = makeFake();
     const build = (apiBaseUrl?: string) =>
-      new WebflowAdapter({
+      new WixAdapter({
         site: SITE,
         secrets: resolver,
-        authRef: "vault://webflow/prop-1",
+        authRef: "vault://wix/prop-1",
         fetch: fake.port,
         apiBaseUrl,
       });
     // The only legal values.
     expect(() => build()).not.toThrow();
-    expect(() => build("https://api.webflow.com")).not.toThrow();
-    expect(() => build("https://api.webflow.com/")).not.toThrow();
-    // Everything else is refused — including the SSRF/cleartext classes.
+    expect(() => build("https://www.wixapis.com")).not.toThrow();
+    expect(() => build("https://www.wixapis.com/")).not.toThrow();
+    // Everything else is refused — including the SSRF/cleartext classes and
+    // the ?token=... echo class the shared helper exists for.
     for (const bad of [
       "https://evil.example",
-      "http://api.webflow.com", // cleartext — the token would egress unencrypted
-      "https://api.webflow.com:8443",
-      "https://api.webflow.com/v2", // paths are the adapter's business, not config
-      "https://api.webflow.com.evil.example",
-      "https://user:sekrit-base@api.webflow.com",
+      "http://www.wixapis.com", // cleartext — the key would egress unencrypted
+      "https://www.wixapis.com:8443",
+      "https://www.wixapis.com/wix-data", // paths are the adapter's business
+      "https://www.wixapis.com.evil.example",
+      "https://wixapis.com", // apex is not the API host
+      "https://user:sekrit-base@www.wixapis.com",
+      "https://www.wixapis.com/?token=sekrit-base",
       "not a url",
     ]) {
       let thrown: unknown;
@@ -819,23 +761,31 @@ describe("site pinning", () => {
       expect(thrown).toBeInstanceOf(WriteMethodError);
       const error = thrown as WriteMethodError;
       expect(error.code).toBe("misconfigured");
-      // The rejected value is NEVER echoed (it can carry a credential).
+      // The rejected value is NEVER echoed (it can carry a credential) — and
+      // the shared helper says why, in one voice.
       expect(error.message).not.toContain(bad);
       expect(error.message).not.toContain("sekrit-base");
+      expect(error.message).toContain("not echoed here");
     }
     expect(fake.requests).toHaveLength(0);
   });
 
-  it("refuses an unusable Webflow site id at construction without echoing it", () => {
+  it("refuses an unusable Wix site id at construction without echoing it (a metaSiteId is a lowercase GUID)", () => {
     const resolver = makeResolver();
     const fake = makeFake();
-    for (const bad of [SITE_ID.toUpperCase(), SITE_ID.slice(0, 23), "not-a-site-id"]) {
+    for (const bad of [
+      SITE_ID.toUpperCase(),
+      SITE_ID.replace(/-/g, ""),
+      "683f07d9aa4b5c8d2e1f0a3b", // a Webflow-shaped id is not a Wix site id
+      "not-a-site-id",
+      "",
+    ]) {
       let thrown: unknown;
       try {
-        new WebflowAdapter({
+        new WixAdapter({
           site: { ...SITE, siteId: bad },
           secrets: resolver,
-          authRef: "vault://webflow/prop-1",
+          authRef: "vault://wix/prop-1",
           fetch: fake.port,
         });
       } catch (err) {
@@ -844,7 +794,7 @@ describe("site pinning", () => {
       expect(thrown).toBeInstanceOf(WriteMethodError);
       const error = thrown as WriteMethodError;
       expect(error.code).toBe("misconfigured");
-      expect(error.message).not.toContain(bad);
+      if (bad !== "") expect(error.message).not.toContain(bad);
     }
     expect(fake.requests).toHaveLength(0);
   });
@@ -855,12 +805,12 @@ describe("site pinning", () => {
 /* ------------------------------------------------------------------ */
 
 describe("credential containment", () => {
-  it("the token's ONLY egress is the Bearer Authorization header of requests to the pinned host", async () => {
+  it("the key's ONLY egress is the bare Authorization header of requests to the pinned host", async () => {
     const { adapter, fake } = makeAdapter();
     await adapter.apply(seoTitleWrite("New Title"));
     expect(fake.requests.length).toBeGreaterThan(0);
     for (const req of fake.requests) {
-      expect(req.headers.authorization).toBe(`Bearer ${SECRET}`);
+      expect(req.headers.authorization).toBe(SECRET);
       expect(req.url).not.toContain(SECRET);
       expect(req.url).not.toContain(SECRET_B64);
       expect(req.body ?? "").not.toContain(SECRET);
@@ -868,16 +818,16 @@ describe("credential containment", () => {
     }
   });
 
-  it("no failure-mode error carries the token (raw or encoded) on any surface", async () => {
+  it("no failure-mode error carries the key (raw or encoded) on any surface", async () => {
     const errors: WriteMethodError[] = [];
 
-    // 401 while the real token is resolved (site rotated it away).
+    // 401 while the real key is resolved (account rotated it away).
     const { adapter: a401, fake: fake401 } = makeAdapter();
-    fake401.rotateToken("someone-elses-token");
+    fake401.rotateKey("IST.someone-elses-key");
     errors.push(
       await expectFailure(
         a401.readCurrent(
-          { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+          { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
           CTX,
         ),
         "credential_rejected",
@@ -894,7 +844,7 @@ describe("credential containment", () => {
     fakeRate.rateLimitNext(10);
     errors.push(await expectFailure(aRate.apply(seoTitleWrite("N")), "rate_limited"));
     const { adapter: aVendor, fake: fakeVendor } = makeAdapter();
-    fakeVendor.failNextWriteWith(502, "bad_gateway");
+    fakeVendor.failNextWriteWith(502, "BAD_GATEWAY");
     errors.push(
       await expectFailure(aVendor.apply(seoTitleWrite("N")), "vendor_failure"),
     );
@@ -903,7 +853,7 @@ describe("credential containment", () => {
     errors.push(
       await expectFailure(
         aNet.readCurrent(
-          { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+          { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
           CTX,
         ),
         "network_failure",
@@ -940,7 +890,7 @@ describe("credential containment", () => {
     expect(util.inspect(resolver.credential)).toBe("VendorCredential(***)");
     // ...while the adapter can still use it.
     await adapter.readCurrent(
-      { url: PAGE_URL, locator: `webflow:page/${PAGE_ID}/seo.title` },
+      { url: PAGE_URL, locator: `wix:page/${PAGE_ID}/seo.title` },
       CTX,
     );
   });

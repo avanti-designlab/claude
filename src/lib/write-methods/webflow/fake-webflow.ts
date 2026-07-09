@@ -33,8 +33,13 @@
  * Fault injection: one-shot any-request or write-only failures with any
  * status/slug, HTML-interstitial mode (a CDN/WAF challenge page where JSON was
  * promised), a write mutator (server-side normalization sim, to force
- * verification failures), entity removal mid-flight, token rotation, and
- * network-level failure via the underlying ScriptedFetch.
+ * verification failures), entity removal mid-flight, token rotation,
+ * network-level failure via the underlying ScriptedFetch, and the OG mirror
+ * toggle: `setMirror()` models the site owner flipping "same as SEO field" in
+ * the Designer between our calls, and `flipMirrorOnNextPatch()` flips it ON at
+ * the exact moment the next PATCH arrives — inside the write window, after the
+ * adapter's pre-write flag check already passed (retiring the QA suite's
+ * private-store reach-ins).
  */
 
 import type { Json } from "@/lib/types/db";
@@ -126,6 +131,10 @@ export class FakeWebflow {
   private pendingFailure: FetchPortResponse | null = null;
   private pendingWriteFailure: FetchPortResponse | null = null;
   private writeMutator: ((value: string) => string) | null = null;
+  private pendingMirrorFlip: {
+    pageId: string;
+    attr: "title" | "description";
+  } | null = null;
 
   constructor(seed: FakeWebflowSeed) {
     this.token = seed.token;
@@ -259,6 +268,35 @@ export class FakeWebflow {
     return this;
   }
 
+  /**
+   * Toggle a page's OG mirror flag — the site owner flipping "Same as SEO
+   * title/description" in the Designer between our calls. While ON, the OG
+   * value is derived from the SEO field and a PATCH to it is accepted-and-
+   * ignored (see patchPage). Harnesses model the toggle through THIS surface;
+   * reaching into the private staged store is retired.
+   */
+  setMirror(pageId: string, attr: "title" | "description", on: boolean): this {
+    const page = this.pages.get(pageId);
+    if (!page) throw new Error(`FakeWebflow: no page ${pageId}`);
+    if (attr === "title") page.og.titleCopied = on;
+    else page.og.descriptionCopied = on;
+    return this;
+  }
+
+  /**
+   * One-shot MID-WRITE flip: the mirror turns ON at the instant the next PATCH
+   * to this page arrives — i.e. AFTER the adapter's pre-write flag check (which
+   * read the flag off its own GET) and BEFORE the write is processed. This is
+   * the write-window race the adapter's POST-write flag check exists for:
+   * Webflow accepts-and-ignores an OG write while the mirror is on, and when
+   * the written value happens to equal the SEO value the byte-exact echo
+   * comparison passes — only the echoed flag can reveal the write didn't land.
+   */
+  flipMirrorOnNextPatch(pageId: string, attr: "title" | "description"): this {
+    this.pendingMirrorFlip = { pageId, attr };
+    return this;
+  }
+
   /** Remove a page (deleted-behind-our-back scenarios). Staged only. */
   removePage(id: string): this {
     this.pages.delete(id);
@@ -307,6 +345,14 @@ export class FakeWebflow {
     if (!page) return envelope(404, "resource_not_found");
 
     if (req.method === "PATCH") {
+      // The one-shot mid-write flip: the owner's Designer toggle landed after
+      // our pre-write GET but before this PATCH — apply it BEFORE processing,
+      // so the write hits the accepted-and-ignored mirror path.
+      if (this.pendingMirrorFlip?.pageId === id) {
+        const flip = this.pendingMirrorFlip;
+        this.pendingMirrorFlip = null;
+        this.setMirror(flip.pageId, flip.attr, true);
+      }
       if (this.pendingWriteFailure) {
         const failure = this.pendingWriteFailure;
         this.pendingWriteFailure = null;

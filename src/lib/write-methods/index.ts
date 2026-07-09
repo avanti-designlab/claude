@@ -1,7 +1,7 @@
 /**
  * Auto-fix write methods (Phase 1.3, doc 04 §1) — the adapters that implement
  * the change-management layer's {@link WriteMethodAdapter} port, one per
- * platform: WordPress + Webflow (shipped here) → Wix → Cloudflare edge worker.
+ * platform: WordPress + Webflow + Wix (shipped here) → Cloudflare edge worker.
  *
  * THE NON-NEGOTIABLE (doc 04 §2): nothing imports an adapter to write with it
  * directly. Adapters are registered on the ChangeManager's AdapterRegistry and
@@ -13,3 +13,4 @@
 export * from "./shared";
 export * from "./wordpress";
 export * from "./webflow";
+export * from "./wix";

@@ -89,6 +89,7 @@ import {
   tryParseJson,
   type FetchPort,
 } from "../shared/http";
+import { refuseBaseUrl } from "../shared/refuse";
 import {
   assertReversibleWebflowValue,
   describeWebflowOperation,
@@ -153,10 +154,13 @@ export class WebflowAdapter implements WriteMethodAdapter {
     const base = config.apiBaseUrl ?? WEBFLOW_API_HOST;
     const normalized = base.endsWith("/") ? base.slice(0, -1) : base;
     if (normalized !== WEBFLOW_API_HOST) {
-      throw new WriteMethodError(
+      // Shared refuse-without-echo helper (carried item (α)); the composed
+      // message is byte-identical to this branch's original — strict refactor.
+      throw refuseBaseUrl(
         METHOD,
-        "misconfigured",
-        `webflow: property ${config.site.propertyId} is configured with a custom API base URL — this method talks only to ${WEBFLOW_API_HOST} (the configured value is not echoed here because base URLs can embed credentials); remove the override`,
+        config.site.propertyId,
+        `is configured with a custom API base URL — this method talks only to ${WEBFLOW_API_HOST}`,
+        "remove the override",
       );
     }
     if (!WEBFLOW_ID.test(config.site.siteId)) {
