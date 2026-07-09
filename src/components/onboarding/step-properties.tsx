@@ -179,8 +179,8 @@ export function StepProperties({
       </div>
 
       <p className="text-xs text-muted">
-        Property connections activate in a later build slice — for now, only
-        your client and locations are saved to your workspace.
+        Property connections activate in a later build slice — nothing you
+        enter on this step is saved yet.
       </p>
     </div>
   );

@@ -174,7 +174,8 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
  * onboarding and do NOT delete the client, because:
  *  - the client row is operator-entered state, and it saved fine;
  *  - the plan is DERIVED state — `generatePlan` is pure and deterministic, so
- *    a dashboard retry reproduces it losslessly from the playbook;
+ *    a future regeneration path reproduces it losslessly from the playbook
+ *    (no such control exists yet — do not promise one in user-facing copy);
  *  - PostgREST over the anon key gives us no cross-table transaction here, so
  *    rather than fake atomicity we fail soft and say so in interface voice.
  */
@@ -224,9 +225,9 @@ async function persistPlan(
       if (tasksError) {
         // Best-effort cleanup so we don't keep a plan the caller was just told
         // doesn't exist. If this delete ALSO fails, an empty plan row may
-        // remain — readers must tolerate a plan with zero tasks, and the
-        // dashboard retry generates a fresh plan regardless. RLS scopes the
-        // delete; the eq filters just make the intent explicit.
+        // remain — readers must tolerate a plan with zero tasks, and a future
+        // regeneration path supersedes it regardless. RLS scopes the delete;
+        // the eq filters just make the intent explicit.
         await supabase
           .from("plans")
           .delete()
