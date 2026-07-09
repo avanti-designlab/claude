@@ -583,8 +583,8 @@ export function ContentCalendarPanelView({
             ))}
           </ul>
           <p className="text-xs leading-5 text-muted">
-            Scheduled publish dates arrive with the social queue (M11) — for now
-            this shows live pipeline status.
+            Scheduled publish dates arrive with the social content queue — for
+            now this shows live pipeline status.
           </p>
         </div>
       ) : panel.state === "failed" ? (
