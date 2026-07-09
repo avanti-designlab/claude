@@ -119,10 +119,14 @@ export class WordPressAdapter implements WriteMethodAdapter {
     try {
       parsed = new URL(config.site.baseUrl);
     } catch {
+      // Never echo the unparseable URL (carried item (i) from the 1.3 wp gate):
+      // a MALFORMED URL can still carry a credential substring (e.g. a missing
+      // colon in `http//user:secret@site.com`), so it is refused without being
+      // repeated — consistent with the userinfo branches below.
       throw new WriteMethodError(
         METHOD,
         "misconfigured",
-        `wordpress: property ${config.site.propertyId} has an unusable base URL ('${config.site.baseUrl}') — reconnect the property with the site's full https address`,
+        `wordpress: property ${config.site.propertyId} has an unusable base URL (the value is not echoed here because a malformed URL can embed credentials) — reconnect the property with the site's full https address`,
       );
     }
     if (parsed.protocol !== "https:") {

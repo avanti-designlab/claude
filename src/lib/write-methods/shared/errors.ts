@@ -35,6 +35,15 @@ export type WriteMethodErrorCode =
   | "target_missing"
   /** The site answered with something other than the expected REST JSON (the classic wp-login HTML redirect). */
   | "unexpected_response"
+  /**
+   * The vendor's API rate limit rejected the call (HTTP 429). The operation
+   * did NOT happen: the pipeline leaves the change row in its pre-call status
+   * ('previewed' for a failed apply, 'applied' for a failed revert), so the
+   * SAME action can simply be re-run once the window passes. NOTHING retries
+   * automatically — an unattended retry loop would be an unattended write.
+   * `retryAfterSeconds` carries the vendor's advisory wait when one was given.
+   */
+  | "rate_limited"
   /** The site's API errored (5xx / unexpected status with a parseable error envelope). */
   | "vendor_failure"
   /** The site could not be reached at all (DNS, TLS, timeout — the fetch itself threw). */
@@ -48,6 +57,13 @@ export interface WriteMethodErrorDetail {
   httpStatus?: number;
   /** Sanitized vendor error slug (e.g. WordPress's `rest_cannot_edit`). */
   vendorCode?: string;
+  /**
+   * Seconds the vendor asked us to wait (a `rate_limited` failure whose
+   * Retry-After header was a plain integer — anything else is dropped, never
+   * echoed). Advisory for the operator/queue; the pipeline never sleeps-and-
+   * retries on its own.
+   */
+  retryAfterSeconds?: number;
 }
 
 export class WriteMethodError extends Error {
@@ -55,6 +71,7 @@ export class WriteMethodError extends Error {
   readonly method: SiteChangeMethod;
   readonly httpStatus?: number;
   readonly vendorCode?: string;
+  readonly retryAfterSeconds?: number;
 
   constructor(
     method: SiteChangeMethod,
@@ -68,6 +85,7 @@ export class WriteMethodError extends Error {
     this.code = code;
     this.httpStatus = detail?.httpStatus;
     this.vendorCode = detail?.vendorCode;
+    this.retryAfterSeconds = detail?.retryAfterSeconds;
   }
 }
 

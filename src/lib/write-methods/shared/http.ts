@@ -16,7 +16,8 @@
 
 /** The request shape an adapter is allowed to send. */
 export interface FetchPortInit {
-  method: "GET" | "POST";
+  /** PATCH exists for partial-update APIs (Webflow/Wix-style); nothing wider. */
+  method: "GET" | "POST" | "PATCH";
   headers: Record<string, string>;
   body?: string;
   /**
@@ -56,6 +57,16 @@ export type FetchPort = (
  */
 export function basicAuthHeader(credential: string): string {
   return `Basic ${Buffer.from(credential, "utf8").toString("base64")}`;
+}
+
+/**
+ * Build an HTTP Bearer Authorization header value from a resolved credential
+ * (e.g. a Webflow API token). Same containment rule as {@link basicAuthHeader}:
+ * call sites pass `credential.reveal()` straight in — the revealed string
+ * exists only for this expression and lands only in the request header.
+ */
+export function bearerAuthHeader(credential: string): string {
+  return `Bearer ${credential}`;
 }
 
 /** Result of an honesty-first JSON parse — no throw, no partial value. */

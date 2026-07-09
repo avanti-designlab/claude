@@ -29,7 +29,7 @@ export interface RecordedRequest {
 export type ScriptedHandler = (req: RecordedRequest) => FetchPortResponse;
 
 interface ScriptedRoute {
-  method: "GET" | "POST" | "*";
+  method: "GET" | "POST" | "PATCH" | "*";
   match: string | RegExp;
   handler: ScriptedHandler;
 }
@@ -45,7 +45,7 @@ export class ScriptedFetch {
    * tested against the full request URL; first registered match wins.
    */
   on(
-    method: "GET" | "POST" | "*",
+    method: "GET" | "POST" | "PATCH" | "*",
     match: string | RegExp,
     handler: ScriptedHandler,
   ): this {
@@ -104,20 +104,34 @@ function makeResponse(
   status: number,
   body: string,
   contentType: string,
+  extraHeaders?: Record<string, string>,
 ): FetchPortResponse {
+  const headers = new Map<string, string>([["content-type", contentType]]);
+  for (const [name, value] of Object.entries(extraHeaders ?? {})) {
+    headers.set(name.toLowerCase(), value);
+  }
   return {
     status,
-    headers: {
-      get: (name) =>
-        name.toLowerCase() === "content-type" ? contentType : null,
-    },
+    headers: { get: (name) => headers.get(name.toLowerCase()) ?? null },
     text: async () => body,
   };
 }
 
-/** A JSON response (the honest vendor path). */
-export function jsonResponse(status: number, body: unknown): FetchPortResponse {
-  return makeResponse(status, JSON.stringify(body), "application/json; charset=UTF-8");
+/**
+ * A JSON response (the honest vendor path). `extraHeaders` lets a fake carry
+ * response headers an adapter must read (e.g. a 429's Retry-After).
+ */
+export function jsonResponse(
+  status: number,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): FetchPortResponse {
+  return makeResponse(
+    status,
+    JSON.stringify(body),
+    "application/json; charset=UTF-8",
+    extraHeaders,
+  );
 }
 
 /** An HTML response (the classic wp-login redirect / security interstitial). */

@@ -16,6 +16,7 @@ export {
 
 export {
   basicAuthHeader,
+  bearerAuthHeader,
   looksLikeHtml,
   tryParseJson,
   type FetchPort,

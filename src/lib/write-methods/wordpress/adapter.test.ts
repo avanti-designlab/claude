@@ -694,6 +694,34 @@ describe("site pinning", () => {
     expect((credsError as WriteMethodError).message).not.toContain("sekrit-pass");
   });
 
+  it("an UNPARSEABLE base URL is refused without being echoed — a malformed URL can still carry a credential (carried item (i))", () => {
+    const resolver = makeResolver();
+    const fake = makeFake();
+    // The classic malformation: a missing colon turns the scheme into a path
+    // prefix and new URL() throws — but the raw string still embeds a secret.
+    const malformed = "http//wp-admin:sekrit-base@ggrealty.example";
+    let thrown: unknown;
+    try {
+      new WordPressAdapter({
+        site: { ...SITE, baseUrl: malformed },
+        secrets: resolver,
+        authRef: "vault://wp/prop-1",
+        fetch: fake.port,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(WriteMethodError);
+    const error = thrown as WriteMethodError;
+    expect(error.code).toBe("misconfigured");
+    // Interface voice, but NEVER the URL itself or any fragment of it.
+    expect(error.message).toContain("reconnect the property");
+    expect(error.message).not.toContain(malformed);
+    expect(error.message).not.toContain("sekrit-base");
+    expect(error.message).not.toContain("wp-admin");
+    expect(fake.requests).toHaveLength(0);
+  });
+
   it("refuses an http: base URL at construction — the application password never travels cleartext (no dev opt-out)", () => {
     const resolver = makeResolver();
     const fake = makeFake();
