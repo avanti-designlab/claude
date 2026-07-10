@@ -8,6 +8,10 @@ import {
   getLatestVisibilityScore,
   getVisibilityScoreSeries,
 } from "@/lib/intelligence/visibility/reads";
+import { readClientCompetitors } from "@/lib/competitors/reads";
+import { toCompetitorRefs } from "@/lib/competitors/refs";
+import { getClaims } from "@/lib/auth/session";
+import { isStaffRole } from "@/lib/auth/parse-claims";
 import type { VisibilityEngine } from "@/lib/types/db";
 import {
   FailedState,
@@ -18,6 +22,7 @@ import {
 } from "../../../../_components/surface";
 import { tryCreateClient } from "../../../../_components/reads";
 import { PromptResults } from "./_components/prompt-results";
+import { CompetitorsPanel } from "./_components/competitors-panel";
 
 export const metadata: Metadata = {
   title: "Visibility — Client workspace",
@@ -56,11 +61,30 @@ export default async function VisibilityTab({
   const { clientId } = await params;
   const supabase = await tryCreateClient();
 
+  // Named competitors seed the manage panel AND feed share of voice — SOV
+  // measures the client against exactly the rows listed below (one source of
+  // truth). The write floor is the caller's role: staff manage, a viewer reads.
+  const [claims, competitorsRead] = await Promise.all([
+    getClaims(),
+    supabase
+      ? readClientCompetitors(supabase, clientId)
+      : Promise.resolve({ ok: false } as const),
+  ]);
+  const canManage = claims ? isStaffRole(claims.role) : false;
+
   const [latest, series, sov, results] = supabase
     ? await Promise.all([
         getLatestVisibilityScore(supabase, clientId),
         getVisibilityScoreSeries(supabase, clientId, { maxRuns: 30 }),
-        getLatestShareOfVoice(supabase, clientId, []),
+        // A FAILED competitors read routes SOV to its failed state — the chart
+        // must never invent "no competitors set" out of a read blip.
+        competitorsRead.ok
+          ? getLatestShareOfVoice(
+              supabase,
+              clientId,
+              toCompetitorRefs(competitorsRead.rows)
+            )
+          : Promise.resolve({ kind: "failed" } as const),
         getLatestRunResults(supabase, clientId),
       ])
     : [
@@ -69,6 +93,12 @@ export default async function VisibilityTab({
         { kind: "failed" } as const,
         { kind: "failed" } as const,
       ];
+
+  // Whether a stored tracker run exists — the competitors panel's footer copy
+  // hangs on it: SOV recomputes against the latest STORED run at read time, so
+  // once a run exists a competitor change shows on the next render (no new run
+  // needed) and "waiting on tracking" would be false.
+  const sovHasRun = sov.kind === "ok" && sov.latest !== null;
 
   const ready = latest.kind === "ok" && latest.latest !== null ? latest.latest : null;
   const cited = ready
@@ -200,6 +230,22 @@ export default async function VisibilityTab({
           )}
         </PanelCard>
       </section>
+
+      <PanelCard
+        title="Competitors"
+        description="The named rivals that share of voice measures this client against — managed here, matched by domain in AI answers"
+      >
+        {competitorsRead.ok ? (
+          <CompetitorsPanel
+            clientId={clientId}
+            initial={competitorsRead.rows}
+            canManage={canManage}
+            hasRun={sovHasRun}
+          />
+        ) : (
+          <FailedState subject="competitors" />
+        )}
+      </PanelCard>
 
       {promptResultsFailed || promptRun ? (
         <PanelCard

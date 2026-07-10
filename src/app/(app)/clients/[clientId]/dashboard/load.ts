@@ -37,6 +37,8 @@ import {
   type LatestShareOfVoice,
   type VisibilityRunScore,
 } from "@/lib/intelligence/visibility/reads";
+import { readClientCompetitors } from "@/lib/competitors/reads";
+import { toCompetitorRefs } from "@/lib/competitors/refs";
 import { readLocalHistory } from "@/lib/local/persist";
 import type { LocalHistoryEntry } from "@/lib/local/rows";
 import {
@@ -197,9 +199,20 @@ export async function loadClientDashboard(
     ] = await Promise.all([
       getLatestVisibilityScore(supabase, clientId),
       getVisibilityScoreSeries(supabase, clientId, { maxRuns: TREND_MAX_RUNS }),
-      // Competitor set is sourced server-side at the wiring slice; until then it
-      // is empty, so share-of-voice stays pending (no run + no competitors).
-      getLatestShareOfVoice(supabase, clientId, []),
+      // Named competitors (RLS-scoped) feed share-of-voice matching — the
+      // server-side wiring the old `[]` was a placeholder for. Chained so the
+      // competitors read adds no serial round-trip; a FAILED read routes SOV to
+      // its failed state (a read blip must never render as "no competitors
+      // set"). SOV still stays pending until a tracker run lands.
+      readClientCompetitors(supabase, clientId).then((competitors) =>
+        competitors.ok
+          ? getLatestShareOfVoice(
+              supabase,
+              clientId,
+              toCompetitorRefs(competitors.rows),
+            )
+          : ({ kind: "failed" } as const),
+      ),
       readLocalHistory(supabase, clientId),
       getLatestRoiSnapshot(supabase, clientId),
       getRoiAttribution(supabase, clientId),
