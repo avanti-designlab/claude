@@ -17,7 +17,13 @@ import "server-only";
 
 import type { createClient } from "@/lib/supabase/server";
 import type { PropertyAuditResult } from "./engine";
-import { auditHistoryEntry, auditInsertRow, type AuditHistoryEntry } from "./rows";
+import {
+  auditHistoryEntry,
+  auditInsertRow,
+  parseStoredFixes,
+  type AuditFixView,
+  type AuditHistoryEntry,
+} from "./rows";
 
 export type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -133,4 +139,42 @@ export async function readAuditHistory(
   if (error || !data) return { ok: false };
   const rows = data as Array<{ id: string; property_id: string; score: unknown; created_at: string }>;
   return { ok: true, entries: rows.slice(0, AUDIT_HISTORY_MAX).map(auditHistoryEntry) };
+}
+
+/* ------------------------------------------------------------------ */
+/* readLatestAuditFixes — one audit's prioritized fix list (P1 slice)  */
+/* ------------------------------------------------------------------ */
+
+export type AuditFixesRead =
+  | { ok: true; rawCount: number; fixes: AuditFixView[] }
+  | { ok: false };
+
+/**
+ * The prioritized `fixes` (the `audits.fixes` jsonb) for ONE audit, addressed by
+ * id — the caller resolves the latest audit's id from `readAuditHistory` so the
+ * fix-list panel and the history panel always describe the SAME run.
+ *
+ * THIN P1 READ (flagged): `readAuditHistory` deliberately does NOT select
+ * `fixes` (that would pull every history row's full array). This fetches it for
+ * the single audit whose fixes we render. RLS (`audits_select`, migration 0005)
+ * scopes to the caller's tenant AND `app.client_scope(client_id)`; the extra
+ * `eq(client_id)` narrows within that own scope (defense-in-depth, mirrors
+ * `readAuditHistory`). Array-return shape — no `.single()`, so a vanished row is
+ * an honest empty list, never a thrown "no rows" error. The pure `parseStoredFixes`
+ * drops the engine's internal codes and reports the raw-vs-rendered delta.
+ */
+export async function readLatestAuditFixes(
+  supabase: Supabase,
+  clientId: string,
+  auditId: string
+): Promise<AuditFixesRead> {
+  const { data, error } = await supabase
+    .from("audits")
+    .select("fixes")
+    .eq("id", auditId)
+    .eq("client_id", clientId);
+  if (error || !data) return { ok: false };
+  const rows = data as Array<{ fixes: unknown }>;
+  const raw = rows.length > 0 ? rows[0].fixes : null;
+  return { ok: true, ...parseStoredFixes(raw) };
 }

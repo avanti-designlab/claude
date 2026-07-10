@@ -257,6 +257,80 @@ export async function getVisibilityScoreSeries(
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Per-prompt latest-run results — THIN P1 read (adds `sentiment`)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Columns for the per-prompt view: `RESULT_COLUMNS` PLUS `sentiment`, which the
+ * score / SOV reads don't need and deliberately don't select. Kept as a SEPARATE
+ * constant + fetch so the load-bearing score reads (also consumed by the M19
+ * dashboard gauges) stay byte-for-byte unchanged — this P1 slice must not perturb
+ * them. (Modest duplication of the newest-run grouping is the deliberate trade.)
+ */
+const RESULT_ROW_COLUMNS =
+  "engine, prompt, cited, position, sentiment, cited_source, captured_at";
+
+interface StoredResultRowFull extends StoredResultRow {
+  sentiment: string | null;
+}
+
+/** One measured prompt×engine sample, exactly as the per-prompt table renders it. */
+export interface VisibilityPromptResult {
+  engine: VisibilityEngine;
+  prompt: string;
+  cited: boolean;
+  /** Citation rank when the engine reported one; null = not captured (never 0). */
+  position: number | null;
+  /** Vendor sentiment label (free text; value set is doc-silent, §9) or null = not captured. */
+  sentiment: string | null;
+  /** The source the engine cited (the competitor/page winning the answer) or null. */
+  citedSource: string | null;
+}
+
+export type LatestRunResultsRead =
+  | { kind: "ok"; latest: { runAt: string; rows: VisibilityPromptResult[] } | null }
+  | { kind: "failed" };
+
+function toPromptResult(row: StoredResultRowFull): VisibilityPromptResult {
+  return {
+    engine: row.engine,
+    prompt: row.prompt,
+    cited: row.cited,
+    position: row.position,
+    sentiment: row.sentiment,
+    citedSource: row.cited_source,
+  };
+}
+
+/**
+ * The newest run's per-prompt samples — the operator's daily "which prompts are
+ * we cited on, where, and who got cited instead" view. Returns EVERY measured
+ * sample in the newest captured_at group (the UI bounds the DISPLAY, honestly).
+ * Only MEASURED samples are stored (persist.ts), so an absent prompt/engine reads
+ * as "not measured", never as "not cited". Mirrors `fetchLatestRunRows`' newest-run
+ * grouping but selects `sentiment` too (see `RESULT_ROW_COLUMNS`). A non-UUID
+ * clientId never reaches Postgres — same "no runs" observation as the score read.
+ */
+export async function getLatestRunResults(
+  supabase: Supabase,
+  clientId: string
+): Promise<LatestRunResultsRead> {
+  if (!isUuidV4(clientId)) return { kind: "ok", latest: null };
+  const { data, error } = await supabase
+    .from("visibility_results")
+    .select(RESULT_ROW_COLUMNS)
+    .eq("client_id", clientId)
+    .order("captured_at", { ascending: false })
+    .limit(LATEST_RUN_ROW_CAP);
+  if (error || !data) return { kind: "failed" };
+  const rows = data as unknown as StoredResultRowFull[];
+  if (rows.length === 0) return { kind: "ok", latest: null };
+  const runAt = rows[0].captured_at;
+  const runRows = rows.filter((r) => r.captured_at === runAt).map(toPromptResult);
+  return { kind: "ok", latest: { runAt, rows: runRows } };
+}
+
 /**
  * Latest share-of-voice vs named competitors, plus the run's cited-URL
  * inventory. Competitor refs come from server-side callers (the wiring slice

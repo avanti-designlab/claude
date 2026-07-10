@@ -3,6 +3,7 @@ import { SparklesIcon, TargetIcon, TrendingUpIcon } from "lucide-react";
 
 import { ShareOfVoice, VisibilityTrend } from "@/components/charts";
 import {
+  getLatestRunResults,
   getLatestShareOfVoice,
   getLatestVisibilityScore,
   getVisibilityScoreSeries,
@@ -16,6 +17,7 @@ import {
   StatusPill,
 } from "../../../../_components/surface";
 import { tryCreateClient } from "../../../../_components/reads";
+import { PromptResults } from "./_components/prompt-results";
 
 export const metadata: Metadata = {
   title: "Visibility — Client workspace",
@@ -54,13 +56,15 @@ export default async function VisibilityTab({
   const { clientId } = await params;
   const supabase = await tryCreateClient();
 
-  const [latest, series, sov] = supabase
+  const [latest, series, sov, results] = supabase
     ? await Promise.all([
         getLatestVisibilityScore(supabase, clientId),
         getVisibilityScoreSeries(supabase, clientId, { maxRuns: 30 }),
         getLatestShareOfVoice(supabase, clientId, []),
+        getLatestRunResults(supabase, clientId),
       ])
     : [
+        { kind: "failed" } as const,
         { kind: "failed" } as const,
         { kind: "failed" } as const,
         { kind: "failed" } as const,
@@ -71,6 +75,13 @@ export default async function VisibilityTab({
     ? ready.engines.filter((e) => e.score !== null && e.cited > 0).length
     : 0;
   const measured = ready ? ready.engines.filter((e) => e.score !== null).length : 0;
+
+  // Per-prompt panel: surface a read failure, render the table when a run exists,
+  // and SUPPRESS the panel with no run — the "No tracker run yet" pending above
+  // already stands for that (do NOT add a run button; tracking is vendor-gated).
+  const promptRun =
+    results.kind === "ok" && results.latest !== null ? results.latest : null;
+  const promptResultsFailed = results.kind === "failed";
 
   return (
     <div className="flex flex-col gap-6">
@@ -189,6 +200,27 @@ export default async function VisibilityTab({
           )}
         </PanelCard>
       </section>
+
+      {promptResultsFailed || promptRun ? (
+        <PanelCard
+          title="Per-prompt results"
+          description="One row per prompt and engine from the latest run — where the client was cited, the position and sentiment when the engine reported them, and the source cited otherwise. A dash means that signal wasn't captured, not zero."
+          aside={
+            promptRun ? (
+              <StatusPill tone="muted">
+                {promptRun.rows.length}{" "}
+                {promptRun.rows.length === 1 ? "sample" : "samples"}
+              </StatusPill>
+            ) : undefined
+          }
+        >
+          {promptRun ? (
+            <PromptResults rows={promptRun.rows} />
+          ) : (
+            <FailedState subject="prompt results" />
+          )}
+        </PanelCard>
+      ) : null}
     </div>
   );
 }

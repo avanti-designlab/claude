@@ -15,6 +15,7 @@ import { MAX_TRACKED_QUERIES } from "./derive";
 import type { Supabase } from "./persist";
 import { fakeReadPostgrest, type ScriptedRead } from "./read-fake";
 import {
+  getLatestRunResults,
   getLatestShareOfVoice,
   getLatestVisibilityScore,
   getVisibilityScoreSeries,
@@ -245,5 +246,96 @@ describe("getLatestShareOfVoice", () => {
     expect(await getLatestShareOfVoice(failing.supabase, CLIENT_ID, [])).toEqual({
       kind: "failed",
     });
+  });
+});
+
+describe("getLatestRunResults — per-prompt latest-run view (with sentiment)", () => {
+  const fullRow = (o: {
+    engine?: VisibilityEngine;
+    prompt?: string;
+    cited?: boolean;
+    position?: number | null;
+    sentiment?: string | null;
+    cited_source?: string | null;
+    captured_at: string;
+  }) => ({
+    engine: o.engine ?? "chatgpt",
+    prompt: o.prompt ?? "who is Gable & Grove Realty",
+    cited: o.cited ?? false,
+    position: o.position ?? null,
+    sentiment: o.sentiment ?? null,
+    cited_source: o.cited_source ?? null,
+    captured_at: o.captured_at,
+  });
+
+  it("returns ONLY the newest run's samples and selects the sentiment column", async () => {
+    const { supabase, reads } = client({
+      data: [
+        fullRow({
+          captured_at: RUN_NEW,
+          engine: "chatgpt",
+          cited: true,
+          position: 1,
+          sentiment: "positive",
+          cited_source: "client.example/about",
+        }),
+        fullRow({
+          captured_at: RUN_NEW,
+          engine: "perplexity",
+          cited: false,
+          cited_source: "rival.com/why-us",
+        }),
+        fullRow({ captured_at: RUN_OLD, engine: "chatgpt", cited: true, position: 2 }),
+      ],
+    });
+    const result = await getLatestRunResults(supabase, CLIENT_ID);
+    if (result.kind !== "ok" || result.latest === null) {
+      throw new Error("expected an ok read with a latest run");
+    }
+    expect(result.latest.runAt).toBe(RUN_NEW);
+    // The older run's row is NOT mixed in; cited_source → citedSource; absent
+    // signals stay null (never invented as 0).
+    expect(result.latest.rows).toEqual([
+      {
+        engine: "chatgpt",
+        prompt: "who is Gable & Grove Realty",
+        cited: true,
+        position: 1,
+        sentiment: "positive",
+        citedSource: "client.example/about",
+      },
+      {
+        engine: "perplexity",
+        prompt: "who is Gable & Grove Realty",
+        cited: false,
+        position: null,
+        sentiment: null,
+        citedSource: "rival.com/why-us",
+      },
+    ]);
+    // Selects sentiment — which the score/SOV reads deliberately do NOT.
+    expect(reads[0].columns).toBe(
+      "engine, prompt, cited, position, sentiment, cited_source, captured_at"
+    );
+    expect(reads[0].limit).toBe(MAX_TRACKED_QUERIES * 6);
+    expect(reads[0].order).toEqual([{ column: "captured_at", ascending: false }]);
+  });
+
+  it("returns latest:null with no runs and a typed failure on error", async () => {
+    expect(
+      await getLatestRunResults(client({ data: [] }).supabase, CLIENT_ID)
+    ).toEqual({ kind: "ok", latest: null });
+    expect(
+      await getLatestRunResults(client({ error: { message: "boom" } }).supabase, CLIENT_ID)
+    ).toEqual({ kind: "failed" });
+  });
+
+  it("never sends a junk client id to Postgres", async () => {
+    const { supabase, reads } = client({ data: [] });
+    expect(await getLatestRunResults(supabase, "not-a-uuid")).toEqual({
+      kind: "ok",
+      latest: null,
+    });
+    expect(reads).toHaveLength(0);
   });
 });

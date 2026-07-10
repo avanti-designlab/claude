@@ -3,7 +3,11 @@ import { FileSearchIcon } from "lucide-react";
 
 import { getClaims } from "@/lib/auth/session";
 import { isStaffRole } from "@/lib/auth/parse-claims";
-import { readAuditHistory } from "@/lib/intelligence/audit/persist";
+import {
+  readAuditHistory,
+  readLatestAuditFixes,
+  type AuditFixesRead,
+} from "@/lib/intelligence/audit/persist";
 import type { AuditHistoryEntry } from "@/lib/intelligence/audit/rows";
 import type { RunStatus } from "@/lib/types/db";
 import {
@@ -11,9 +15,11 @@ import {
   PageHeader,
   PanelCard,
   PendingState,
+  StatusPill,
 } from "../../../../_components/surface";
 import { tryCreateClient } from "../../../../_components/reads";
 import { AuditRuns, type RunProperty, type RunView } from "./_components/audit-runs";
+import { AuditFixes } from "./_components/audit-fixes";
 
 export const metadata: Metadata = {
   title: "Audit — Client workspace",
@@ -75,6 +81,15 @@ async function loadAudit(clientId: string): Promise<AuditLoad> {
   const supabase = await tryCreateClient();
   if (!supabase) return { ok: false };
   return readAuditHistory(supabase, clientId);
+}
+
+/** The latest audit's prioritized fixes — a DEPENDENT read (needs the latest
+ *  audit id from history) so the fix panel and the history panel always describe
+ *  the SAME run. Its own claim-scoped client = independent failure domain. */
+async function loadFixes(clientId: string, auditId: string): Promise<AuditFixesRead> {
+  const supabase = await tryCreateClient();
+  if (!supabase) return { ok: false };
+  return readLatestAuditFixes(supabase, clientId, auditId);
 }
 
 type PropertiesLoad = { ok: true; rows: RunProperty[] } | { ok: false };
@@ -219,6 +234,14 @@ export default async function AuditTab({
     ? mapRuns(runsLoad.rows, propertyUrlById, auditIds)
     : [];
 
+  // Latest audit's fix list — fetched ONLY when a scored audit exists. With no
+  // audit yet, the history panel's pending state already promises the fixes, so
+  // a second empty panel would be redundant; we render the fix panel only when
+  // there is a run to describe. The dependent read guarantees it's the same run.
+  const fixesLoad = latest ? await loadFixes(clientId, latest.id) : null;
+  const fixCountPill =
+    fixesLoad && fixesLoad.ok && fixesLoad.rawCount > 0 ? fixesLoad.rawCount : null;
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -295,6 +318,22 @@ export default async function AuditTab({
           </div>
         )}
       </PanelCard>
+
+      {fixesLoad ? (
+        <PanelCard
+          title="Prioritized fixes"
+          description="What to fix on the client's site, ordered by the impact the audit assigns — the plan is built from these."
+          aside={
+            fixCountPill !== null ? (
+              <StatusPill tone="accent">
+                {fixCountPill} {fixCountPill === 1 ? "fix" : "fixes"}
+              </StatusPill>
+            ) : undefined
+          }
+        >
+          <AuditFixes read={fixesLoad} />
+        </PanelCard>
+      ) : null}
     </div>
   );
 }

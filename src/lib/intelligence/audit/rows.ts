@@ -22,7 +22,7 @@
  * tenant or reference another client's property.
  */
 
-import type { AuditFix, CheckResult, EvidenceItem, SkipReason } from "@/lib/skills/aeo-audit";
+import type { AuditFix, CheckResult, EvidenceItem, ImpactLevel, SkipReason } from "@/lib/skills/aeo-audit";
 import type { CrawlCoverage } from "@/lib/intelligence/crawl";
 import type { PropertyAuditResult } from "./engine";
 
@@ -156,4 +156,85 @@ export function auditHistoryEntry(row: {
     pagesFailed: attempted !== null && crawled !== null ? Math.max(attempted - crawled, 0) : null,
     playbookVersion: nonEmptyString(score.playbookVersion),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Fix-list read parsing (defensive jsonb) — thin P1 addition          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One prioritized fix as the UI renders it — a defensively-parsed projection of
+ * the stored `AuditFix` (the `audits.fixes` jsonb). ONLY the interface-voice,
+ * human-facing fields survive: the engine's `title` / `detail` / `impactEstimate`
+ * copy, its real `impact` scale, and the `targetUrls`. The engine's internal
+ * bookkeeping — the `id`'s check-code prefix, `checkId`, `module` (M-codes),
+ * `priorityScore`, `automationLevel` — is DROPPED and never rendered (house
+ * rule: no internal codes on operator surfaces). The stored array is already
+ * priority-ordered (AuditResult.fixes: highest first) and persisted verbatim, so
+ * callers PRESERVE array order and never re-derive priority.
+ */
+export interface AuditFixView {
+  /** Stable id — used ONLY as a render key, never displayed. */
+  id: string;
+  /** Actionable headline (the engine's copy). Present by construction — a fix
+   *  with no title is dropped (it can't state what's wrong). */
+  title: string;
+  /** Fuller explanation (why + execution rules; the engine's copy), or null. */
+  detail: string | null;
+  /** The engine's real impact level, or null when the stored value is unrecognized. */
+  impact: ImpactLevel | null;
+  /** Human-readable impact estimate (the engine's copy), or null. */
+  impactEstimate: string | null;
+  /** Pages/URLs the fix targets (deduped, non-empty); may be empty. */
+  targetUrls: string[];
+}
+
+const IMPACT_LEVELS = new Set<ImpactLevel>(["critical", "high", "medium", "low"]);
+
+function impactLevel(value: unknown): ImpactLevel | null {
+  return typeof value === "string" && IMPACT_LEVELS.has(value as ImpactLevel)
+    ? (value as ImpactLevel)
+    : null;
+}
+
+/**
+ * Parse the stored `audits.fixes` jsonb into render-ready views. Returns the RAW
+ * stored count alongside the parsed list so a caller can be honest when defensive
+ * parsing dropped a malformed entry (rendered < rawCount → "showing X of Y").
+ * A non-array (hostile / absent) value yields an empty result — never a throw,
+ * never an invented fix.
+ */
+export function parseStoredFixes(value: unknown): {
+  rawCount: number;
+  fixes: AuditFixView[];
+} {
+  if (!Array.isArray(value)) return { rawCount: 0, fixes: [] };
+  const fixes: AuditFixView[] = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const raw = value[i];
+    if (typeof raw !== "object" || raw === null) continue;
+    const fix = raw as Record<string, unknown>;
+    const title = nonEmptyString(fix.title);
+    // No plain-language title ⇒ can't state "what's wrong". Drop it (still
+    // counted in rawCount, so the delta surfaces honestly) — never a blank row.
+    if (title === null) continue;
+    const targetUrls = Array.isArray(fix.targetUrls)
+      ? [
+          ...new Set(
+            fix.targetUrls.filter(
+              (u): u is string => typeof u === "string" && u.trim() !== ""
+            )
+          ),
+        ]
+      : [];
+    fixes.push({
+      id: nonEmptyString(fix.id) ?? `fix-${i}`,
+      title,
+      detail: nonEmptyString(fix.detail),
+      impact: impactLevel(fix.impact),
+      impactEstimate: nonEmptyString(fix.impactEstimate),
+      targetUrls,
+    });
+  }
+  return { rawCount: value.length, fixes };
 }
