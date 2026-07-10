@@ -1,53 +1,27 @@
 "use client";
 
 /**
- * A PERSISTENT polite live region + a module-scope dispatcher for the Review &
- * Approvals decision controls (the same pattern the dashboard's Generate-plan
- * control uses — dashboard/status-announcer.tsx). A decision (approve / verdict
- * / send-back / resubmit) succeeds, the page router-refreshes to show the new
- * status, and the outcome is announced through THIS region.
+ * The Review & Approvals persistent polite live region. A decision (approve /
+ * verdict / send-back / resubmit) succeeds, the page router-refreshes to show
+ * the new status, and the outcome is announced through THIS region — which the
+ * detail page renders at a STABLE position outside the decision panel, because
+ * the controls that triggered the action re-render or disappear on success and
+ * a region inside them could be torn out of the accessibility tree with its
+ * announcement unspoken.
  *
- * WHY A STANDALONE REGION (not one inside the decision panel): on approve /
- * send-back the controls that triggered the action re-render or disappear
- * (status left in_review), so a live region living inside them could be torn
- * out of the accessibility tree with its announcement unspoken. This region is
- * rendered by the detail page at a STABLE position outside the panel, so
- * router.refresh() preserves its DOM node (React reconciles by type + position)
- * and the message is announced into a region that already existed.
+ * The implementation now lives in the shared factory
+ * (src/components/announcer.tsx — Design Review m3 / Code Review minor 2,
+ * 2026-07-10, which also documents the survive-the-refresh and clear-then-set
+ * mechanics). This module keeps the queue's OWN listener set and its exported
+ * names, so its surface is unchanged.
  */
 
-import * as React from "react";
+import { makeAnnouncer } from "@/components/announcer";
 
-type Listener = (message: string) => void;
-const listeners = new Set<Listener>();
+const reviewQueue = makeAnnouncer();
 
 /** Politely announce `message` through every mounted ReviewStatusAnnouncer. */
-export function announceReview(message: string): void {
-  for (const listener of listeners) listener(message);
-}
+export const announceReview = reviewQueue.announce;
 
-export function ReviewStatusAnnouncer() {
-  const [message, setMessage] = React.useState("");
-  const frame = React.useRef(0);
-
-  React.useEffect(() => {
-    const listener: Listener = (next) => {
-      // Clear-then-set across a frame so repeating the SAME message still
-      // mutates the DOM (and therefore re-announces).
-      cancelAnimationFrame(frame.current);
-      setMessage("");
-      frame.current = requestAnimationFrame(() => setMessage(next));
-    };
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-      cancelAnimationFrame(frame.current);
-    };
-  }, []);
-
-  return (
-    <div role="status" aria-live="polite" className="sr-only">
-      {message}
-    </div>
-  );
-}
+/** The queue's persistent live region — rendered once, outside the decision panel. */
+export const ReviewStatusAnnouncer = reviewQueue.Announcer;
