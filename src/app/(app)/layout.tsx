@@ -29,6 +29,30 @@ async function loadTenantName(): Promise<string | null> {
 }
 
 /**
+ * The count of UNACKNOWLEDGED alerts across the caller's clients, for the top
+ * bar's bell badge — a HEAD-only exact count (RLS-scoped by `alerts_select`, no
+ * tenant filter written in app code; the partial `alerts_unacknowledged_idx`
+ * (migration 0006) backs it). FAIL CLOSED to null on a failed/env-less read or a
+ * null count: the badge then renders nothing rather than a fabricated zero. Every
+ * alert here is a PROBLEM, so this is a real "needs a look" number, never an
+ * all-clear metric.
+ */
+async function loadUnacknowledgedAlertCount(): Promise<number | null> {
+  const supabase = await tryCreateClient();
+  if (!supabase) return null;
+  try {
+    const { count, error } = await supabase
+      .from("alerts")
+      .select("id", { count: "exact", head: true })
+      .eq("acknowledged", false);
+    if (error) return null;
+    return count;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The authenticated app shell. Everything under this route group
  * (/dashboard, /clients, the studios, …) is server-gated HERE: we read the
  * VERIFIED session and redirect to /login when there is no verified tenant
@@ -66,8 +90,12 @@ export default async function AppShellLayout({
     return <ClientShell>{children}</ClientShell>;
   }
 
-  // Operator shell only: resolve the agency name for the top bar's identity line.
-  const tenantName = await loadTenantName();
+  // Operator shell only: resolve the agency name for the top bar's identity line
+  // and the unacknowledged-alert count for its bell badge (parallel reads).
+  const [tenantName, unacknowledgedAlerts] = await Promise.all([
+    loadTenantName(),
+    loadUnacknowledgedAlertCount(),
+  ]);
 
   return (
     <div className="flex min-h-full">
@@ -78,6 +106,7 @@ export default async function AppShellLayout({
           role={session.claims.role}
           tenantId={session.claims.tenantId}
           tenantName={tenantName}
+          unacknowledgedAlerts={unacknowledgedAlerts}
         />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>

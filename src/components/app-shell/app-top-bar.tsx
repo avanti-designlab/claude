@@ -1,4 +1,5 @@
-import { LogOutIcon } from "lucide-react";
+import Link from "next/link";
+import { BellIcon, LogOutIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,9 +39,37 @@ export interface AppTopBarProps {
    * than crash or invent a name.
    */
   tenantName: string | null;
+  /**
+   * Count of UNACKNOWLEDGED alerts across the caller's clients, read RLS-scoped
+   * in the (app) layout. Null on a failed/env-less read — the bell then shows no
+   * badge (never a fabricated zero). A real 0 also shows no badge (nothing to
+   * flag); only a positive count renders one.
+   */
+  unacknowledgedAlerts: number | null;
 }
 
-export function AppTopBar({ email, role, tenantId, tenantName }: AppTopBarProps) {
+/** Cap the badge glyph so a large backlog never blows out the bar. aria uses the real number. */
+const ALERT_BADGE_CAP = 9;
+
+export function AppTopBar({
+  email,
+  role,
+  tenantId,
+  tenantName,
+  unacknowledgedAlerts,
+}: AppTopBarProps) {
+  // Only a positive, known count renders a badge. Null (failed/env-less read) and
+  // a real 0 both show the bare bell — no fake zero, no alarming empty badge.
+  const alertCount =
+    typeof unacknowledgedAlerts === "number" && unacknowledgedAlerts > 0
+      ? unacknowledgedAlerts
+      : null;
+  const badgeGlyph =
+    alertCount === null ? null : alertCount > ALERT_BADGE_CAP ? `${ALERT_BADGE_CAP}+` : String(alertCount);
+  const bellLabel =
+    alertCount === null
+      ? "Alerts"
+      : `Alerts — ${alertCount} unacknowledged`;
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/85 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/70 sm:px-6">
       {/* Below lg the sidebar is hidden: the menu trigger + wordmark stand in. */}
@@ -74,6 +103,29 @@ export function AppTopBar({ email, role, tenantId, tenantName }: AppTopBarProps)
             </span>
           )}
         </div>
+        {/* Alerts bell — a quiet link to /alerts with a static unacknowledged
+            count badge (no glow, no pulse: doc 06 §5). The badge shows only when
+            there's a positive, known count; a failed read or a real zero shows
+            the bare bell. The count itself is read RLS-scoped in the layout. */}
+        <Button
+          asChild
+          variant="ghost"
+          size="icon-sm"
+          className="relative shrink-0"
+          aria-label={bellLabel}
+        >
+          <Link href="/alerts">
+            <BellIcon aria-hidden />
+            {badgeGlyph ? (
+              <span
+                aria-hidden
+                className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] leading-none font-medium text-accent-foreground"
+              >
+                {badgeGlyph}
+              </span>
+            ) : null}
+          </Link>
+        </Button>
         {/* Global color-mode toggle — one instance for every operator page. It
             drives the shared data-theme mechanism. This bar never renders for
             a client_viewer; their toggle lives on the M19 report page itself
