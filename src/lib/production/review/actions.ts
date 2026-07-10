@@ -8,6 +8,7 @@ import type {
   ContentReviewVerdict,
   Json,
 } from "@/lib/types/db";
+import { NOTE_MAX, REASON_MAX } from "./limits";
 import {
   applyContentPatch,
   readReviewRow,
@@ -89,8 +90,8 @@ const REASON_REQUIRED_ERROR =
 const NOTHING_TO_REVISE_ERROR =
   "Add new content or a new title before saving the revision.";
 
-const REASON_MAX = 2000;
-const NOTE_MAX = 2000;
+// REASON_MAX / NOTE_MAX live in ./limits (pure constants) so the review UI and
+// this clamp share one source of truth — no literal mirror to drift.
 const TITLE_MAX = 200;
 /** A generous body cap at the seam (the column itself is uncapped) — bounds the
  *  write without truncating legitimate long-form content. Flagged for review. */
