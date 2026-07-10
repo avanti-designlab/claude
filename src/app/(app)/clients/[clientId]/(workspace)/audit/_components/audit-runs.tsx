@@ -37,6 +37,11 @@ import {
   FailedState,
   StatusPill,
 } from "../../../../../_components/surface";
+import {
+  NEGATIVE_TEXT_CLASS,
+  POSITIVE_TEXT_CLASS,
+  WARM_TEXT_CLASS,
+} from "../../../../../_components/tone";
 
 /* ------------------------------------------------------------------ */
 /* Props (all plain, server-serialized data)                           */
@@ -142,16 +147,6 @@ function attemptLine(attempts: number): string | null {
 /** Interface-voice fallback when an action call fails to round-trip. */
 const SEAM_UNREACHABLE =
   "We couldn’t confirm that — we’ve refreshed the list so you can see its current state before trying again.";
-
-/** House AA-fixed notice recipes (same color-mix as the Properties panel).
- *  WARM covers the stale-heartbeat callout — raw text-accent-warm measures
- *  ~3:1 on the light card surface (Design M1). */
-const POSITIVE_TEXT_CLASS =
-  "text-[color-mix(in_oklab,var(--positive)_70%,var(--ink))] dark:text-positive";
-const NEGATIVE_TEXT_CLASS =
-  "text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative";
-const WARM_TEXT_CLASS =
-  "text-[color-mix(in_oklab,var(--accent-warm)_70%,var(--ink))] dark:text-accent-warm";
 
 const TIME_FMT = new Intl.DateTimeFormat(undefined, {
   hour: "2-digit",

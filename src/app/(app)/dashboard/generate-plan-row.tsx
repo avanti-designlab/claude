@@ -40,6 +40,7 @@ import {
   toGeneratePlanOutcome,
 } from "./generate-plan-outcome";
 import { announceStatus } from "./status-announcer";
+import { NEGATIVE_TEXT_CLASS } from "../_components/tone";
 
 export function GeneratePlanRow({ clientId }: { clientId: string }) {
   const router = useRouter();
@@ -89,10 +90,7 @@ export function GeneratePlanRow({ clientId }: { clientId: string }) {
       </dd>
       {error ? (
         <dd className="col-span-2 min-w-0">
-          <p
-            role="alert"
-            className="text-[11px] leading-4 text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
-          >
+          <p role="alert" className={`text-[11px] leading-4 ${NEGATIVE_TEXT_CLASS}`}>
             {error}
           </p>
         </dd>

@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn } from "@/lib/auth/actions";
 import { APP_HOME } from "@/components/app-shell/nav";
+import { NEGATIVE_TEXT_CLASS } from "@/components/tone";
 
 /** Map the action's result string to an interface-voice message. */
 function friendlyError(raw: string): string {
@@ -106,10 +107,7 @@ export function LoginForm() {
         // review 2026-07-09 Major 4; measured on both chrome layers of both
         // reachable palettes in
         // src/app/(app)/dashboard/error-text-contrast.test.ts).
-        <p
-          role="alert"
-          className="text-sm text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
-        >
+        <p role="alert" className={`text-sm ${NEGATIVE_TEXT_CLASS}`}>
           {error}
         </p>
       ) : null}

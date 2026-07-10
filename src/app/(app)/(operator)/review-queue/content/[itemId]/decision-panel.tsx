@@ -50,7 +50,11 @@ import {
 // literal mirror to drift (Code Review c2).
 import { NOTE_MAX, REASON_MAX } from "@/lib/production/review/limits";
 import { announceReview } from "../../_components/announcer";
-import { POSITIVE_TEXT_CLASS, WARM_TEXT_CLASS } from "../../_components/tone";
+import {
+  NEGATIVE_TEXT_CLASS,
+  POSITIVE_TEXT_CLASS,
+  WARM_TEXT_CLASS,
+} from "../../_components/tone";
 
 const UNREACHABLE_ERROR =
   "We couldn’t reach the server to record that. Check your connection and try again.";
@@ -560,10 +564,7 @@ function SendBackForm({
 function ErrorLine({ error }: { error: string | null }) {
   if (!error) return null;
   return (
-    <p
-      role="alert"
-      className="text-[13px] leading-5 text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
-    >
+    <p role="alert" className={`text-[13px] leading-5 ${NEGATIVE_TEXT_CLASS}`}>
       {error}
     </p>
   );

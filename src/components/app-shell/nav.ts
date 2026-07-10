@@ -5,8 +5,9 @@
  *
  * The operator navigation is the app's information architecture: Home + Clients,
  * then the global studios (production), operations (review/measure/alert), and
- * knowledge, with Settings pinned to the footer. It is consumed by the sidebar
- * (desktop) and the mobile Sheet — one source of truth so the two never drift.
+ * knowledge, with the two workspace-administration surfaces — Connections and
+ * Settings — pinned to the footer. It is consumed by the sidebar (desktop) and
+ * the mobile Sheet — one source of truth so the two never drift.
  * ROLE-AWARENESS is enforced upstream: this model is the OPERATOR surface; a
  * `client_viewer` never renders it (see access.ts + the (app) layout).
  */
@@ -21,6 +22,7 @@ import {
   LineChartIcon,
   PaletteIcon,
   PenLineIcon,
+  PlugIcon,
   SettingsIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -85,8 +87,13 @@ export const OPERATOR_NAV: AppNavGroup[] = [
   },
 ];
 
-/** Pinned to the bottom of the sidebar, apart from the primary groups. */
+/**
+ * Pinned to the bottom of the sidebar, apart from the primary groups — the
+ * workspace-administration surfaces (which vendors are wired; the workspace
+ * itself), a different register from the per-client operational feeds above.
+ */
 export const OPERATOR_NAV_FOOTER: AppNavItem[] = [
+  { href: "/connections", label: "Connections", icon: PlugIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 

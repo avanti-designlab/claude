@@ -396,6 +396,7 @@ function ComingOnline({ step }: { step: number }) {
           title="AI citations"
           description="Engine-by-engine citations — ChatGPT, Perplexity, Gemini, and more — fill in on a client's Visibility tab once you connect their site and run a check."
           link={{ href: "/clients", label: "Open a client" }}
+          secondaryLink={{ href: "/connections", label: "What turns this on?" }}
         />
         <PendingModuleCard
           icon={TargetIcon}

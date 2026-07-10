@@ -34,6 +34,7 @@ import {
   websiteUrlProblem,
 } from "@/components/properties/website-url";
 import { PLATFORM_GUIDANCE, PLATFORM_ORDER } from "./onboarding-copy";
+import { NEGATIVE_TEXT_CLASS } from "@/components/tone";
 
 export interface PropertyDraft {
   id: string;
@@ -133,7 +134,7 @@ function PropertyRow({
             <p
               id={problemId}
               role="alert"
-              className="text-[13px] leading-5 text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
+              className={`text-[13px] leading-5 ${NEGATIVE_TEXT_CLASS}`}
             >
               {urlProblem}
             </p>

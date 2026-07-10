@@ -21,8 +21,13 @@
  *   - the operator boot theme (light + dark modes, post-gate kit values), and
  *   - the frozen "Signal" framework fallback (light + dark token blocks).
  *
- * Used by: src/app/(app)/dashboard/generate-plan-row.tsx and
- * src/components/auth/login-form.tsx (the identical-pattern sweep).
+ * The class now ships from ONE source — NEGATIVE_TEXT_CLASS in
+ * src/components/tone.ts (the 2026-07-10 consolidation) — consumed by the
+ * dashboard Generate-plan row, the login form, the onboarding + workspace
+ * property forms, the audit run list, and the review-queue decision panel.
+ * This suite is BOUND to that source: the mix share below is PARSED from the
+ * shipped class string, so editing the module's recipe re-runs this proof
+ * against the new value instead of silently diverging from a hardcoded 0.7.
  */
 
 import { describe, expect, test } from "vitest";
@@ -35,9 +40,27 @@ import {
 } from "@/lib/skills/brand-kit";
 import { SIGNAL_LIGHT_SURFACE } from "@/lib/theme/light-surface";
 import { operatorModeBuild } from "@/lib/theme/operator-theme";
+import { NEGATIVE_TEXT_CLASS } from "@/components/tone";
 
-/** The mix the utility class encodes: negative 70%, ink 30%, in oklab. */
-const NEGATIVE_SHARE = 0.7;
+/**
+ * The shape this proof verifies: a light-mode negative/ink oklab mix plus a
+ * dark-mode pure-token passthrough. Parsed (not assumed) from the consolidated
+ * class — if the recipe ever changes shape, the module-level throw fails the
+ * whole suite loudly so the proof is updated WITH the recipe, never skipped.
+ */
+const CLASS_SHAPE =
+  /^text-\[color-mix\(in_oklab,var\(--negative\)_(\d+(?:\.\d+)?)%,var\(--ink\)\)\] dark:text-negative$/;
+const parsedShare = NEGATIVE_TEXT_CLASS.match(CLASS_SHAPE);
+if (!parsedShare) {
+  throw new Error(
+    "NEGATIVE_TEXT_CLASS (src/components/tone.ts) no longer matches the " +
+      "light-mix + dark-passthrough shape this contrast proof verifies — " +
+      "update this suite alongside the recipe change."
+  );
+}
+
+/** The mix the utility class encodes (parsed above): negative share toward ink, in oklab. */
+const NEGATIVE_SHARE = Number(parsedShare[1]) / 100;
 
 /* ----------------------------------------------------------------------
  * CSS Color 4 `color-mix(in oklab, A p%, B)` for two OPAQUE sRGB colors:

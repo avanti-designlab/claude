@@ -45,6 +45,10 @@ import {
   PLATFORM_ORDER,
 } from "@/components/onboarding/onboarding-copy";
 import { EmptyState, StatusPill } from "../../../../../_components/surface";
+import {
+  NEGATIVE_TEXT_CLASS,
+  POSITIVE_TEXT_CLASS,
+} from "../../../../../_components/tone";
 
 /** One saved property, as the page's read returned it. */
 export interface WorkspaceProperty {
@@ -64,15 +68,6 @@ export interface WorkspaceProperty {
  */
 const SEAM_UNREACHABLE =
   "We couldn’t confirm the save. We’ve refreshed the list below — check whether it saved before trying again.";
-
-/**
- * Positive confirmation sentence text — the house POSITIVE recipe (Design B1;
- * same 70/30 positive/ink color-mix the review-queue POSITIVE_TEXT_CLASS
- * ships, inlined here to match how this panel already handles negative text).
- * Raw text-positive measures ~2.75:1 on the light card surface.
- */
-const POSITIVE_TEXT_CLASS =
-  "text-[color-mix(in_oklab,var(--positive)_70%,var(--ink))] dark:text-positive";
 
 /** connection_method → rendered state. Only 'none' is writable today; the
  * connected values are doc-04 vocabulary, mapped so no internal code renders. */
@@ -163,7 +158,7 @@ function PropertyForm({
             <p
               id={problemId}
               role="alert"
-              className="text-[13px] leading-5 text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
+              className={`text-[13px] leading-5 ${NEGATIVE_TEXT_CLASS}`}
             >
               {urlProblem}
             </p>
@@ -193,10 +188,7 @@ function PropertyForm({
       </div>
 
       {error ? (
-        <p
-          role="alert"
-          className="text-[13px] leading-5 text-[color-mix(in_oklab,var(--negative)_70%,var(--ink))] dark:text-negative"
-        >
+        <p role="alert" className={`text-[13px] leading-5 ${NEGATIVE_TEXT_CLASS}`}>
           {error}
         </p>
       ) : null}

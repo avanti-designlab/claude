@@ -24,12 +24,19 @@ export function PendingModuleCard({
   title,
   description,
   link,
+  secondaryLink,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
   /** A live surface where this signal lives, once data is connected. */
   link?: { href: string; label: string };
+  /**
+   * An optional second, quieter link — e.g. to /connections, where the operator
+   * can see what has to connect for this signal to fill. Additive: cards that
+   * don't pass it render exactly as before.
+   */
+  secondaryLink?: { href: string; label: string };
 }) {
   return (
     <div className="flex h-full items-start gap-3 rounded-lg border border-dashed border-border p-4">
@@ -45,14 +52,26 @@ export function PendingModuleCard({
           <WashPill tone="gold">Not connected yet</WashPill>
         </div>
         <p className="text-xs leading-5 text-muted">{description}</p>
-        {link ? (
-          <Link
-            href={link.href}
-            className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-xs font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            {link.label}
-            <ArrowRightIcon aria-hidden className="size-3" strokeWidth={2} />
-          </Link>
+        {link || secondaryLink ? (
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+            {link ? (
+              <Link
+                href={link.href}
+                className="inline-flex w-fit items-center gap-1 rounded text-xs font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                {link.label}
+                <ArrowRightIcon aria-hidden className="size-3" strokeWidth={2} />
+              </Link>
+            ) : null}
+            {secondaryLink ? (
+              <Link
+                href={secondaryLink.href}
+                className="inline-flex w-fit items-center rounded text-xs font-medium text-muted underline-offset-4 outline-none hover:text-ink hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                {secondaryLink.label}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

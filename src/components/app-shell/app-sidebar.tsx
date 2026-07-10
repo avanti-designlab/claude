@@ -16,8 +16,9 @@ import { Wordmark } from "./wordmark";
 
 /**
  * The persistent operator sidebar (desktop `lg+`). It is the app's primary
- * navigation: the Signal wordmark, the grouped studios/operations nav, and
- * Settings pinned to the foot. Client component only because it reads
+ * navigation: the Signal wordmark, the grouped studios/operations nav, and the
+ * workspace-administration links (Connections, Settings) pinned to the foot.
+ * Client component only because it reads
  * `usePathname` to mark the active route — no data, no motion. Token-driven, so
  * it re-skins with the tenant theme exactly like the rest of the app.
  *
