@@ -192,6 +192,30 @@ export const WRITE_SPECS: TableWriteSpec[] = [
     }),
     ownRowId: (t) => t.alertId,
   },
+  {
+    table: "competitors",
+    writers: ["agency_admin", "operator"],
+    // Distinct name from the seed's "Rival <label>" so the own-tenant positive
+    // control never collides on the (tenant_id, client_id, lower(name)) index.
+    buildInsert: (t) => ({
+      text: `insert into competitors (tenant_id, client_id, name)
+             values ($1, $2, 'Fixture Rival')`,
+      params: [t.tenantId, t.clientId],
+    }),
+    ownRowId: (t) => t.competitorId,
+  },
+  {
+    table: "runs",
+    writers: ["agency_admin", "operator"],
+    // Client-scoped enqueue (property_id NULL) — valid for the positive control;
+    // the is_writer INSERT policy is the enqueue floor.
+    buildInsert: (t) => ({
+      text: `insert into runs (tenant_id, client_id, kind)
+             values ($1, $2, 'audit')`,
+      params: [t.tenantId, t.clientId],
+    }),
+    ownRowId: (t) => t.runId,
+  },
 ];
 
 /** Roles that must be REJECTED as writers of a given spec (the complement). */

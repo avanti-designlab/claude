@@ -961,3 +961,89 @@ describe("createClientFromOnboarding — plan-write telemetry is redacted (ticke
     }
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* website property (this batch): persist on the fresh path, RECONCILE  */
+/* on replay (the ratified idempotency must cover the property row).     */
+/* ------------------------------------------------------------------ */
+
+describe("createClientFromOnboarding — website property persistence + replay coverage", () => {
+  const WEBSITE = { url: "https://gableandgrove.com", platform: "wordpress" as const };
+
+  it("FRESH: persists the website (connection_method 'none', NEVER auth_ref, claim-sourced tenant)", async () => {
+    const fake = setup({
+      ...HAPPY_SCRIPT,
+      properties: { select: { data: [] }, insert: { data: { id: "prop-1" } } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({ ...INPUT, website: WEBSITE })
+    );
+    expect(result.property).toEqual({ id: "prop-1", url: WEBSITE.url, platform: "wordpress" });
+    const values = fake.inserts.find((i) => i.table === "properties")!.values as Record<string, unknown>;
+    expect(values).toMatchObject({
+      tenant_id: "tenant-1",
+      client_id: "client-1",
+      type: "website",
+      platform: "wordpress",
+      url: WEBSITE.url,
+      connection_method: "none",
+    });
+    expect("auth_ref" in values).toBe(false);
+  });
+
+  it("an incomplete website (url, no platform) saves the client with a propertyWarning — never fails onboarding", async () => {
+    const fake = setup(HAPPY_SCRIPT);
+    const result = okResult(
+      await createClientFromOnboarding({ ...INPUT, website: { url: "https://gableandgrove.com", platform: "" } })
+    );
+    expect(result.property).toBeNull();
+    expect(typeof result.propertyWarning).toBe("string");
+    // No property query was attempted for an unpersistable website.
+    expect(fake.inserts.some((i) => i.table === "properties")).toBe(false);
+  });
+
+  it("a website insert failure keeps the client saved and surfaces a propertyWarning (soft)", async () => {
+    setup({
+      ...HAPPY_SCRIPT,
+      properties: { select: { data: [] }, insert: { error: { message: "boom", code: "23505" } } },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({ ...INPUT, website: WEBSITE })
+    );
+    expect(result.client.id).toBe("client-1");
+    expect(result.property).toBeNull();
+    expect(typeof result.propertyWarning).toBe("string");
+  });
+
+  it("REPLAY: a lost-response retry UPDATES-THROUGH a diverged property URL — never strands a stale one", async () => {
+    const roadmap = generatePlan({
+      playbook: SEED_PLAYBOOKS["real-estate"],
+      now: "2026-07-09T00:00:00.000Z",
+    });
+    const fake = setup({
+      clients: {
+        insert: { error: { message: "duplicate key", code: "23505" } },
+        select: { data: KEYED_CLIENT_ROW }, // identical client payload → world 1
+      },
+      plans: {
+        select: {
+          data: [{ id: "plan-1", playbook_version: roadmap.playbookVersion, generated_roadmap: roadmap }],
+        },
+      },
+      tasks: { select: { data: [{ plan_id: "plan-1" }] } },
+      // The first attempt persisted the OLD url; the replay carries a new one.
+      properties: {
+        select: { data: [{ id: "prop-1", url: "https://old.com", platform: "wix" }] },
+        update: { data: { id: "prop-1" } },
+      },
+    });
+    const result = okResult(
+      await createClientFromOnboarding({ ...INPUT, idempotencyKey: KEY, website: WEBSITE })
+    );
+    // The property was reconciled to the resubmitted values, not stranded.
+    expect(result.property).toEqual({ id: "prop-1", url: WEBSITE.url, platform: "wordpress" });
+    const propUpdate = fake.updates.find((u) => u.table === "properties");
+    expect(propUpdate?.values).toEqual({ url: WEBSITE.url, platform: "wordpress" });
+    expect(propUpdate?.filters).toEqual({ tenant_id: "tenant-1", id: "prop-1" });
+  });
+});

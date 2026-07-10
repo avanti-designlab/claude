@@ -155,6 +155,10 @@ export type ContentItemType = (typeof CONTENT_ITEM_TYPES)[number];
 export const CONTENT_ITEM_STATUSES = [
   "draft",
   "in_review",
+  // Send-back target (migration 0009): a reviewer returned the draft to the
+  // producer. Re-review is required to re-approve; the body_hash binding makes
+  // any prior verdicts structurally stale on the next edit.
+  "needs_revision",
   "approved",
   "published",
 ] as const;
@@ -222,6 +226,13 @@ export type AlertType = (typeof ALERT_TYPES)[number];
 export const ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
 export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
 
+/**
+ * How a property is connected for the auto-fix write methods (doc 04):
+ * 'api' (WordPress/Webflow/Wix APIs) | 'edge_worker' (Cloudflare worker) |
+ * 'pr' (the GIT/PULL-REQUEST write method — NOT press-release/M12) | 'none'.
+ * Only 'none' is writable until the Connections block wires real connections
+ * (Orchestrator ruling 2026-07-10 — no exceptions).
+ */
 export const PROPERTY_CONNECTION_METHODS = [
   "api",
   "edge_worker",
@@ -240,6 +251,61 @@ export const PROPERTY_PLATFORMS = [
   "custom",
 ] as const;
 export type PropertyPlatform = (typeof PROPERTY_PLATFORMS)[number];
+
+/** Narrow an unknown to a valid property platform (mirrors the 0003 CHECK). */
+export function isPropertyPlatform(value: unknown): value is PropertyPlatform {
+  return (
+    typeof value === "string" &&
+    (PROPERTY_PLATFORMS as readonly string[]).includes(value)
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* runs — the scan work-order queue (migration 0011)                   */
+/* ------------------------------------------------------------------ */
+
+/** Run kinds — one per intelligence scan module (migration 0011 CHECK). */
+export const RUN_KINDS = [
+  "audit", // M2 audit engine
+  "monitor", // M5 crawler/render monitoring
+  "decay", // M6 content decay/freshness
+  "local", // M14 local assessment
+  "entity", // M12 PR entity leverage
+  "visibility", // M3 visibility tracker
+] as const;
+export type RunKind = (typeof RUN_KINDS)[number];
+
+/** Run lifecycle states (migration 0011 CHECK). Transition legality lives in
+ *  src/lib/runs/transitions.ts (enforced by the future queue actions). */
+export const RUN_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "canceled",
+] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+/** Terminal states — immutable once reached (queue-infra invariant). */
+export const TERMINAL_RUN_STATUSES = [
+  "succeeded",
+  "failed",
+  "canceled",
+] as const;
+
+/**
+ * CLOSED error-code enum (migration 0011 CHECK). NEVER raw error text or URLs
+ * (honesty rule) — a small honest set the failure paths map onto. Set only on a
+ * failed run.
+ */
+export const RUN_ERROR_CODES = [
+  "crawl_refused", // egress guard / robots / DNS refused the target
+  "budget_exhausted_total", // the crawler's honest total-budget truncation
+  "engine_error", // the intelligence engine itself errored
+  "orphaned", // sweeper marked a stale-heartbeat run failed
+  "misconfigured", // enqueued against missing/invalid config (missing property, etc.)
+] as const;
+export type RunErrorCode = (typeof RUN_ERROR_CODES)[number];
 
 /* ------------------------------------------------------------------ */
 /* jsonb sub-shapes                                                    */
@@ -392,11 +458,75 @@ export interface ContentItemRow {
   type: ContentItemType;
   brand_kit_id: string;
   automation_level: AutomationLevel;
+  /** Optional client-facing headline (≤200). NULL renders as "Untitled". */
+  title: string | null;
   body: string;
+  /**
+   * SHA-256 over {title, body}, maintained by the content_items_set_body_hash
+   * trigger (migration 0009) — never caller-set. Each review verdict records
+   * the hash it reviewed; approval requires the recorded hashes to equal this.
+   */
+  body_hash: string;
   humanization: HumanizationResult | null;
   quality_review: ReviewVerdict | null;
   compliance_review: ReviewVerdict | null;
   status: ContentItemStatus;
+  /** tenant_users.id of the human approver; required for approved/published. */
+  approved_by: string | null;
+  /** Server-clock approval time (set by the approve action, never a caller). */
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A review-gate verdict (`content_items.quality_review` / `compliance_review`)
+ * as the R3 lifecycle actions record it. `passed` is the gate's decision (the
+ * approval CHECK requires TRUE) and `body_hash` binds the verdict to the exact
+ * content version reviewed. The DB stores the jsonb opaquely (`ReviewVerdict`);
+ * this is the shape the review module reads/writes.
+ */
+export interface ContentReviewVerdict {
+  passed: boolean;
+  /** The content_items.body_hash this verdict reviewed (version binding). */
+  body_hash: string;
+  /** Reviewer's tenant_users.id (audit; not caller-supplied). */
+  reviewed_by?: string;
+  /** ISO-8601 stamp set server-side. */
+  reviewed_at?: string;
+  /** Free-text note / send-back reason (redaction-safe; reviewer-authored). */
+  note?: string;
+  [key: string]: Json | undefined;
+}
+
+export interface CompetitorRow {
+  id: string;
+  tenant_id: string;
+  client_id: string;
+  name: string;
+  /** Optional bare hostname ("example.com"); NULL when only a name is known. */
+  domain: string | null;
+  created_at: string;
+}
+
+export interface RunRow {
+  id: string;
+  tenant_id: string;
+  client_id: string;
+  /** Set for property-scoped kinds (audit/monitor/decay/local); NULL otherwise. */
+  property_id: string | null;
+  kind: RunKind;
+  status: RunStatus;
+  attempts: number;
+  /** Bounded, content-free progress frontier (never crawled URLs/content). */
+  progress: Json;
+  heartbeat_at: string | null;
+  /** tenant_users.id of the enqueuer; NULL for system/sweeper re-queues. */
+  requested_by: string | null;
+  /** Content-free pointer to the produced artifact; NULL until succeeded. */
+  result_ref: Json | null;
+  /** Closed enum; set only on a failed run. */
+  error_code: RunErrorCode | null;
   created_at: string;
   updated_at: string;
 }

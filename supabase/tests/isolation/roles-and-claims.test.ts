@@ -198,6 +198,28 @@ describe("platform_owner — no writes through tenant-facing policies", () => {
     );
   });
 
+  it("platform_owner INSERT into competitors / runs is rejected (is_writer floor on the new tables)", async () => {
+    // The governed post-freeze tables inherit the same is_writer WITH CHECK
+    // floor; platform_owner is not a writer, so both are rejected — closes the
+    // all-four-roles write matrix on competitors (0010) and runs (0011).
+    await expectQueryRejected(
+      db.admin,
+      "authenticated",
+      claimsForRole("platform_owner", b),
+      `insert into competitors (tenant_id, client_id, name) values ($1, $2, 'PO Rival')`,
+      [b.tenantId, b.clientId],
+      REJECT_RLS
+    );
+    await expectQueryRejected(
+      db.admin,
+      "authenticated",
+      claimsForRole("platform_owner", b),
+      `insert into runs (tenant_id, client_id, kind) values ($1, $2, 'audit')`,
+      [b.tenantId, b.clientId],
+      REJECT_RLS
+    );
+  });
+
   it("platform_owner UPDATE / DELETE of a module row touches ZERO rows", async () => {
     expect(
       await rowCount(

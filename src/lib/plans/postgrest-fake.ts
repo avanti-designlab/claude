@@ -11,6 +11,7 @@
  *   .select(cols).eq(…)[.order(…)]         → thenable { data, error }
  *   .update(v).eq(…)[.eq(…)].select(cols).single() → { data, error }
  *   .delete().eq(…)[.eq(…)][.in(…)]        → thenable { error }
+ *   .delete().eq(…)[.eq(…)].select(cols)   → thenable { data, error }
  *
  * Results are scripted PER TABLE AND OPERATION as a queue: each call consumes
  * the next scripted result; the last (or only) one repeats. An unscripted
@@ -89,6 +90,13 @@ interface FakeUpdateChain {
 interface FakeDeleteChain {
   eq(column: string, value: unknown): FakeDeleteChain;
   in(column: string, values: unknown[]): FakeDeleteChain;
+  /** `.delete()....select(cols)` → a thenable resolving { data, error }. */
+  select(columns?: string): {
+    then(
+      resolve: (value: Settled) => void,
+      reject?: (reason: unknown) => void
+    ): void;
+  };
   then(
     resolve: (value: { error: FakeError | null }) => void,
     reject?: (reason: unknown) => void
@@ -214,6 +222,18 @@ export function fakePostgrest(script: FakeScript) {
             in(column, values) {
               call.filters[column] = values;
               return chain;
+            },
+            select() {
+              return {
+                then(resolve, reject) {
+                  try {
+                    resolve(settle(result));
+                  } catch (err) {
+                    if (reject) reject(err);
+                    else throw err;
+                  }
+                },
+              };
             },
             then(resolve, reject) {
               try {

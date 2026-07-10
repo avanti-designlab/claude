@@ -153,14 +153,20 @@ describe("catalog matches the documented constants — a new table without cover
   it("live tenant_id tables == TENANT_ID_TABLES", () => {
     expect(schema.tenantIdTables).toEqual([...TENANT_ID_TABLES].sort());
   });
-  it("live client_id columns == every viewer-scoped table except `clients` (scopes on id), plus `tenant_users`", () => {
+  it("live client_id columns == every viewer-scoped table except `clients` (scopes on id), plus `tenant_users` + `runs`", () => {
     // The physical client_id column set differs from the semantic
-    // CLIENT_SCOPED_TABLES list: `clients` is scoped on its own `id` (no
-    // client_id column), while `tenant_users` carries client_id for the
-    // viewer's own-membership row without being a "client-scoped" surface.
+    // CLIENT_SCOPED_TABLES list:
+    //  - `clients` is scoped on its own `id` (no client_id column);
+    //  - `tenant_users` carries client_id for the viewer's own-membership row
+    //    without being a "client-scoped" surface;
+    //  - `runs` carries client_id for tenant-consistency + client filtering,
+    //    but its SELECT is writer-only (internal scan queue) — it is not a
+    //    client_viewer surface, so it is excluded from CLIENT_SCOPED_TABLES and
+    //    listed here alongside tenant_users.
     const expectedClientIdColumns = [
       ...CLIENT_SCOPED_TABLES.filter((t) => t !== "clients"),
       "tenant_users",
+      "runs",
     ].sort();
     expect(schema.clientIdTables).toEqual(expectedClientIdColumns);
   });

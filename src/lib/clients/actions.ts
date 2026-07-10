@@ -8,8 +8,13 @@ import {
   persistPlan,
 } from "@/lib/plans/persist";
 import type { Supabase } from "@/lib/plans/persist";
+import {
+  ensureWebsiteProperty,
+  type PersistedProperty,
+} from "@/lib/clients/properties";
 import { createClient } from "@/lib/supabase/server";
 import type { ClientLocation, ClientStatus } from "@/lib/types/db";
+import type { WebsiteValidation } from "@/lib/properties/validate";
 import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 import { validateCreateClientInput, type ValidClientInput } from "./validate";
 
@@ -74,6 +79,19 @@ export interface CreateClientInput {
    * server-generated id, no idempotency — exactly the pre-ticket behavior.
    */
   idempotencyKey?: string;
+  /**
+   * The onboarding website (step 3): { url, platform }. Optional and backward
+   * compatible — omitted or incomplete leaves no property (older callers are
+   * unaffected). When present with a valid url + platform, a website property
+   * is persisted (connection_method 'none', NEVER auth_ref) and reconciled on
+   * replay alongside the client (see finalizeWithWebsite). The browser sends
+   * only url + platform — never tenant_id, connection_method, or auth_ref.
+   * SINGULAR by scope ruling (Orchestrator CONFIRMED 2026-07-10): onboarding
+   * persists ONE website; additional step-3 properties are workspace-seam adds
+   * (src/lib/properties/actions.ts). The onboarding-flow UI wiring that sends
+   * this field is a frontend follow-up AFTER Code Review passes this batch.
+   */
+  website?: { url: string; platform: string };
 }
 
 export interface CreatedClient {
@@ -102,6 +120,17 @@ export type CreateClientResult =
       plan: CreatedPlan | null;
       /** Present iff the client saved but the plan write path failed. */
       planWarning?: string;
+      /**
+       * The persisted website property, or null when none was entered (or it
+       * couldn't be persisted — see propertyWarning). Absent for older callers
+       * that send no website.
+       */
+      property?: PersistedProperty | null;
+      /**
+       * Present iff a website was entered but couldn't be saved (client still
+       * saved). Independent of planWarning — both can appear.
+       */
+      propertyWarning?: string;
     }
   | { ok: false; error: string };
 
@@ -122,6 +151,14 @@ const SAVE_FAILED_ERROR =
  */
 const REPLAY_UPDATE_FAILED_ERROR =
   "We couldn’t save this client’s details. Check your connection and try again.";
+
+/**
+ * Interface-voice partial-failure notice (doc 06 §6) for the website property:
+ * the client saved, but its site couldn't be recorded (a bad/incomplete URL, or
+ * a write failure). Points at the workspace properties seam, which can add it.
+ */
+const PROPERTY_WARNING =
+  "Your client was saved, but we couldn’t save their website — add it from the client's Properties once you're in.";
 
 export async function createClientFromOnboarding(
   input: CreateClientInput
@@ -176,13 +213,21 @@ export async function createClientFromOnboarding(
   if (error || !data) {
     // Unique violation on a KEYED insert = an idempotent replay (a
     // lost-response retry, or a concurrent double submit): the row already
-    // exists. Recover it instead of failing.
+    // exists. Recover it instead of failing. The keyed client id IS the row id,
+    // so the website property reconciles against that same client.
     if (value.idempotencyKey && error?.code === "23505") {
-      return recoverIdempotentReplay(
+      const replay = await recoverIdempotentReplay(
         supabase,
         claims.tenantId,
         value.idempotencyKey,
         value
+      );
+      return finalizeWithWebsite(
+        supabase,
+        claims.tenantId,
+        value.idempotencyKey,
+        value.website,
+        replay
       );
     }
     // Interface-voice failure (doc 06 §6): what happened + what to do, never a
@@ -206,9 +251,58 @@ export async function createClientFromOnboarding(
     client
   );
 
-  return planWarning
+  const base: CreateClientResult = planWarning
     ? { ok: true, client, plan, planWarning }
     : { ok: true, client, plan };
+
+  // Website property (this batch): persisted after the client, reconciled on
+  // replay. A property failure is a soft warning — the client already saved.
+  return finalizeWithWebsite(
+    supabase,
+    claims.tenantId,
+    client.id,
+    value.website,
+    base
+  );
+}
+
+/**
+ * Merge the onboarding website property into a client-save result. Runs on BOTH
+ * the fresh path AND the replay path (recoverIdempotentReplay's output), which
+ * is why ensureWebsiteProperty is idempotent: it inserts on the fresh path,
+ * reconciles (or no-ops) on a replay. Never turns a client success into a
+ * failure — the client is already saved; a website problem is a soft warning.
+ *
+ *   - result not ok (client didn't save, or a foreign-id replay) → returned
+ *     UNCHANGED: no property is ever written against an unsaved/foreign client.
+ *   - website 'none'    → unchanged (no URL was entered).
+ *   - website 'invalid' → propertyWarning (a URL was entered but isn't persistable).
+ *   - website 'ok'      → ensureWebsiteProperty; property on success, else warning.
+ */
+async function finalizeWithWebsite(
+  supabase: Supabase,
+  tenantId: string,
+  clientId: string,
+  website: WebsiteValidation,
+  result: CreateClientResult
+): Promise<CreateClientResult> {
+  if (!result.ok) return result;
+
+  switch (website.kind) {
+    case "none":
+      return result;
+    case "invalid":
+      return { ...result, property: null, propertyWarning: PROPERTY_WARNING };
+    case "ok": {
+      const outcome = await ensureWebsiteProperty(supabase, tenantId, clientId, {
+        url: website.url,
+        platform: website.platform,
+      });
+      return outcome.ok
+        ? { ...result, property: outcome.property }
+        : { ...result, property: null, propertyWarning: PROPERTY_WARNING };
+    }
+  }
 }
 
 /**

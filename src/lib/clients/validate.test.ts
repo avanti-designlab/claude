@@ -68,9 +68,34 @@ describe("validateCreateClientInput — sanitization", () => {
       name: "Gable & Grove Realty",
       vertical: "real-estate",
       locations: [{ name: "North Park", address: "Ray St" }],
+      // This batch: the validator ALWAYS resolves the optional onboarding
+      // website (softly) — no website in → the 'none' marker out.
+      website: { kind: "none" },
     });
     // No idempotencyKey in → no idempotencyKey out (older-caller behavior).
     expect("idempotencyKey" in value).toBe(false);
+  });
+
+  it("resolves the optional website softly: ok / invalid / none — never a refusal", () => {
+    // Valid url + platform → ok (persistable).
+    expect(
+      okValue(hostile({ website: { url: "https://gg.com", platform: "wordpress" } }))
+        .website
+    ).toEqual({ kind: "ok", url: "https://gg.com", platform: "wordpress" });
+    // A url with a missing/unknown platform → invalid (client still saves; the
+    // action surfaces a propertyWarning — a bad website NEVER fails onboarding).
+    expect(
+      okValue(hostile({ website: { url: "https://gg.com" } })).website
+    ).toEqual({ kind: "invalid" });
+    expect(
+      okValue(hostile({ website: { url: "nonsense", platform: "wordpress" } }))
+        .website
+    ).toEqual({ kind: "invalid" });
+    // Absent / empty / hostile shapes → none (older callers unaffected).
+    expect(okValue(hostile({ website: undefined })).website).toEqual({ kind: "none" });
+    expect(okValue(hostile({ website: "https://gg.com" })).website).toEqual({
+      kind: "none",
+    });
   });
 
   it("rebuilds location entries: unknown keys are dropped, never persisted", () => {

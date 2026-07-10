@@ -521,6 +521,9 @@ export function WorkLogPanel({
 const CONTENT_STATUS_LABEL: Record<ContentItemStatus, string> = {
   draft: "Drafting",
   in_review: "In review",
+  // Client-facing label for the send-back state (migration 0009). Kept in
+  // active-work voice; Design Review owns the final white-label copy.
+  needs_revision: "In revision",
   approved: "Approved",
   published: "Published",
 };
@@ -528,6 +531,7 @@ const CONTENT_STATUS_LABEL: Record<ContentItemStatus, string> = {
 const CONTENT_STATUS_ORDER: ContentItemStatus[] = [
   "draft",
   "in_review",
+  "needs_revision",
   "approved",
   "published",
 ];

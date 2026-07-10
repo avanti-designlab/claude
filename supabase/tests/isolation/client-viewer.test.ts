@@ -106,6 +106,24 @@ describe("client_viewer READ — own client only, sibling client invisible", () 
     );
     expect(res.rows.map((r) => r.id)).toEqual([b.viewerUserId]);
   });
+
+  it("is BLIND to runs even for its OWN client (runs SELECT is writer-only, migration 0011)", async () => {
+    // runs is the INTERNAL scan work-order queue: runs_select is
+    // `tenant_id = app.tenant_id() and app.is_writer()`, so a client_viewer (not
+    // a writer) sees ZERO runs — even the ones under its own client. This proves
+    // the writer-only exclusion the architect intended, not merely that runs is
+    // absent from CLIENT_SCOPED_TABLES. A positive control (operator sees the
+    // seeded run) guards against a false-green from a blanket deny.
+    expect(await viewerCountWhere("runs", "client_id", b.clientId)).toBe(0);
+    const operatorSees = await queryAs<{ n: number }>(
+      db.admin,
+      "authenticated",
+      claimsForRole("operator", b),
+      `select count(*)::int as n from runs where client_id = $1`,
+      [b.clientId]
+    );
+    expect(operatorSees.rows[0].n).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe("client_viewer WRITE — no write ability ANYWHERE (INSERT/UPDATE/DELETE)", () => {

@@ -29,6 +29,8 @@ export interface SeededTenant {
   visibilityResultId: string;
   metricId: string;
   alertId: string;
+  competitorId: string;
+  runId: string;
 }
 
 const THEME = {
@@ -208,6 +210,23 @@ export async function seedTenant(
     [tenantId, clientId]
   );
 
+  // competitors (0010) — under the PRIMARY client, so client_viewer own-client
+  // reads find a row and the sibling-blindness test has something to be blind to.
+  const competitorId = await insertReturningId(
+    admin,
+    `insert into competitors (tenant_id, client_id, name, domain)
+     values ($1, $2, $3, 'rival.example.com') returning id`,
+    [tenantId, clientId, `Rival ${label}`]
+  );
+
+  // runs (0011) — a property-scoped audit work-order under the primary client.
+  const runId = await insertReturningId(
+    admin,
+    `insert into runs (tenant_id, client_id, property_id, kind, requested_by)
+     values ($1, $2, $3, 'audit', $4) returning id`,
+    [tenantId, clientId, propertyId, operatorUserId]
+  );
+
   return {
     tenantId,
     adminUserId,
@@ -228,6 +247,8 @@ export async function seedTenant(
     visibilityResultId,
     metricId,
     alertId,
+    competitorId,
+    runId,
   };
 }
 
@@ -257,6 +278,7 @@ export interface SiblingClientRows {
   visibilityResultId: string;
   metricId: string;
   alertId: string;
+  competitorId: string;
 }
 
 /**
@@ -339,6 +361,14 @@ export async function seedSiblingClientRows(
     [t.tenantId, t.siblingClientId]
   );
 
+  // competitors under the SIBLING client — the viewer must be BLIND to these.
+  const competitorId = await insertReturningId(
+    admin,
+    `insert into competitors (tenant_id, client_id, name)
+     values ($1, $2, 'Sibling Rival') returning id`,
+    [t.tenantId, t.siblingClientId]
+  );
+
   return {
     propertyId,
     brandKitId,
@@ -350,5 +380,6 @@ export async function seedSiblingClientRows(
     visibilityResultId,
     metricId,
     alertId,
+    competitorId,
   };
 }

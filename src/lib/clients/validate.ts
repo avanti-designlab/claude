@@ -20,6 +20,7 @@
  */
 
 import type { ClientLocation, Json } from "@/lib/types/db";
+import { validateWebsiteInput, type WebsiteValidation } from "@/lib/properties/validate";
 import type { CreateClientInput } from "./actions";
 
 /* ------------------------------------------------------------------ */
@@ -58,6 +59,12 @@ export interface ValidClientInput {
   vertical: string;
   locations: ClientLocation[];
   idempotencyKey?: string;
+  /**
+   * The optional onboarding website property, resolved softly (a bad website
+   * never fails the client save — see WebsiteValidation). Always present;
+   * kind 'none' when no URL was entered.
+   */
+  website: WebsiteValidation;
 }
 
 export type ClientInputValidation =
@@ -122,6 +129,10 @@ export function validateCreateClientInput(
     locations.push(location);
   }
 
+  // Optional onboarding website — resolved SOFTLY (never fails the client save;
+  // the action decides insert vs. warning off the kind). See WebsiteValidation.
+  const website = validateWebsiteInput(raw.website);
+
   if (raw.idempotencyKey !== undefined) {
     // Strict UUID-v4 or refusal — never pass junk to Postgres (ticket a). The
     // key is browser-minted (crypto.randomUUID()), so anything else is a
@@ -133,11 +144,17 @@ export function validateCreateClientInput(
     }
     return {
       ok: true,
-      value: { name, vertical, locations, idempotencyKey: raw.idempotencyKey },
+      value: {
+        name,
+        vertical,
+        locations,
+        idempotencyKey: raw.idempotencyKey,
+        website,
+      },
     };
   }
 
-  return { ok: true, value: { name, vertical, locations } };
+  return { ok: true, value: { name, vertical, locations, website } };
 }
 
 /**

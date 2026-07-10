@@ -32,7 +32,10 @@ export function adminDatabaseUrl(): string {
   return process.env.ISOLATION_DATABASE_URL ?? DEFAULT_ADMIN_URL;
 }
 
-/** All tables of the F1 schema (doc 03 §3), in dependency order. */
+/**
+ * All tables of the F1 schema (doc 03 §3) + the governed post-freeze additions
+ * (competitors 0010, runs 0011), in dependency order (parents before children).
+ */
 export const ALL_TABLES = [
   "tenants",
   "tenant_users",
@@ -47,6 +50,8 @@ export const ALL_TABLES = [
   "visibility_results",
   "metrics",
   "alerts",
+  "competitors",
+  "runs",
 ] as const;
 export type TableName = (typeof ALL_TABLES)[number];
 
@@ -55,7 +60,14 @@ export const TENANT_ID_TABLES = ALL_TABLES.filter(
   (t) => t !== "tenants"
 ) as readonly Exclude<TableName, "tenants">[];
 
-/** Tables carrying a client_id column (client_viewer-scoped reads). */
+/**
+ * Tables whose reads are client_viewer-SCOPED (own-client only, via
+ * app.client_scope). `competitors` joins them (M19 renders share-of-voice).
+ * `runs` is intentionally NOT here: it carries a client_id column for
+ * tenant-consistency but its SELECT is writer-only (internal scan queue), so —
+ * like `tenant_users` — it is a client_id-bearing table that is not a
+ * client_viewer surface (see posture.test.ts).
+ */
 export const CLIENT_SCOPED_TABLES = [
   "clients",
   "properties",
@@ -68,6 +80,7 @@ export const CLIENT_SCOPED_TABLES = [
   "visibility_results",
   "metrics",
   "alerts",
+  "competitors",
 ] as const;
 
 function quoteIdent(name: string): string {
