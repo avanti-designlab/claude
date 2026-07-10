@@ -112,7 +112,7 @@ export default async function OverviewTab({
             value={result.data.planVersion ?? "None yet"}
             mono={Boolean(result.data.planVersion)}
           />
-          <SummaryCard label="Open & total tasks" value={String(result.data.taskTotal)} />
+          <SummaryCard label="Total tasks" value={String(result.data.taskTotal)} />
           <SummaryCard label="Awaiting review" value={String(result.data.taskInReview)} />
         </section>
       )}

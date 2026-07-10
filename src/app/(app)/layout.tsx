@@ -5,6 +5,28 @@ import { AppTopBar } from "@/components/app-shell/app-top-bar";
 import { ClientShell } from "@/components/app-shell/client-shell";
 import { LOGIN_PATH } from "@/components/app-shell/nav";
 import { getSession } from "@/lib/auth/session";
+import { tryCreateClient } from "./_components/reads";
+
+/**
+ * The caller's agency (tenant) display name for the top bar — the SAME
+ * RLS-scoped read the Settings page uses (RLS returns only the caller's own
+ * tenant row). Null on a failed read or env-less build; the top bar then falls
+ * back to the short id rather than showing a raw UUID or crashing.
+ */
+async function loadTenantName(): Promise<string | null> {
+  const supabase = await tryCreateClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("tenants")
+      .select("name")
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { name: string }).name ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The authenticated app shell. Everything under this route group
@@ -44,6 +66,9 @@ export default async function AppShellLayout({
     return <ClientShell>{children}</ClientShell>;
   }
 
+  // Operator shell only: resolve the agency name for the top bar's identity line.
+  const tenantName = await loadTenantName();
+
   return (
     <div className="flex min-h-full">
       <AppSidebar />
@@ -52,6 +77,7 @@ export default async function AppShellLayout({
           email={session.user.email}
           role={session.claims.role}
           tenantId={session.claims.tenantId}
+          tenantName={tenantName}
         />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>

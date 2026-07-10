@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LockIcon, PaletteIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Entrance } from "@/components/moments";
 import {
@@ -26,6 +27,9 @@ export const metadata: Metadata = {
  * kit is a workspace action that arrives with the brand-kit wave; this is the
  * honest library view.
  */
+
+/** Card cap for the library — surfaced honestly when it's at the cap. */
+const KIT_LIMIT = 60;
 
 const DATE_MED = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -57,7 +61,7 @@ async function load(): Promise<Load> {
       .from("brand_kits")
       .select("id, client_id, version, locked, updated_at")
       .order("updated_at", { ascending: false })
-      .limit(60);
+      .limit(KIT_LIMIT);
     if (error || !data) return { ok: false };
     const kits: KitEntry[] = (
       data as Array<{
@@ -105,6 +109,11 @@ export default async function BrandKitsPage() {
             icon={PaletteIcon}
             title="No brand kits yet"
             description="A kit is ingested once per client — logo, palette, type, voice, and likeness references — then locked. Kits appear here as clients are set up."
+            action={
+              <Button asChild size="sm">
+                <Link href="/onboarding">Onboard a client</Link>
+              </Button>
+            }
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -162,6 +171,12 @@ export default async function BrandKitsPage() {
           </div>
         )}
       </Entrance>
+
+      {result.ok && result.kits.length === KIT_LIMIT ? (
+        <p className="text-xs text-muted">
+          Showing the {KIT_LIMIT} most recently updated kits.
+        </p>
+      ) : null}
     </PageContainer>
   );
 }

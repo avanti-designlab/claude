@@ -142,10 +142,13 @@ export function PendingState({
   icon: Icon,
   title,
   measuring,
+  action,
 }: {
   icon: LucideIcon;
   title: string;
   measuring: string;
+  /** Optional first-action affordance, centered below the copy. */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center">
@@ -162,6 +165,7 @@ export function PendingState({
         </div>
         <p className="max-w-sm text-xs leading-5 text-muted">{measuring}</p>
       </div>
+      {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );
 }
@@ -179,15 +183,23 @@ export function FailedState({ subject }: { subject: string }) {
   );
 }
 
-/** A real, healthy empty state — "nothing here yet", not a placeholder. */
+/**
+ * A real, healthy empty state — "nothing here yet", not a placeholder. Doc 06
+ * §4 makes empty states "inviting first-action moments", so an optional `action`
+ * (a Button/Link) can be offered below the copy. The prop is optional: existing
+ * call sites render exactly as before.
+ */
 export function EmptyState({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  /** Optional first-action affordance, centered below the description. */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-6 py-12 text-center">
@@ -199,6 +211,7 @@ export function EmptyState({
       </span>
       <p className="text-sm font-medium text-ink">{title}</p>
       <p className="max-w-sm text-xs leading-5 text-muted">{description}</p>
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );
 }

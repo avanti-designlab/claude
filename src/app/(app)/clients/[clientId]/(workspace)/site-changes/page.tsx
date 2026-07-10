@@ -81,6 +81,9 @@ function medDate(iso: string): string {
   return Number.isFinite(t) ? DATE_MED.format(t) : "—";
 }
 
+/** Row cap for this log — surfaced honestly when the log is at the cap. */
+const CHANGE_LIMIT = 60;
+
 interface ChangeEntry {
   id: string;
   changeType: SiteChangeType;
@@ -102,7 +105,7 @@ async function load(clientId: string): Promise<Load> {
       )
       .eq("client_id", clientId)
       .order("created_at", { ascending: false })
-      .limit(60);
+      .limit(CHANGE_LIMIT);
     if (error || !data) return { ok: false };
     const changes: ChangeEntry[] = (
       data as Array<{
@@ -177,7 +180,18 @@ export default async function SiteChangesTab({
                       {METHOD_LABEL[change.method] ?? change.method}
                     </TableCell>
                     <TableCell>
-                      <StatusPill tone="muted">Ready</StatusPill>
+                      {/* No fabricated "Ready": the diff viewer is not built
+                          yet, so this stays an inert em-dash — not a control
+                          that implies a working diff. The visible note below
+                          carries the explanation; an sr-only sibling gives
+                          screen readers the same fact (aria-label/title on a
+                          generic span is unreliable/mouse-only). */}
+                      <span aria-hidden className="text-muted">
+                        —
+                      </span>
+                      <span className="sr-only">
+                        Diff preview isn&apos;t available yet
+                      </span>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted">
                       {medDate(change.at)}
@@ -195,9 +209,15 @@ export default async function SiteChangesTab({
         )}
       </PanelCard>
 
+      {result.ok && result.changes.length === CHANGE_LIMIT ? (
+        <p className="text-xs text-muted">
+          Showing the {CHANGE_LIMIT} most recent changes.
+        </p>
+      ) : null}
+
       <p className="max-w-3xl text-xs leading-5 text-muted">
-        Diff preview and one-click rollback controls arrive with the
-        write-methods wiring. This log reads live change records only — no write
+        Diff preview and one-click rollback aren&apos;t built yet — this log
+        records each change. It reads live change records only, and no write
         reaches a client site except through this change-management layer.
       </p>
     </div>

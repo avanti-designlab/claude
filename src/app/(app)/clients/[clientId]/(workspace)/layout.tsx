@@ -100,6 +100,10 @@ export default async function ClientWorkspaceLayout({
 
   const claims = await getClaims();
   if (claims?.role === "client_viewer") {
+    // Symmetric with the M19 report's equality check: a viewer resolves only
+    // their OWN client — any other id 404s rather than redirecting to a report
+    // they can't open. RLS is still the real boundary.
+    if (claims.clientId && claims.clientId !== clientId) notFound();
     redirect(`/clients/${clientId}/dashboard`);
   }
 

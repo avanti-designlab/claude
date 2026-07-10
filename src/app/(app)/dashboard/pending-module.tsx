@@ -1,5 +1,6 @@
+import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import { RadarIcon } from "lucide-react";
+import { ArrowRightIcon, RadarIcon } from "lucide-react";
 
 import { WashPill } from "@/components/dashboard-preview";
 
@@ -12,17 +13,23 @@ import { WashPill } from "@/components/dashboard-preview";
  */
 
 /**
- * A "coming online" tile: which module, and what has to ship before it lights
- * up. Server-safe (pure markup) — used in the coming-online strip.
+ * A signal tile: which intelligence signal, why it has no number yet, and —
+ * when the surface it lives on is already live — a quiet link to it. The view
+ * is built; it fills with real data once a client's property is connected and
+ * tracking runs. Server-safe (pure markup) — used in the intelligence-signals
+ * strip.
  */
 export function PendingModuleCard({
   icon: Icon,
   title,
   description,
+  link,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  /** A live surface where this signal lives, once data is connected. */
+  link?: { href: string; label: string };
 }) {
   return (
     <div className="flex h-full items-start gap-3 rounded-lg border border-dashed border-border p-4">
@@ -38,6 +45,15 @@ export function PendingModuleCard({
           <WashPill tone="gold">Not connected yet</WashPill>
         </div>
         <p className="text-xs leading-5 text-muted">{description}</p>
+        {link ? (
+          <Link
+            href={link.href}
+            className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-xs font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {link.label}
+            <ArrowRightIcon aria-hidden className="size-3" strokeWidth={2} />
+          </Link>
+        ) : null}
       </div>
     </div>
   );
@@ -67,8 +83,8 @@ export function PendingGauge() {
         Visibility Score
       </p>
       <p className="text-xs leading-5 text-accent-foreground/70 dark:text-muted">
-        Not connected yet — the score resolves here when the visibility
-        tracker (M3) comes online.
+        Not connected yet — the score resolves here once you connect a client&apos;s
+        site and run a visibility check.
       </p>
     </div>
   );

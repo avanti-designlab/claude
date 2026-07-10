@@ -31,6 +31,9 @@ export const metadata: Metadata = {
  * publishes without a human when it should not.
  */
 
+/** Row cap for the task table — surfaced honestly when the list is at the cap. */
+const TASK_LIMIT = 60;
+
 const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "To do",
   in_progress: "In progress",
@@ -78,7 +81,7 @@ async function load(clientId: string): Promise<Load> {
         .select("id, module, automation_level, status, created_at")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
-        .limit(60),
+        .limit(TASK_LIMIT),
     ]);
     if (planRes.error || tasksRes.error || !tasksRes.data) return { ok: false };
     const plan = planRes.data as {
@@ -184,6 +187,12 @@ export default async function PlanTab({
           </div>
         )}
       </PanelCard>
+
+      {result.ok && result.data.tasks.length === TASK_LIMIT ? (
+        <p className="text-xs text-muted">
+          Showing the {TASK_LIMIT} most recent tasks.
+        </p>
+      ) : null}
 
       {result.ok && result.data.createdAt ? (
         <p className="text-xs text-muted">

@@ -12,6 +12,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ModeToggle } from "@/components/dashboard-preview";
 import { OPERATOR_NAV, OPERATOR_NAV_FOOTER } from "./nav";
 import { NavLink } from "./app-sidebar";
 import { Wordmark } from "./wordmark";
@@ -69,7 +70,7 @@ export function AppMobileNav() {
             </div>
           ))}
         </nav>
-        <div className="border-t border-border px-3 py-4">
+        <div className="flex flex-col gap-3 border-t border-border px-3 py-4">
           {OPERATOR_NAV_FOOTER.map((item) => (
             <NavLink
               key={item.href}
@@ -78,6 +79,9 @@ export function AppMobileNav() {
               onNavigate={close}
             />
           ))}
+          {/* The global color-mode toggle, surfaced here on mobile where the top
+              bar hides it. Same shared data-theme mechanism. */}
+          <ModeToggle className="w-full justify-center" />
         </div>
       </SheetContent>
     </Sheet>

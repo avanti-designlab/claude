@@ -39,13 +39,18 @@ function getServerSnapshot(): ThemeMode | null {
 }
 
 export interface ModeToggleProps {
-  /** Pill labels (the preview page keeps "Light" / "Dark glow"). */
+  /**
+   * Pill labels. The default is plain "Light" / "Dark" — this toggle is global
+   * chrome on quiet operator surfaces, so its copy names the mode, not an
+   * effect. The preview page passes its own "Dark glow" label explicitly (the
+   * glow is that page's showpiece, not a product-wide promise).
+   */
   labels?: Record<ThemeMode, string>;
   className?: string;
 }
 
 export function ModeToggle({
-  labels = { light: "Light", dark: "Dark glow" },
+  labels = { light: "Light", dark: "Dark" },
   className,
 }: ModeToggleProps) {
   const ambient = React.useSyncExternalStore(

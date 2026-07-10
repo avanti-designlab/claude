@@ -232,7 +232,9 @@ export function DashboardPreview() {
             operator brand&apos;s two modes.
           </span>
           <span className="ml-auto">
-            <ModeToggle />
+            {/* The preview OWNS the "Dark glow" label — it names this page's
+                glow showpiece. Product surfaces use the plain default. */}
+            <ModeToggle labels={{ light: "Light", dark: "Dark glow" }} />
           </span>
         </div>
       </div>

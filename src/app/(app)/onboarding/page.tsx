@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { guardOperatorSurface } from "@/components/app-shell/access";
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 
 export const metadata: Metadata = {
@@ -14,8 +15,14 @@ export const metadata: Metadata = {
  * server action, which persists the `clients` row AND generates + persists the
  * plan/tasks server-side — the plan the flow then shows is the action's
  * returned, persisted roadmap. See `@/components/onboarding/onboarding-flow`.
+ *
+ * Onboarding is an OPERATOR surface: it sits outside the (operator) route group
+ * (so it isn't covered by that group's layout guard), so it confines a
+ * client_viewer here itself — the same `guardOperatorSurface()` every other
+ * operator surface uses. RLS still backs the createClient action below.
  */
-export default function OnboardingPage() {
+export default async function OnboardingPage() {
+  await guardOperatorSurface();
   return (
     <div className="flex-1">
       <OnboardingFlow />

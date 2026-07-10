@@ -69,6 +69,9 @@ function medDate(iso: string): string {
   return Number.isFinite(t) ? DATE_MED.format(t) : "—";
 }
 
+/** Row cap per panel — surfaced honestly alongside the exact total below. */
+const REVIEW_LIMIT = 50;
+
 interface ContentReviewItem {
   id: string;
   clientId: string;
@@ -89,6 +92,9 @@ type Load =
       ok: true;
       content: ContentReviewItem[];
       changes: ChangeReviewItem[];
+      /** Exact DB counts (HEAD-only) — null when the count read failed. */
+      contentCount: number | null;
+      changesCount: number | null;
       names: Map<string, string>;
     };
 
@@ -96,20 +102,32 @@ async function load(): Promise<Load> {
   const supabase = await tryCreateClient();
   if (!supabase) return { ok: false };
   try {
-    const [contentRes, changesRes] = await Promise.all([
-      supabase
-        .from("content_items")
-        .select("id, client_id, type, updated_at")
-        .eq("status", "in_review")
-        .order("updated_at", { ascending: false })
-        .limit(50),
-      supabase
-        .from("site_changes")
-        .select("id, client_id, change_type, method, created_at")
-        .eq("status", "previewed")
-        .order("created_at", { ascending: false })
-        .limit(50),
-    ]);
+    // The rendered (capped) rows plus HEAD-only exact counts of the same
+    // filters — so the "N waiting" pill and the truncation labels are true
+    // even past the cap, not derived from the fetched page (which undercounts).
+    const [contentRes, changesRes, contentCountRes, changesCountRes] =
+      await Promise.all([
+        supabase
+          .from("content_items")
+          .select("id, client_id, type, updated_at")
+          .eq("status", "in_review")
+          .order("updated_at", { ascending: false })
+          .limit(REVIEW_LIMIT),
+        supabase
+          .from("site_changes")
+          .select("id, client_id, change_type, method, created_at")
+          .eq("status", "previewed")
+          .order("created_at", { ascending: false })
+          .limit(REVIEW_LIMIT),
+        supabase
+          .from("content_items")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "in_review"),
+        supabase
+          .from("site_changes")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "previewed"),
+      ]);
     if (contentRes.error || !contentRes.data) return { ok: false };
     if (changesRes.error || !changesRes.data) return { ok: false };
 
@@ -146,7 +164,11 @@ async function load(): Promise<Load> {
       ...content.map((c) => c.clientId),
       ...changes.map((c) => c.clientId),
     ]);
-    return { ok: true, content, changes, names };
+    // A failed count read degrades to null (label falls back to a total-free
+    // "showing first N"), never a fabricated number.
+    const contentCount = contentCountRes.error ? null : contentCountRes.count;
+    const changesCount = changesCountRes.error ? null : changesCountRes.count;
+    return { ok: true, content, changes, contentCount, changesCount, names };
   } catch {
     return { ok: false };
   }
@@ -154,7 +176,19 @@ async function load(): Promise<Load> {
 
 export default async function ReviewQueuePage() {
   const result = await load();
-  const total = result.ok ? result.content.length + result.changes.length : 0;
+  // Exact total when the HEAD counts are available (they don't cap at the
+  // fetched page); fall back to the fetched lengths only if a count read failed.
+  const total = result.ok
+    ? (result.contentCount ?? result.content.length) +
+      (result.changesCount ?? result.changes.length)
+    : 0;
+  // If a count read failed while its panel sits at the row cap, `total` is a
+  // LOWER BOUND, not an exact figure — the pill says "N+" rather than assert
+  // a precision nobody has (honesty rule).
+  const totalIsLowerBound =
+    result.ok &&
+    ((result.contentCount == null && result.content.length === REVIEW_LIMIT) ||
+      (result.changesCount == null && result.changes.length === REVIEW_LIMIT));
 
   return (
     <PageContainer>
@@ -165,7 +199,10 @@ export default async function ReviewQueuePage() {
           description="Nothing reaches a live client site without a human decision. Content drafts and pending site changes wait here for approval or a send-back."
           actions={
             result.ok && total > 0 ? (
-              <StatusPill tone="accent">{total} waiting</StatusPill>
+              <StatusPill tone="accent">
+                {total}
+                {totalIsLowerBound ? "+" : ""} waiting
+              </StatusPill>
             ) : undefined
           }
         />
@@ -186,16 +223,26 @@ export default async function ReviewQueuePage() {
                 description="Drafts land here as the content pipeline runs — review, then approve or send back."
               />
             ) : (
-              <QueueList
-                items={result.content.map((item) => ({
-                  id: item.id,
-                  clientId: item.clientId,
-                  primary: CONTENT_NOUN[item.type] ?? item.type,
-                  name: result.names.get(item.clientId) ?? "A client",
-                  when: medDate(item.updatedAt),
-                  badge: "In review",
-                }))}
-              />
+              <>
+                <QueueList
+                  items={result.content.map((item) => ({
+                    id: item.id,
+                    // No per-client content-review surface exists yet, so link
+                    // to the client's Plan (roadmap) — the closest real tab for
+                    // production work — not the bare workspace. A precise
+                    // item-detail route lands with the review-gate wave.
+                    href: `/clients/${item.clientId}/plan`,
+                    primary: CONTENT_NOUN[item.type] ?? item.type,
+                    name: result.names.get(item.clientId) ?? "A client",
+                    when: medDate(item.updatedAt),
+                    badge: "In review",
+                  }))}
+                />
+                <TruncationNote
+                  shown={result.content.length}
+                  count={result.contentCount}
+                />
+              </>
             )}
           </PanelCard>
         </Entrance>
@@ -214,16 +261,24 @@ export default async function ReviewQueuePage() {
                 description="On-page and schema changes appear here as a diff you approve before it applies — with one-click rollback after."
               />
             ) : (
-              <QueueList
-                items={result.changes.map((item) => ({
-                  id: item.id,
-                  clientId: item.clientId,
-                  primary: CHANGE_NOUN[item.changeType] ?? item.changeType,
-                  name: result.names.get(item.clientId) ?? "A client",
-                  when: medDate(item.createdAt),
-                  badge: METHOD_LABEL[item.method] ?? item.method,
-                }))}
-              />
+              <>
+                <QueueList
+                  items={result.changes.map((item) => ({
+                    id: item.id,
+                    // Site changes have a real destination: the client's Site
+                    // Changes tab (the change-management log).
+                    href: `/clients/${item.clientId}/site-changes`,
+                    primary: CHANGE_NOUN[item.changeType] ?? item.changeType,
+                    name: result.names.get(item.clientId) ?? "A client",
+                    when: medDate(item.createdAt),
+                    badge: METHOD_LABEL[item.method] ?? item.method,
+                  }))}
+                />
+                <TruncationNote
+                  shown={result.changes.length}
+                  count={result.changesCount}
+                />
+              </>
             )}
           </PanelCard>
         </Entrance>
@@ -240,12 +295,38 @@ export default async function ReviewQueuePage() {
   );
 }
 
+/**
+ * The honest "showing first N" affordance when a panel is at its row cap. Uses
+ * the exact DB count when available ("of N"), else a total-free note — never a
+ * fabricated total.
+ */
+function TruncationNote({
+  shown,
+  count,
+}: {
+  shown: number;
+  count: number | null;
+}) {
+  if (shown < REVIEW_LIMIT) return null;
+  // An exact count that fits within the cap means nothing is actually hidden —
+  // say nothing rather than assert a truncation that didn't happen.
+  if (count != null && count <= REVIEW_LIMIT) return null;
+  return (
+    <p className="mt-3 text-xs text-muted">
+      {count != null
+        ? `Showing the first ${REVIEW_LIMIT} of ${count} — newest first.`
+        : `Showing the first ${REVIEW_LIMIT} — newest first.`}
+    </p>
+  );
+}
+
 function QueueList({
   items,
 }: {
   items: Array<{
     id: string;
-    clientId: string;
+    /** The type-relevant destination this item concerns. */
+    href: string;
     primary: string;
     name: string;
     when: string;
@@ -275,7 +356,7 @@ function QueueList({
               </span>
               <span className="block font-mono text-xs text-muted">
                 <Link
-                  href={`/clients/${item.clientId}`}
+                  href={item.href}
                   className="underline-offset-4 hover:text-ink hover:underline"
                 >
                   {item.name}

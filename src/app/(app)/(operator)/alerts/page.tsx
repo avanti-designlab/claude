@@ -60,6 +60,24 @@ const SEVERITY_TONE: Record<AlertSeverity, "accent" | "warm" | "negative"> = {
   critical: "negative",
 };
 
+/**
+ * Where each alert is investigated — the client-workspace tab most relevant to
+ * its type. A row links to the real destination it concerns, not the bare
+ * workspace root. All segments are live workspace tabs (tabs.ts).
+ */
+const ALERT_TAB: Record<AlertType, string> = {
+  visibility_drop: "visibility",
+  competitor_overtook: "visibility",
+  schema_broke: "audit",
+  crawler_blocked: "crawler-health",
+  negative_review_spike: "reviews",
+  site_down: "crawler-health",
+  auto_rollback_fired: "site-changes",
+};
+
+/** Row cap for the feed — surfaced honestly when it's at the cap. */
+const ALERT_LIMIT = 50;
+
 const DATE_MED = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -99,7 +117,7 @@ async function load(): Promise<Load> {
       .select("id, client_id, type, severity, created_at")
       .eq("acknowledged", false)
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(ALERT_LIMIT);
     if (error || !data) return { ok: false };
     const alerts: AlertEntry[] = (data as AlertRawRow[]).map((row) => ({
       id: row.id,
@@ -170,7 +188,7 @@ export default async function AlertsPage() {
                       </span>
                       <span className="block font-mono text-xs text-muted">
                         <Link
-                          href={`/clients/${alert.clientId}`}
+                          href={`/clients/${alert.clientId}/${ALERT_TAB[alert.type]}`}
                           className="underline-offset-4 hover:text-ink hover:underline"
                         >
                           {name}
@@ -188,6 +206,12 @@ export default async function AlertsPage() {
           )}
         </PanelCard>
       </Entrance>
+
+      {result.ok && result.alerts.length === ALERT_LIMIT ? (
+        <p className="text-xs text-muted">
+          Showing the {ALERT_LIMIT} most recent open alerts.
+        </p>
+      ) : null}
     </PageContainer>
   );
 }

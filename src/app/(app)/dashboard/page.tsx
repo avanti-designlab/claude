@@ -22,7 +22,6 @@ import {
   ArrowButton,
   CountUpValue,
   GlowCard,
-  ModeToggle,
   PipelineMini,
   StatCard,
   WashPill,
@@ -370,37 +369,45 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * "Coming online" — the modules this dashboard will grow, named honestly
- * with what has to ship first. Rendered on every branch (even an empty
- * workspace should know what's coming).
+ * "Your intelligence signals" — the AI-visibility signals every client
+ * workspace already carries. Honest about the real gate: these views are
+ * built and live, they just hold no number until a client's property is
+ * connected and tracking runs. No build codes, no "future module" framing —
+ * where a signal's surface is already live, this links straight to it.
+ * Rendered on every branch (even an empty workspace should know where signal
+ * comes from).
  */
 function ComingOnline({ step }: { step: number }) {
   return (
     <Entrance step={step} as="section" className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <h2 className="font-display text-2xl leading-tight font-bold tracking-tight text-ink">
-          Coming online
+          Your intelligence signals
         </h2>
         <p className="text-sm text-muted">
-          These modules activate in later Phase 1 slices — until then they say
-          so instead of showing placeholder numbers.
+          AI citations, share of voice, and alerts are built into the app
+          already. They fill with real numbers the moment you connect a
+          client&apos;s site and run tracking — never a placeholder before then.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <PendingModuleCard
           icon={SparklesIcon}
           title="AI citations"
-          description="Engine-by-engine citations (ChatGPT, Perplexity, Gemini, …) arrive with the visibility tracker (M3)."
+          description="Engine-by-engine citations — ChatGPT, Perplexity, Gemini, and more — fill in on a client's Visibility tab once you connect their site and run a check."
+          link={{ href: "/clients", label: "Open a client" }}
         />
         <PendingModuleCard
           icon={TargetIcon}
           title="Share of voice"
-          description="Your share of AI answers vs named competitors arrives with competitor analysis (M4)."
+          description="Your share of AI answers versus named competitors lands with that same visibility check, right beside the citations."
+          link={{ href: "/clients", label: "Open a client" }}
         />
         <PendingModuleCard
           icon={BellRingIcon}
           title="Alerts"
-          description="Visibility drops, schema breaks, and crawler blocks page you when the alerting engine ships (Phase 1.8)."
+          description="Visibility drops, broken schema, and blocked crawlers surface here the moment monitoring catches one across your clients."
+          link={{ href: "/alerts", label: "View alerts" }}
         />
       </div>
     </Entrance>
@@ -862,7 +869,7 @@ export default async function DashboardPage() {
   );
 }
 
-/** Page header — title + the standard mode toggle (page chrome, no glow). */
+/** Page header — title only (the color-mode toggle now lives in the top bar). */
 function Header() {
   return (
     <Entrance step={0} className="flex flex-wrap items-end justify-between gap-4">
@@ -875,7 +882,6 @@ function Header() {
           data.
         </p>
       </div>
-      <ModeToggle />
     </Entrance>
   );
 }
