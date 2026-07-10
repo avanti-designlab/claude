@@ -28,6 +28,7 @@ import {
   WashPill,
 } from "@/components/dashboard-preview";
 import { counterDelayMs, Entrance } from "@/components/moments";
+import { guardOperatorSurface } from "@/components/app-shell/access";
 import { getClaims } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { verticalLabel } from "@/lib/clients/format";
@@ -420,6 +421,11 @@ function HonestyFooter() {
 }
 
 export default async function DashboardPage() {
+  // Role confinement: a client_viewer never sees the operator home — send them
+  // to their own report. Staff pass through. (getClaims fails closed to null on
+  // env-unset, so this never redirects during an env-less build.)
+  await guardOperatorSurface();
+
   // The caller's verified role gates WHICH plan row each client card gets
   // (planRowVariant): `regeneratePlanForClient` is agency_admin-only, so only
   // that role sees the Generate-plan control — anyone else would collect a
@@ -682,9 +688,12 @@ export default async function DashboardPage() {
                 <Card className="h-full gap-3 py-5">
                   <div className="flex flex-col gap-3 px-6">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="truncate font-medium text-ink">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        className="truncate font-medium text-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
                         {client.name}
-                      </span>
+                      </Link>
                       <Badge
                         variant={STATUS_VARIANT[client.status]}
                         className="shrink-0 font-mono text-[10px] uppercase"

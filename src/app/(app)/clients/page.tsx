@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Entrance } from "@/components/moments";
+import { guardOperatorSurface } from "@/components/app-shell/access";
 import { createClient } from "@/lib/supabase/server";
 import { verticalLabel } from "@/lib/clients/format";
 import type { ClientRow } from "@/lib/types/db";
@@ -57,6 +58,10 @@ async function loadClients(): Promise<
 }
 
 export default async function ClientsPage() {
+  // Role confinement: a client_viewer never sees the operator client list —
+  // send them to their own report. Staff pass through.
+  await guardOperatorSurface();
+
   const result = await loadClients();
 
   return (
@@ -117,8 +122,12 @@ export default async function ClientsPage() {
               : 0;
             return (
               <Entrance key={client.id} step={1 + index}>
-                <Card className="h-full gap-3 py-5">
-                  <div className="flex flex-col gap-3 px-6">
+                <Link
+                  href={`/clients/${client.id}`}
+                  className="group block h-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  <Card className="h-full gap-3 py-5 transition-colors group-hover:border-accent/40">
+                    <div className="flex flex-col gap-3 px-6">
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate font-medium text-ink">
                         {client.name}
@@ -139,8 +148,9 @@ export default async function ClientsPage() {
                         {locationCount === 1 ? "location" : "locations"}
                       </span>
                     </div>
-                  </div>
-                </Card>
+                    </div>
+                  </Card>
+                </Link>
               </Entrance>
             );
           })}
