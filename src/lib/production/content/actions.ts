@@ -17,7 +17,13 @@ import {
   readContentDraftsForClient,
 } from "./persist";
 import type { ContentDraftDetail, ContentDraftSummary } from "./rows";
-import { isGeneratableContentType, type GeneratableContentType } from "./types";
+import {
+  GROUNDING_FACT_MAX,
+  GROUNDING_FACTS_MAX,
+  isGeneratableContentType,
+  TOPIC_MAX,
+  type GeneratableContentType,
+} from "./types";
 
 /**
  * M8 Content Production — server actions (doc 05 Part B, doc 07 §1.5). Security
@@ -54,13 +60,8 @@ import { isGeneratableContentType, type GeneratableContentType } from "./types";
  * the audit action; a dormant/unknown vertical gets `no_playbook`.
  */
 
-/* ------------------------------------------------------------------ */
-/* Input clamps                                                        */
-/* ------------------------------------------------------------------ */
-
-const TOPIC_MAX = 500;
-const GROUNDING_FACTS_MAX = 100;
-const GROUNDING_FACT_MAX = 2000;
+// Input clamps (TOPIC_MAX, GROUNDING_FACTS_MAX, GROUNDING_FACT_MAX) are pinned
+// in ./types — pure and importable by the UI, values unchanged.
 
 /* ------------------------------------------------------------------ */
 /* Result contracts (FROZEN once consumed by the frontend — post-handoff

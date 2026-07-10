@@ -38,6 +38,20 @@ export function isGeneratableContentType(value: unknown): value is GeneratableCo
 }
 
 /* ------------------------------------------------------------------ */
+/* Input clamps (server-authoritative, applied in ./actions)           */
+/* ------------------------------------------------------------------ */
+
+// Exported pure — importable both sides like GENERATABLE_CONTENT_TYPES — so a
+// UI mirrors the REAL limits instead of hardcoding copies that drift.
+
+/** Max chars of `topic` the create action keeps (excess truncated server-side). */
+export const TOPIC_MAX = 500;
+/** Max grounding facts kept per draft (excess entries dropped server-side). */
+export const GROUNDING_FACTS_MAX = 100;
+/** Max chars kept per grounding fact (excess truncated server-side). */
+export const GROUNDING_FACT_MAX = 2000;
+
+/* ------------------------------------------------------------------ */
 /* The generation spec (what the provider consumes)                    */
 /* ------------------------------------------------------------------ */
 

@@ -100,10 +100,13 @@ export {
   type DraftPipelineState,
 } from "./rows";
 
-// Content types M8 generates.
+// Content types M8 generates + the server-authoritative input clamps.
 export {
   GENERATABLE_CONTENT_TYPES,
+  GROUNDING_FACT_MAX,
+  GROUNDING_FACTS_MAX,
   isGeneratableContentType,
+  TOPIC_MAX,
   type GeneratableContentType,
   type ContentGenerationSpec,
   type ContentGenerationResult,
