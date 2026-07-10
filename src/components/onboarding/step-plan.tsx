@@ -17,7 +17,13 @@
  */
 
 import Link from "next/link";
-import { CalendarCheckIcon, CheckCircle2Icon } from "lucide-react";
+import {
+  CalendarCheckIcon,
+  CheckCircle2Icon,
+  PaletteIcon,
+  PlugIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -29,6 +35,7 @@ import {
 import { ShareOfVoice, type ShareOfVoiceEntry } from "@/components/charts";
 import { APP_HOME } from "@/components/app-shell/nav";
 import type { CreatedClient, CreatedPlan } from "@/lib/clients/actions";
+import type { PersistedProperty } from "@/lib/clients/properties";
 import type { RoadmapTask } from "@/lib/types/roadmap";
 import { cn } from "@/lib/theme/utils";
 import {
@@ -37,7 +44,7 @@ import {
   IMPACT_LABEL,
   MODULE_LABEL,
 } from "./onboarding-copy";
-import { planOutcome } from "./save-outcome";
+import { planOutcome, websitePersisted } from "./save-outcome";
 
 export interface StepPlanProps {
   /** The persisted client (the save happened during the assembling step). */
@@ -46,6 +53,13 @@ export interface StepPlanProps {
   plan: CreatedPlan | null;
   /** Present iff the client saved but the plan write path failed. */
   planWarning?: string;
+  /**
+   * The persisted onboarding website, or null when it couldn't be saved (see
+   * propertyWarning). Undefined when no website was sent.
+   */
+  property?: PersistedProperty | null;
+  /** Present iff the website couldn't be saved (the client still saved). */
+  propertyWarning?: string;
   verticalLabel: string;
 }
 
@@ -216,18 +230,16 @@ function PlanlessState({
   );
 }
 
-export function StepPlan({
+/** The persisted-plan body (the roadmap), rendered when a plan exists. */
+function PlanBody({
   client,
   plan,
-  planWarning,
   verticalLabel,
-}: StepPlanProps) {
-  const outcome = planOutcome(plan, planWarning);
-
-  if (outcome !== "plan" || plan === null) {
-    return <PlanlessState client={client} planWarning={planWarning} />;
-  }
-
+}: {
+  client: CreatedClient;
+  plan: CreatedPlan;
+  verticalLabel: string;
+}) {
   const { roadmap } = plan;
   const generatedDate = new Date(roadmap.generatedAt);
   const generatedLabel = Number.isNaN(generatedDate.getTime())
@@ -275,6 +287,122 @@ export function StepPlan({
           </ol>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The honest partial-success notice when the client saved but its website
+ * couldn't be recorded. Renders the server's interface-voice text verbatim (it
+ * already says what to do — add it from the workspace), never a scary failure.
+ */
+function WebsiteWarning({ message }: { message: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-accent-warm/40 bg-accent-warm/5 p-4">
+      <TriangleAlertIcon
+        aria-hidden
+        className="mt-0.5 size-5 shrink-0 text-accent-warm"
+      />
+      <p className="text-sm text-ink">{message}</p>
+    </div>
+  );
+}
+
+/**
+ * The post-completion next steps (audit A3e). SUPPORTS the plan reveal above it,
+ * never competes with it:
+ *  - a REAL CTA to ingest the brand kit for the just-created client (content
+ *    generation refuses without one — the copy says why);
+ *  - an HONEST "connect the site" item that states plainly that connections
+ *    aren't available yet — a static label, no dead link and no fake button.
+ */
+function NextSteps({
+  client,
+  siteSaved,
+}: {
+  client: CreatedClient;
+  /** True iff the onboarding website persisted (drives the connect-item copy). */
+  siteSaved: boolean;
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h3 className="font-medium text-ink">Next steps</h3>
+        <p className="text-sm text-muted">
+          Two things get {client.name} ready to produce work.
+        </p>
+      </div>
+
+      {/* (a) Brand kit — a real CTA to the ingest route for THIS client. */}
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border bg-card p-5">
+        <span
+          aria-hidden
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-overlay"
+        >
+          <PaletteIcon className="size-5 text-accent" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="font-medium text-ink">Add their brand kit</p>
+          <p className="text-sm text-muted">
+            Content generation needs a locked brand kit — it&apos;s what keeps
+            every draft on-brand and in their voice.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href={`/brand-kits/new/${client.id}`}>Add brand kit</Link>
+        </Button>
+      </div>
+
+      {/* (b) Connect the site — honestly pending: no link, no button. */}
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed bg-card p-5">
+        <span
+          aria-hidden
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-overlay"
+        >
+          <PlugIcon className="size-5 text-muted" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-ink">Connect their site</p>
+            <Badge variant="outline" className="text-muted">
+              Not available yet
+            </Badge>
+          </div>
+          <p className="text-sm text-muted">
+            {siteSaved
+              ? "Their website is saved, but connecting it for crawling and auto-fixes isn’t available yet — that ships with the Connections step."
+              : "Connecting a site for crawling and auto-fixes isn’t available yet — that ships with the Connections step."}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function StepPlan({
+  client,
+  plan,
+  planWarning,
+  property,
+  propertyWarning,
+  verticalLabel,
+}: StepPlanProps) {
+  const outcome = planOutcome(plan, planWarning);
+
+  return (
+    <div className="flex flex-col gap-8">
+      {propertyWarning ? <WebsiteWarning message={propertyWarning} /> : null}
+
+      {plan !== null && outcome === "plan" ? (
+        <PlanBody client={client} plan={plan} verticalLabel={verticalLabel} />
+      ) : (
+        <PlanlessState client={client} planWarning={planWarning} />
+      )}
+
+      <NextSteps
+        client={client}
+        siteSaved={websitePersisted(property, propertyWarning)}
+      />
     </div>
   );
 }

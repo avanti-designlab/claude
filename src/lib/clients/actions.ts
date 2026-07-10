@@ -158,7 +158,7 @@ const REPLAY_UPDATE_FAILED_ERROR =
  * a write failure). Points at the workspace properties seam, which can add it.
  */
 const PROPERTY_WARNING =
-  "Your client was saved, but we couldn’t save their website — add it from the client's Properties once you're in.";
+  "Your client was saved, but we couldn’t save their website — add it from the client’s Properties once you’re in.";
 
 export async function createClientFromOnboarding(
   input: CreateClientInput

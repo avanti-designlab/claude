@@ -22,8 +22,8 @@ export function ClientNameField({ value, onChange }: ClientNameFieldProps) {
       <div className="flex flex-col gap-1">
         <h3 className="font-medium text-ink">Save this client</h3>
         <p className="text-sm text-muted">
-          Continue saves this client to your workspace and generates their
-          plan. You can refine everything later.
+          Continue saves this client — with your primary website — to your
+          workspace and generates their plan. You can refine everything later.
         </p>
       </div>
       <div className="flex flex-col gap-1.5">

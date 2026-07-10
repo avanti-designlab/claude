@@ -16,6 +16,7 @@ import type {
   CreatedClient,
   CreatedPlan,
 } from "@/lib/clients/actions";
+import type { PersistedProperty } from "@/lib/clients/properties";
 import type { GeneratedRoadmap } from "@/lib/types/roadmap";
 import {
   isSettled,
@@ -25,6 +26,7 @@ import {
   saveErrorBody,
   shouldReveal,
   toSaveState,
+  websitePersisted,
   type SaveState,
 } from "./save-outcome";
 
@@ -49,6 +51,12 @@ const plan: CreatedPlan = {
   playbookVersion: "1.0.0",
   taskCount: 12,
   roadmap,
+};
+
+const property: PersistedProperty = {
+  id: "33333333-3333-3333-3333-333333333333",
+  url: "https://gableandgrove.example",
+  platform: "wordpress",
 };
 
 describe("toSaveState", () => {
@@ -87,6 +95,59 @@ describe("toSaveState", () => {
     });
     if (failed.phase !== "saved") throw new Error("unreachable");
     expect(failed.planWarning).toMatch(/client was saved/);
+  });
+});
+
+describe("website property threading (remediation A6 — toSaveState carries the outcome verbatim)", () => {
+  it("ABSENT property (older callers / no website sent) stays undefined — never mistaken for a save", () => {
+    const state = toSaveState({ ok: true, client, plan });
+    if (state.phase !== "saved") throw new Error("unreachable");
+    expect(state.property).toBeUndefined();
+    expect(state.propertyWarning).toBeUndefined();
+    expect(websitePersisted(state.property, state.propertyWarning)).toBe(false);
+  });
+
+  it("NULL property + warning (entered but not saved) threads through — warning verbatim, not a save", () => {
+    const warning =
+      "Your client was saved, but we couldn’t save their website — add it from the client’s Properties once you’re in.";
+    const state = toSaveState({
+      ok: true,
+      client,
+      plan,
+      property: null,
+      propertyWarning: warning,
+    });
+    if (state.phase !== "saved") throw new Error("unreachable");
+    expect(state.property).toBeNull();
+    // VERBATIM copy-through: the server's interface-voice string, untouched.
+    expect(state.propertyWarning).toBe(warning);
+    expect(websitePersisted(state.property, state.propertyWarning)).toBe(false);
+  });
+
+  it("persisted property threads through as the SERVER'S object, and counts as saved", () => {
+    const state = toSaveState({ ok: true, client, plan, property });
+    if (state.phase !== "saved") throw new Error("unreachable");
+    expect(state.property).toBe(property);
+    expect(websitePersisted(state.property, state.propertyWarning)).toBe(true);
+  });
+});
+
+describe("websitePersisted (the finish screen's 'their website is saved' gate)", () => {
+  it("undefined → false (no website was sent)", () => {
+    expect(websitePersisted(undefined)).toBe(false);
+  });
+
+  it("null → false (entered but not saved)", () => {
+    expect(websitePersisted(null)).toBe(false);
+  });
+
+  it("warning present ⇒ false, even alongside a property object — a warning always wins", () => {
+    expect(websitePersisted(property, "soft-fail warning")).toBe(false);
+  });
+
+  it("property with no warning → true", () => {
+    expect(websitePersisted(property)).toBe(true);
+    expect(websitePersisted(property, undefined)).toBe(true);
   });
 });
 

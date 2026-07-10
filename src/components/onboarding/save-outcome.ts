@@ -14,6 +14,7 @@ import type {
   CreatedClient,
   CreatedPlan,
 } from "@/lib/clients/actions";
+import type { PersistedProperty } from "@/lib/clients/properties";
 
 /**
  * Interface-voice fallback when the action call itself fails to round-trip
@@ -56,6 +57,17 @@ export type SaveState =
       client: CreatedClient;
       plan: CreatedPlan | null;
       planWarning?: string;
+      /**
+       * The persisted onboarding website property, or null when a website was
+       * entered but couldn't be saved (see propertyWarning). Undefined when no
+       * website field was sent at all.
+       */
+      property?: PersistedProperty | null;
+      /**
+       * Present iff a website was entered but couldn't be saved (the client
+       * still saved). Independent of planWarning — both can appear.
+       */
+      propertyWarning?: string;
     }
   | { phase: "error"; message: string };
 
@@ -69,6 +81,8 @@ export function toSaveState(result: CreateClientResult): SaveState {
     client: result.client,
     plan: result.plan,
     planWarning: result.planWarning,
+    property: result.property,
+    propertyWarning: result.propertyWarning,
   };
 }
 
@@ -88,6 +102,20 @@ export function planOutcome(
 ): PlanOutcome {
   if (plan) return "plan";
   return planWarning ? "plan-write-failed" : "no-playbook";
+}
+
+/**
+ * True iff the onboarding website actually PERSISTED: a real property row came
+ * back AND no warning accompanied it. Absent (no website sent — older callers)
+ * and null (entered but not saved) are both NOT persisted, and a warning always
+ * wins — the UI must never claim a save the server didn't confirm (remediation
+ * A6; drives the finish screen's connect-item copy).
+ */
+export function websitePersisted(
+  property: PersistedProperty | null | undefined,
+  propertyWarning?: string
+): boolean {
+  return property != null && !propertyWarning;
 }
 
 /** True once the server write has resolved, either way. */

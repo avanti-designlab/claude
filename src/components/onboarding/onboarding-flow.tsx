@@ -4,7 +4,7 @@
  * Phase 1.1 onboarding flow (doc 06 §5). A client-side stepper that ends in
  * the real tenant write:
  *
- *   select industry → add location(s) → connect properties (+ client name) →
+ *   select industry → add location(s) → add the website (+ client name) →
  *   plan assembling (moment #1, covering the server write) →
  *   the SERVER-PERSISTED plan
  *
@@ -36,11 +36,15 @@ import { StepPlan } from "./step-plan";
 import { ClientNameField } from "./client-name-field";
 import { SAVE_UNREACHABLE, toSaveState, type SaveState } from "./save-outcome";
 import { VERTICAL_META } from "./onboarding-copy";
+import {
+  normalizeWebsiteUrl,
+  websiteUrlProblem,
+} from "@/components/properties/website-url";
 
 const STEPS: OnboardingStepMeta[] = [
   { id: 1, label: "Industry" },
   { id: 2, label: "Locations" },
-  { id: 3, label: "Properties" },
+  { id: 3, label: "Website" },
   { id: 4, label: "Assembling" },
   { id: 5, label: "Your plan" },
 ];
@@ -101,11 +105,25 @@ export function OnboardingFlow() {
   const canAdvance = React.useMemo(() => {
     if (step === 1) return vertical !== null;
     if (step === 2) return locations.some((l) => l.value.trim().length > 0);
-    if (step === 3)
+    if (step === 3) {
+      // The FIRST property is the PRIMARY website — the single site the client
+      // save persists (Orchestrator singular ruling). Because leaving step 3
+      // promises "this website saves", the gate mirrors the server's
+      // persistability check EXACTLY (remediation A1): the primary's URL —
+      // after the same https:// normalization the payload gets — must pass
+      // websiteUrlProblem (the sanitizePropertyUrl mirror), and a platform
+      // must be picked (the frozen properties_website_has_platform CHECK
+      // requires one). Nothing this gate passes can soft-fail server-side on
+      // shape. Extra rows are added later from the workspace, not gated here.
+      const primary = properties[0];
+      const url = normalizeWebsiteUrl(primary.url);
       return (
-        properties.some((p) => p.url.trim().length > 0) &&
+        url !== "" &&
+        websiteUrlProblem(url) === null &&
+        primary.platform !== "" &&
         clientName.trim().length > 0
       );
+    }
     return true;
   }, [step, vertical, locations, properties, clientName]);
 
@@ -134,7 +152,14 @@ export function OnboardingFlow() {
       { id: nextDraftId("prop"), url: "", platform: "" },
     ]);
   const removeProperty = (id: string) =>
-    setProperties((prev) => prev.filter((p) => p.id !== id));
+    setProperties((prev) => {
+      // FLOOR (remediation A7): never drop below one row, so `properties[0]`
+      // (the primary) exists STRUCTURALLY — not by grace of render logic
+      // (rows hide their remove button at one row, but state must not rely
+      // on that).
+      const next = prev.filter((p) => p.id !== id);
+      return next.length > 0 ? next : prev;
+    });
 
   // Save (the real write) ----------------------------------------------
   // Fired on leaving step 3, and again from step 4's retry after an error.
@@ -148,11 +173,29 @@ export function OnboardingFlow() {
   const startSave = () => {
     if (!vertical || save.phase === "saving") return;
     setSave({ phase: "saving" });
+    // SINGULAR website (Orchestrator ruling): only the PRIMARY (first) property
+    // persists. url + platform are sent per the landed contract; the action
+    // resolves it softly and writes connection_method 'none' (never auth_ref).
+    // Extra rows stay in the UI as workspace-seam adds and are intentionally
+    // not sent. The payload URL is normalizeWebsiteUrl(primary.url) — the SAME
+    // idempotent normalization the input applies on blur, so what the operator
+    // sees in the field and what persists are byte-identical (remediation A1).
+    // canAdvance already guarantees a persistable primary here; the guard keeps
+    // the same-key step-4 retry safe if state ever differs.
+    const primary = properties[0];
+    const primaryUrl = normalizeWebsiteUrl(primary.url);
+    const website =
+      primaryUrl !== "" &&
+      websiteUrlProblem(primaryUrl) === null &&
+      primary.platform !== ""
+        ? { url: primaryUrl, platform: primary.platform }
+        : undefined;
     createClientFromOnboarding({
       name: clientName.trim(),
       vertical,
       locations: toClientLocations(locations.map((l) => l.value)),
       idempotencyKey: runKey,
+      website,
     }).then(
       (result) => setSave(toSaveState(result)),
       () => setSave({ phase: "error", message: SAVE_UNREACHABLE })
@@ -268,6 +311,8 @@ export function OnboardingFlow() {
               client={save.client}
               plan={save.plan}
               planWarning={save.planWarning}
+              property={save.property}
+              propertyWarning={save.propertyWarning}
               verticalLabel={verticalLabel(vertical)}
             />
           ) : null}

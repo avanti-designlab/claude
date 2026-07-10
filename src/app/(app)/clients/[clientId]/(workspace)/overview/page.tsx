@@ -17,6 +17,10 @@ import {
   PanelCard,
 } from "../../../../_components/surface";
 import { tryCreateClient } from "../../../../_components/reads";
+import {
+  PropertiesPanel,
+  type WorkspaceProperty,
+} from "./_components/properties-panel";
 
 export const metadata: Metadata = {
   title: "Overview — Client workspace",
@@ -24,9 +28,10 @@ export const metadata: Metadata = {
 
 /**
  * Overview tab — the operator's at-a-glance summary for one client: the current
- * plan + task load (M1), and quick routes into the intelligence and local tabs.
- * Reads `plans` (latest) + `tasks` (HEAD counts) RLS-scoped; no fabricated
- * numbers.
+ * plan + task load (M1), quick routes into the intelligence and local tabs, and
+ * the Properties panel (combined-remediation Part B — the minimal workspace
+ * surface the onboarding warning points at). Reads `plans` (latest) + `tasks`
+ * (HEAD counts) + `properties` RLS-scoped; no fabricated numbers.
  */
 
 interface OverviewData {
@@ -36,6 +41,43 @@ interface OverviewData {
 }
 
 type Load = { ok: false } | { ok: true; data: OverviewData };
+
+type PropertiesLoad = { ok: false } | { ok: true; rows: WorkspaceProperty[] };
+
+/**
+ * THIN, RLS-scoped properties read (this page's inline-load precedent — the
+ * claim-scoped client pins tenant + viewer client-scope in the database; app
+ * code writes no tenant filter). Oldest first: the onboarding website leads.
+ * Independent of load() so a properties blip fails ONLY the panel, honestly.
+ */
+async function loadProperties(clientId: string): Promise<PropertiesLoad> {
+  const supabase = await tryCreateClient();
+  if (!supabase) return { ok: false };
+  try {
+    const res = await supabase
+      .from("properties")
+      .select("id, url, platform, connection_method")
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: true });
+    if (res.error || !res.data) return { ok: false };
+    const rows = (
+      res.data as Array<{
+        id: string;
+        url: string;
+        platform: string | null;
+        connection_method: string;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      url: row.url,
+      platform: row.platform,
+      connectionMethod: row.connection_method,
+    }));
+    return { ok: true, rows };
+  } catch {
+    return { ok: false };
+  }
+}
 
 async function load(clientId: string): Promise<Load> {
   const supabase = await tryCreateClient();
@@ -93,14 +135,17 @@ export default async function OverviewTab({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
-  const result = await load(clientId);
+  const [result, properties] = await Promise.all([
+    load(clientId),
+    loadProperties(clientId),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         level="h2"
         title="Overview"
-        description="The current plan, task load, and where to dig in."
+        description="The current plan, task load, saved properties, and where to dig in."
       />
 
       {!result.ok ? (
@@ -144,6 +189,20 @@ export default async function OverviewTab({
             );
           })}
         </div>
+      </PanelCard>
+
+      {/* The minimal Properties surface (remediation Part B): list + add + edit
+          through the landed seam only — no delete (v1 ruling), no connect
+          affordance (none exists yet; the panel says so). */}
+      <PanelCard
+        title="Properties"
+        description="The sites we work on for this client — saved here, connected later"
+      >
+        {properties.ok ? (
+          <PropertiesPanel clientId={clientId} initial={properties.rows} />
+        ) : (
+          <FailedState subject="this client’s properties" />
+        )}
       </PanelCard>
     </div>
   );
