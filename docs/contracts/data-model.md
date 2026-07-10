@@ -174,6 +174,29 @@ captures; no `created_at`). Mutable tables add trigger-maintained
 | `assets` | **F1 addition** (§8 item 4): `{logo_url, ...}` client brand assets |
 | `locked`, `version` | version ≥ 1; unique `(tenant_id, client_id, version)` |
 
+### brand_assets *(0014 — governed post-freeze, §13.8)*
+The per-client brand asset LIBRARY — the platform's first object-storage-backed
+table. Assets attach to the CLIENT (mutable library), never a kit version.
+
+| Column | Notes |
+|---|---|
+| `type` | **closed** CHECK `primary_logo\|secondary_logo\|mono_logo\|reversed_logo\|favicon\|icon\|imagery\|other` |
+| `label` | nullable, CHECK ≤120 |
+| `variants` | jsonb object (CHECK), serialized ≤4096 (CHECK) — presentation hints only, never creds/URLs/bytes |
+| `storage_path` | **the auth_ref-analog (doc 03 §5)** — pointer into the PRIVATE `brand-assets` bucket; raw bytes never in the row. `unique`. CHECK `brand_assets_path_scoped` forces it to begin with the row's OWN `tenant_id/client_id/` (below RLS — a row can never claim a foreign object path) |
+| `content_type` | CHECK MIME allowlist `image/png\|image/jpeg\|image/webp\|image/gif\|image/svg+xml` (raster + SVG) |
+| `size_bytes` | CHECK `>0` and `≤10485760` (10 MiB ⚑ ratify default) |
+| `archived_at` | soft-delete marker — set by `removeAsset` when a LOCKED kit still references the asset (never dangle a snapshot) |
+| unique | `(tenant_id, id)` + `(tenant_id, client_id, id)` anchors; composite FK `(tenant_id, client_id) → clients` |
+
+Trigger-maintained `updated_at`. Index `(tenant_id, client_id, created_at
+desc)`. RLS enabled + forced; SELECT is `app.client_scope` (client_viewer sees
+its OWN client's assets — its "home of assets"); writes at the `is_writer` floor.
+**The bytes live in a PRIVATE Storage bucket with its OWN RLS** (a distinct
+isolation surface) — provisioned via `supabase/storage/brand-assets-bucket.sql`,
+NOT a migration. Full contract + storage policies + upload/SVG/remove flows:
+§13.8.
+
 ### plans
 `playbook_version text`, `generated_roadmap jsonb` (Playbook Engine + audit
 output; shape owned by M1 at 1.1).
@@ -832,8 +855,117 @@ for the `in_progress` target is sound because `done` is human_only-only in the D
 (an ai_draft row can never occupy the `done` source), with the 0013 CHECK the
 authoritative backstop.
 
+### 13.8 brand_assets — the client asset library + PRIVATE Storage bucket (migration 0014) — NEW table + NEW isolation surface
+
+Authorized by the 2026-07-10 Orchestrator ruling recorded in
+`docs/BUILD-STATE.md` (operator requirement: assets organized "separately by
+each client so that branding doesn't get mixed up and every client has their own
+home of assets"). Governed post-freeze change (CLAUDE.md rule 1); frozen
+migrations 0001–0013 untouched. Shape/keys/RLS in §5. This is the platform's
+FIRST object-storage surface; the bytes live in a private bucket with its own
+RLS, DISTINCT from table RLS.
+
+- **Attachment model — RULED:** an asset attaches to the **CLIENT** (a
+  per-client MUTABLE library), never to a `brand_kits` version. A locked kit may
+  REFERENCE specific asset ids/paths as an immutable snapshot (below); changing
+  the library never mutates a locked kit.
+- **`storage_path` is the auth_ref-analog** (doc 03 §5): raw bytes NEVER in a
+  table. Path convention `"<tenant_id>/<client_id>/<uuid>[.ext]"`. Bound to the
+  row's own tenant/client by the `brand_assets_path_scoped` CHECK (below RLS) AND
+  independently re-checked against the caller's JWT by the bucket's
+  storage.objects RLS (defense in depth — never path obscurity alone).
+- **Bucket is PRIVATE.** Provisioned via `supabase/storage/brand-assets-bucket.sql`
+  (NOT a SQL migration — Supabase's `storage` schema is service-provided and
+  absent from the local harness; a `create policy on storage.objects` in a
+  migration would break every migration run). The operator applies that file to
+  a live project **staging-first** (docs/ops/environments.md). No public read;
+  access ONLY via server-generated **signed URLs** issued AFTER a tenant/client
+  authorization check (`getAssetSignedUrl` reads the asset row under RLS first —
+  a guessed/enumerated path can never be signed).
+  - **storage.objects policies** (bucket-scoped, `authenticated` only):
+    READ = object's path segment 1 = caller tenant AND (`is_writer` OR
+    `client_viewer` whose `client_id` = segment 2); WRITE (insert/update/delete)
+    = `is_writer` AND segment 1 = caller tenant. TEXT-on-TEXT comparisons (path
+    segments never cast to uuid — a malformed/short path yields NULL ⇒ denied,
+    fail closed). `client_viewer` is read-only (no write policy matches it).
+  - **Bucket PUT-time gates:** `allowed_mime_types` (raster + SVG) +
+    `file_size_limit` = 10 MiB — the first MIME/size-bypass defense on the direct
+    signed-PUT path.
+- **Two-phase upload (honest):**
+  - *Raster (png/jpeg/webp/gif):* `requestAssetUpload` issues a signed upload URL
+    to a server-computed, tenant/client-scoped path (NO row yet); the browser
+    PUTs the bytes; `finalizeAssetUpload` VERIFIES the object exists, reads its
+    **real** size + MIME from storage, re-checks the cap + allowlist against that
+    truth (second MIME/size-bypass defense), rejects+purges on violation, then
+    inserts the row. **Verify-on-finalize** ⇒ a never-finalized upload leaves an
+    orphan OBJECT, not a dangling row; the orphan-object sweep is the documented
+    backstop (needs live-storage listing → canary).
+  - *SVG:* bytes travel in the ACTION BODY (never a direct PUT — a signed PUT
+    would bypass the server sanitizer), are sanitized, and only the sanitized
+    bytes are written server-side. The size cap is enforced on the action body
+    before sanitizing.
+- **SVG sanitizer (`src/lib/brand-assets/svg-sanitize.ts`) — security-critical,
+  isolation-tested pure module, 0-bypass standard.** Allowlist + REFUSE-DOMINANT
+  (throw-not-serve): a document is emitted only when it conforms end-to-end to a
+  strict element allowlist + attribute/URL/CSS rules; anything unsafe/
+  unsanitizable is REFUSED (a brand logo should be a clean export). Closes:
+  `<script>`/`<foreignObject>`/iframe/SMIL/`<feImage>` (element allowlist), `on*`
+  handlers, `javascript:`/`vbscript:`/`data:`/external `href|xlink:href`,
+  `expression()`/`@import`/external `url()`/`-moz-binding` in style, DOCTYPE/
+  ENTITY/CDATA/PI (XXE, billion-laughs), and case/char-ref/encoding smuggling
+  (values decoded before inspection; NUL/C0 controls + non-UTF-8 encoding decls
+  rejected). Adversarial coverage: `svg-sanitize.test.ts`.
+  - **SERVE-SIDE CONTRACT (UI slice, binding):** brand-asset SVGs render ONLY via
+    non-executing contexts (`<img src>`, CSS `background-image`) from signed URLs
+    — never inline/inject markup, never `dangerouslySetInnerHTML`. **Inline-SVG
+    recolor is NOT authorized.**
+- **remove/replace never dangle a locked-kit snapshot** (the on-delete-restrict
+  discipline applied to storage). `removeAsset`: if a LOCKED kit references the
+  asset → **archive** (`archived_at`, KEEP row + object); else hard-delete the
+  row + object. `replace` (finalize/uploadSvg with `replaceAssetId`) writes new
+  bytes to a NEW path, repoints the row, and deletes the OLD object ONLY when
+  proven unreferenced. **Fail-safe:** a failed reference scan is treated as
+  "cannot prove unreferenced" ⇒ never destroy bytes.
+  - **Reference contract:** a locked kit records referenced assets in the FROZEN,
+    open `brand_kits.assets` jsonb (0003) under `asset_refs` — an array of
+    `{ asset_id, storage_path }` (mirrors `likeness_refs`), keeping this slice to
+    migration 0014 only. The WRITING side (M7's lock/revise flow populating
+    `asset_refs`) is future work; the READING side (`references.ts`) is built +
+    correct now (no refs yet ⇒ `referenced:false`, starts honoring snapshots the
+    moment M7 writes them).
+- **Actions (`src/lib/brand-assets/actions.ts`, "use server"):**
+  `requestAssetUpload` / `finalizeAssetUpload` (raster), `uploadSvgAsset` (SVG),
+  `listBrandAssets` + `getAssetSignedUrl` (reads), `removeAsset`. Writers guard
+  with `requireOperator()` (the `is_writer` RLS floor); reads with
+  `requireAuth()` (RLS `app.client_scope` narrows a client_viewer). Claim-sourced
+  tenant; RLS-scoped client id; typed outcomes; interface-voice errors; redacted
+  failure telemetry (`[brand-asset-write-failure] stage=… code=…`, SQLSTATE
+  only). **⚑ Ratify:** the 10 MiB size cap + the MIME allowlist.
+- **Test coverage (honest):** table structural gates
+  (`supabase/tests/isolation/brand-assets-table.test.ts`) + the shared catalog
+  sweeps (read/write/client_viewer/posture pick up `brand_assets` via
+  `ALL_TABLES` + `CLIENT_SCOPED_TABLES` + the WRITE_SPEC) + the storage.objects
+  policy suite against a Supabase-exact storage shim
+  (`supabase/tests/storage/brand-assets-storage.pg.test.ts`) + the pure
+  sanitizer/validator/row units. **Live-staging canary (flagged, NOT claimed):**
+  the storage-api token layer — signed-URL generation, expiry, and replay/reuse
+  across tenants — and the orphan-object sweep, none of which are DB policies.
+
 ## Changelog
 
+- **1.5.0 — 2026-07-10 — brand_assets asset library + private Storage bucket
+  (migration 0014) — governed post-freeze change (Orchestrator ruling; gates:
+  hard Code Review on storage isolation + QA bucket-isolation suite extension +
+  this contract sync).** NEW `brand_assets` table (per-client mutable library;
+  `storage_path` the auth_ref-analog; `brand_assets_path_scoped` CHECK) + a NEW
+  isolation surface: a PRIVATE `brand-assets` Storage bucket with its own
+  storage.objects RLS (`supabase/storage/brand-assets-bucket.sql`, operator-
+  applied). Two-phase raster upload (signed PUT + verify-on-finalize) + server-
+  mediated SVG flow through a 0-bypass sanitizer; remove/replace honor locked-kit
+  snapshots (archive-if-referenced, fail-safe). Frozen migrations 0001–0013
+  byte-untouched. §13.8 is the binding contract. Isolation 586/586 (+3 canary
+  todo); brand-assets units green. Authored by `lead-backend-data-architect`;
+  pending `documentation`-agent publish pass.
 - **1.4.0 — 2026-07-10 — tasks `done` status (migration 0013) — governed
   post-freeze change (Orchestrator ruling; gates: Code Review + QA isolation
   blessing tests + this contract sync).** `done` joins the tasks status enum

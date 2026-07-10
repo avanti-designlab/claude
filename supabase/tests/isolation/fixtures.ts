@@ -113,6 +113,20 @@ export const WRITE_SPECS: TableWriteSpec[] = [
     ownRowId: (t) => t.brandKitId,
   },
   {
+    table: "brand_assets",
+    writers: ["agency_admin", "operator"],
+    // A fresh, tenant/client-scoped storage_path (random object name) — never
+    // collides with the seed's asset on the unique storage_path key, and its
+    // "<tenant_id>/<client_id>/" prefix satisfies brand_assets_path_scoped, so a
+    // cross-tenant INSERT is rejected by RLS WITH CHECK (not the path CHECK).
+    buildInsert: (t) => ({
+      text: `insert into brand_assets (tenant_id, client_id, type, storage_path, content_type, size_bytes)
+             values ($1, $2, 'icon', $3, 'image/png', 512)`,
+      params: [t.tenantId, t.clientId, `${t.tenantId}/${t.clientId}/${randomUUID()}.png`],
+    }),
+    ownRowId: (t) => t.brandAssetId,
+  },
+  {
     table: "plans",
     writers: ["agency_admin", "operator"],
     buildInsert: (t) => ({

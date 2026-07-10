@@ -21,6 +21,7 @@ export interface SeededTenant {
   siblingClientId: string;
   propertyId: string;
   brandKitId: string;
+  brandAssetId: string;
   planId: string;
   taskId: string;
   auditId: string;
@@ -154,6 +155,20 @@ export async function seedTenant(
     ]
   );
 
+  // brand_assets (0014) — one live asset under the PRIMARY client. storage_path
+  // is tenant/client-scoped (mirrors brand_assets_path_scoped).
+  const brandAssetId = await insertReturningId(
+    admin,
+    `insert into brand_assets (tenant_id, client_id, type, label, storage_path, content_type, size_bytes)
+     values ($1, $2, 'primary_logo', $3, $4, 'image/png', 2048) returning id`,
+    [
+      tenantId,
+      clientId,
+      `Primary logo ${label}`,
+      `${tenantId}/${clientId}/${randomUUID()}.png`,
+    ]
+  );
+
   const planId = await insertReturningId(
     admin,
     `insert into plans (tenant_id, client_id, playbook_version, generated_roadmap)
@@ -239,6 +254,7 @@ export async function seedTenant(
     siblingClientId,
     propertyId,
     brandKitId,
+    brandAssetId,
     planId,
     taskId,
     auditId,
@@ -270,6 +286,7 @@ export async function seedTenantPair(
 export interface SiblingClientRows {
   propertyId: string;
   brandKitId: string;
+  brandAssetId: string;
   planId: string;
   taskId: string;
   auditId: string;
@@ -303,6 +320,14 @@ export async function seedSiblingClientRows(
     `insert into brand_kits (tenant_id, client_id, tokens, voice_profile, locked, version)
      values ($1, $2, $3, $4, true, 1) returning id`,
     [t.tenantId, t.siblingClientId, JSON.stringify(TOKENS), JSON.stringify(VOICE_PROFILE)]
+  );
+
+  // brand_assets under the SIBLING client — the viewer must be BLIND to this.
+  const brandAssetId = await insertReturningId(
+    admin,
+    `insert into brand_assets (tenant_id, client_id, type, storage_path, content_type, size_bytes)
+     values ($1, $2, 'imagery', $3, 'image/svg+xml', 1024) returning id`,
+    [t.tenantId, t.siblingClientId, `${t.tenantId}/${t.siblingClientId}/${randomUUID()}.svg`]
   );
 
   const planId = await insertReturningId(
@@ -372,6 +397,7 @@ export async function seedSiblingClientRows(
   return {
     propertyId,
     brandKitId,
+    brandAssetId,
     planId,
     taskId,
     auditId,

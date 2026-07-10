@@ -115,6 +115,69 @@ server-only and never logged; run telemetry is redacted (closed-enum
 
 ---
 
+## Brand asset storage: the PRIVATE `brand-assets` bucket + its RLS
+
+### Owner: lead-backend-data-architect · added with migration 0014 (asset library)
+
+The brand asset library (`brand_assets` table, migration 0014) stores its BYTES
+in a PRIVATE Supabase Storage bucket, NOT in Postgres. The table row only holds
+`storage_path` (the auth_ref-analog, doc 03 §5). The bucket + its `storage.objects`
+RLS policies are a **new isolation surface** and are provisioned OUTSIDE the SQL
+migrations — Supabase's `storage` schema is service-provided and does not exist
+in the local isolation harness, so a `create policy on storage.objects` inside a
+migration would break every migration run.
+
+**Provisioning (APPLY STAGING FIRST, then prod after review):** run the exact
+SQL in `supabase/storage/brand-assets-bucket.sql` against the Supabase project.
+It (1) creates the bucket **private** (`public=false`) with `file_size_limit`
+10 MiB and `allowed_mime_types` = raster + `image/svg+xml`, and (2) installs the
+bucket-scoped `storage.objects` policies (read: caller's JWT tenant must equal
+path segment 1, and a `client_viewer` additionally client segment 2; write:
+`is_writer` + own-tenant path). Apply it in the Supabase SQL editor or via
+`psql "$SUPABASE_DB_URL" -f supabase/storage/brand-assets-bucket.sql`. It is
+idempotent (bucket upsert + `drop policy if exists` before each `create`), so
+re-running to update limits/policies is safe. Prereqs already true on a real
+project: the `app.*` claim helpers (migrations 0001/0008) and `auth.jwt()`.
+
+**No new env vars.** The app reaches storage with the SAME anon key + caller
+cookies it already uses (`NEXT_PUBLIC_SUPABASE_*`); storage RLS applies the
+caller's JWT. Signed URLs are minted server-side after an RLS authorization
+check — the bucket is never public.
+
+**Live-staging canary — the AUTHORITATIVE pre-ship checklist (QA-owned).** The
+storage-api token layer + real-bucket behaviors are owned by Supabase, not by DB
+policies, so the DB-only isolation harness cannot prove them (it proves the
+storage.objects POLICY predicates only —
+`supabase/tests/storage/brand-assets-storage.pg.test.ts`). Verify ALL SIX against
+the real staging project before ship:
+
+1. **Cross-tenant signed-READ-URL minting must DENY** — a server request to mint a
+   signed READ URL for tenant A's object, made in tenant B's session, is refused
+   (the object is not RLS-visible to B, so no URL is issued).
+2. **Expired-URL 403** — a signed URL past its TTL returns 403/denied, not the
+   bytes.
+3. **Upload-token single-use / path-binding** — a signed UPLOAD token is
+   single-use and bound to its path; it cannot be replayed, reused, or aimed at a
+   different (e.g. another tenant's) path.
+4. **Orphan-object reconciliation** — a signed upload that never finalized leaves
+   an object with no `brand_assets` row; the scheduled sweep lists the bucket and
+   deletes objects older than the signed-URL TTL that have no matching row
+   (verify it reconciles, and never deletes a row-backed object).
+5. **PUT-time MIME + size gates** — a direct signed PUT of a non-allowlisted MIME
+   or an over-10 MiB file is rejected at PUT time by the bucket's
+   `allowed_mime_types` / `file_size_limit` (the server ALSO magic-byte-sniffs the
+   real bytes on finalize, purging a mislabeled SVG/HTML-as-image/png).
+6. **Re-prove the RLS predicates on the REAL storage.objects** — repeat the
+   cross-tenant / sibling-client / short-path / is_writer-write denials from the
+   local shim suite against the live bucket, to confirm the provisioned policies
+   behave identically on Supabase's own `storage.objects`.
+
+**Secrets discipline.** No credentials in the table (only `storage_path`); asset
+write-failure telemetry is redacted (`[brand-asset-write-failure] stage=… code=…`,
+SQLSTATE only — never paths/ids/payloads).
+
+---
+
 ## Authentication: enable the claim-minting hook + create tenant #1
 
 ### Owner: lead-backend-data-architect · added with the auth-claims layer (migration 0007)

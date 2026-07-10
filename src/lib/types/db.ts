@@ -312,6 +312,37 @@ export const RUN_ERROR_CODES = [
 export type RunErrorCode = (typeof RUN_ERROR_CODES)[number];
 
 /* ------------------------------------------------------------------ */
+/* brand_assets — the per-client asset library (migration 0014)        */
+/* ------------------------------------------------------------------ */
+
+/** Closed asset taxonomy — mirrors `brand_assets_type_allowed` (0014). */
+export const BRAND_ASSET_TYPES = [
+  "primary_logo",
+  "secondary_logo",
+  "mono_logo",
+  "reversed_logo",
+  "favicon",
+  "icon",
+  "imagery",
+  "other",
+] as const;
+export type BrandAssetType = (typeof BRAND_ASSET_TYPES)[number];
+
+/**
+ * MIME allowlist — raster images + SVG (ruling condition 5). Mirrors
+ * `brand_assets_content_type_allowed` (0014) AND the storage bucket's
+ * allowed_mime_types (supabase/storage/brand-assets-bucket.sql).
+ */
+export const BRAND_ASSET_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+] as const;
+export type BrandAssetMime = (typeof BRAND_ASSET_MIME_TYPES)[number];
+
+/* ------------------------------------------------------------------ */
 /* jsonb sub-shapes                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -587,6 +618,33 @@ export interface AlertRow {
   severity: AlertSeverity;
   payload: Json;
   acknowledged: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * `brand_assets` (migration 0014) — the per-client brand asset library. Assets
+ * attach to the CLIENT (mutable library); a locked brand_kit version may
+ * reference asset ids/paths as an immutable snapshot via `brand_kits.assets`.
+ * `storage_path` is the ONLY pointer to the bytes (the auth_ref-analog, doc 03
+ * §5) — raw bytes live in the PRIVATE brand-assets Storage bucket, never a
+ * table. `archived_at` is the soft-delete marker set by the remove action when
+ * a locked kit still references the asset (never dangle an immutable snapshot).
+ */
+export interface BrandAssetRow {
+  id: string;
+  tenant_id: string;
+  client_id: string;
+  type: BrandAssetType;
+  label: string | null;
+  /** Presentation hints only (never credentials/URLs/bytes); bounded jsonb. */
+  variants: Json;
+  /** "<tenant_id>/<client_id>/<uuid>[.ext]" in the private brand-assets bucket. */
+  storage_path: string;
+  content_type: BrandAssetMime;
+  size_bytes: number;
+  /** Non-null once soft-deleted (row kept + object kept for locked-kit refs). */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
