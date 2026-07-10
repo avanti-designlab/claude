@@ -3,12 +3,14 @@
  * queue (migration 0011; ARCHITECTURE RULING 2026-07-10 A4). No server/DB
  * imports; unit-tested in the default `npm test` run.
  *
- * THIS IS A CONTRACT, NOT THE QUEUE. The processor / SECURITY DEFINER
- * lease_next_run() / sweeper are the separately-gated queue-infra block (ruling
- * A8) and consume these rules; the migration stores the states honestly. Pinning
- * every legal + illegal transition here (and in transitions.test.ts) satisfies
- * the A4 condition "legal transitions pinned + tested" without building the
- * queue infra.
+ * THIS IS THE READABLE CONTRACT — ENFORCEMENT IS IN THE DATABASE. Per the
+ * Orchestrator's QA-F2 ruling (2026-07-10), A4's enforcement clause is amended
+ * to "pinned in tests, ENFORCED BY THE DATABASE": migration 0012's
+ * runs_transition_guard trigger refuses every edge outside this graph at the
+ * DB (including attempts-reset and terminal-reopen exploits), superseding the
+ * original "the transition graph is app-logic" posture. This module remains
+ * the spec the trigger mirrors + the app-side predicate the queue code and
+ * tests consult.
  *
  * Legal graph (ruling A4):
  *   queued  → running    (processor leases it)

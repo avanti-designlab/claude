@@ -23,8 +23,11 @@ Template: `.env.example` (checked in, no values). Local dev: copy to `.env.local
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | client+server | Supabase project URL (differs staging/prod) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client+server | Supabase anon (publishable) key — safe to expose; RLS is the enforcement layer |
-| `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Bypasses RLS — used ONLY for admin/migration tooling; never imported in client code; never used in tenant-facing request paths (doc 03 §2 `platform_owner` rule) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Bypasses RLS. Admin/migration tooling AND the run-queue's ONE service-role-class op — the lease/sweep SECURITY DEFINER RPCs (migration 0012, ruling A1). Never in client code; never for tenant data on the run path |
 | `SUPABASE_DB_URL` | tooling only | Direct Postgres connection for migrations |
+| `SUPABASE_JWT_SECRET` | **server only** | Signs the short-lived per-run tenant JWTs the processor mints (ruling A1). Supabase → Settings → API → JWT Settings → JWT Secret. PostgREST verifies minted tokens against it |
+| `RUNS_PROCESSOR_SECRET` | **server only** | Shared secret the enqueue kick presents to, and `/api/runs/{process,sweep}` verify (timing-safe). NEVER logged. Unset ⇒ endpoints refuse 503 + kick skipped (sweeper/cron backstop) |
+| `RUNS_PROCESSOR_URL` | server only (optional) | Base origin the enqueue self-kick posts to. Defaults to `http://127.0.0.1:$PORT` (local dev). Set to the deployment origin when hosted |
 
 Phase 1 keys (added when their modules build; per-tenant where the tenant supplies their own — stored in Supabase Vault, not env, when tenant-scoped): `ANTHROPIC_API_KEY`, citation-data provider key (Profound-class), Ayrshare-class key, humanizer + AI-detection keys, GA4/GSC OAuth creds, call-tracking key, Higgsfield/Motion (MCP) creds, `CLOUDFLARE_API_TOKEN`.
 
@@ -44,6 +47,71 @@ Phase 1 keys (added when their modules build; per-tenant where the tenant suppli
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push/PR: install → lint → typecheck → build. Test suites (QA agent) are added from build step 0.2 onward and become required. Deploys are owned by Vercel Git integration, not CI.
+
+---
+
+## Background scan run-queue (queue-infra block · ruling 2026-07-10 A3/A9)
+
+### Owner: lead-backend-data-architect · added with migration 0012 + `/api/runs/*`
+
+Long-running read-only scans run in the background: enqueue writes a `queued`
+`runs` row and fires a non-blocking **kick** at the Node processor route, which
+leases the oldest queued run (`lease_next_run()`), executes it under an honest
+crawl budget, heartbeats, and records `succeeded|failed`. A **sweeper** reaps
+stale-heartbeat orphans and re-queues failed runs under a capped backoff.
+
+**Runs locally with NO cron (A9).** Under `npm run dev`, set
+`SUPABASE_JWT_SECRET` + `RUNS_PROCESSOR_SECRET` (and the four Supabase vars);
+the enqueue's self-kick then drives the whole loop. Each processed run kicks the
+next pickup, so the queue self-drains.
+
+**Manual / dev sweep trigger** (the backstop for a dropped kick or a crashed
+processor — run it by hand, or on a timer of your choosing):
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/runs/sweep \
+     -H "authorization: Bearer $RUNS_PROCESSOR_SECRET"
+# → {"reaped":N,"requeued":M}   (redacted counts only)
+```
+
+The processor can be poked the same way (`/api/runs/process`) — it leases and
+runs at most one run per call. The sweep endpoint kicks the processor
+**unconditionally** after every pass (QA F1): the sweep DB functions never touch
+a *queued* row (reap = running-only, requeue = failed-only), so a queued run
+whose enqueue kick was dropped is recovered only by that kick-triggered lease —
+one sweep covers orphan reaping, capped retry, AND stranded-pickup in a single
+call.
+
+**A3 timing budget (single source of truth: `src/lib/runs/config.ts`).** The
+route `maxDuration` (60s) and the crawl wall-clock budget derive from one
+constant with `budget ≤ maxDuration − overhead` (test-pinned). Truncation is the
+crawler's honest `budget_exhausted`, never a platform kill.
+
+**Hosted scheduling is NON-OPTIONAL (config-only, not required locally).** In a
+hosted deployment the enqueue self-kick is best-effort — a cold start, a
+timeout, or a network blip can drop it, and NOTHING else picks up a queued run
+until the next sweep. A scheduled sweep is therefore a REQUIRED part of hosting
+this system, not an optimization:
+- **Vercel Cron** — add to `vercel.json` a cron POSTing `/api/runs/sweep`
+  (which also kicks pickup — one job covers everything). Hobby allows **one
+  cron job, once per day** — stated honestly: on Hobby, a dropped kick can
+  leave a queued scan (or a crashed run's retry) waiting **up to 24 hours**
+  before the daily sweep recovers it. Acceptable for tenant-#1 dogfooding;
+  NOT acceptable once clients watch scan status — Pro's finer schedules (or
+  pg_cron) are the fix, and the run-trigger UI's "queued" state must render
+  honestly meanwhile. The cron request must carry `RUNS_PROCESSOR_SECRET`
+  (Vercel Cron can send an `Authorization` header) — the endpoints reject
+  anything else.
+- **pg_cron alternative** — schedule the sweep/pickup from Postgres itself if you
+  prefer not to depend on platform cron (calls the same SECURITY DEFINER
+  functions directly under the service role).
+- **maxDuration by plan** — Hobby caps a Node function at 60s (the current
+  default), Pro at 300s. Raising the budget for Pro is a change to the ONE config
+  constant (+ this route literal), test-pinned — not a code fork.
+
+**Secrets discipline.** `RUNS_PROCESSOR_SECRET` and `SUPABASE_JWT_SECRET` are
+server-only and never logged; run telemetry is redacted (closed-enum
+`error_code` + counts, never URLs/ids/payloads).
 
 ---
 

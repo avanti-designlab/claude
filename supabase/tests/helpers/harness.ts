@@ -104,6 +104,14 @@ function withDatabase(url: string, dbName: string): string {
  * grants resolve. NOLOGIN — the hook is SECURITY DEFINER, so the table read
  * happens as the definer, not as this role (it only needs EXECUTE + schema
  * usage, granted by the migration).
+ *
+ * `service_role` is Supabase-provided (BYPASSRLS) and is the role the run-queue
+ * processor SET ROLEs to when calling the queue-infra SECURITY DEFINER functions
+ * (migration 0012 grants EXECUTE on lease_next_run / reap_orphaned_runs /
+ * requeue_failed_runs to it). Pre-created here BEFORE migrations so those grants
+ * resolve, and so the QA suite can prove the EXECUTE lockdown (only service_role
+ * may call them; authenticated/anon cannot). BYPASSRLS mirrors real Supabase;
+ * the functions are SECURITY DEFINER regardless, so they run as the owner.
  */
 export async function ensureDbRoles(client: Client): Promise<void> {
   await client.query(`
@@ -117,6 +125,9 @@ export async function ensureDbRoles(client: Client): Promise<void> {
       end if;
       if not exists (select from pg_roles where rolname = 'supabase_auth_admin') then
         create role supabase_auth_admin nologin noinherit;
+      end if;
+      if not exists (select from pg_roles where rolname = 'service_role') then
+        create role service_role nologin noinherit bypassrls;
       end if;
     end
     $$;

@@ -223,9 +223,15 @@ export function nonWritersOf(spec: TableWriteSpec): JwtRole[] {
   return APP_ROLES.filter((r) => !spec.writers.includes(r));
 }
 
-/** Rejections we accept for a cross-tenant / re-home write: RLS, or the
- *  structural composite-FK backstop when RLS lets a shape through. */
-export const REJECT_WRITE = /row-level security|violates foreign key|foreign key constraint/;
+/** Rejections we accept for a cross-tenant / re-home write: RLS, the
+ *  structural composite-FK backstop when RLS lets a shape through, or — for
+ *  `runs` — the 0012 transition guard's identity-immutability refusal, which
+ *  fires BEFORE RLS WITH CHECK / FK evaluation (a BEFORE UPDATE trigger) and
+ *  refuses the same re-home even earlier. All three are structural DB
+ *  refusals of the write; the sweep asserts the write CANNOT land, whichever
+ *  layer says no first. */
+export const REJECT_WRITE =
+  /row-level security|violates foreign key|foreign key constraint|runs_transition_refused: row identity is immutable/;
 /** A pure RLS WITH CHECK rejection (deterministic for same-tenant-FK inserts). */
 export const REJECT_RLS = /new row violates row-level security policy/;
 /** No grant at all for the (role, command) — anon everywhere, tenants ins/del. */
