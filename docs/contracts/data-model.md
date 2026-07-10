@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | 1.0.0 |
-| **Status** | **Published (F1 freeze candidate)** |
-| **Date** | 2026-07-07 |
+| **Version** | 1.3.0 |
+| **Status** | **Published (F1 FROZEN 2026-07-08 · + governed post-freeze batch 2026-07-10, §13)** |
+| **Date** | 2026-07-10 |
 | **Published by** | `documentation` agent, per doc 03 §7 freeze criterion 4 |
-| **Authored by** | `lead-backend-data-architect` (build step 0.3), corrected per the F1 Code Review gate |
+| **Authored by** | `lead-backend-data-architect` (build step 0.3 + the 0007–0011 governed changes), corrected per the F1 + batch Code Review gates |
 
 > **This contract is binding.** Frontend and all module agents consume it
 > exactly as documented — build against this document, not against the SQL
@@ -16,8 +16,10 @@
 > (CLAUDE.md rule 1)** and are recorded in the `docs/BUILD-STATE.md` freeze
 > log. Full version history: [Changelog](#changelog) below.
 
-Source migrations: `supabase/migrations/0001–0006`. Shared TS mirror:
-`src/lib/types/db.ts`. Spec: `docs/03-data-model-and-multi-tenancy.md`.
+Source migrations: `supabase/migrations/0001–0006` (frozen F1) + `0007/0008`
+(auth claim-minting layer, §12) + `0009–0011` (governed post-freeze batch,
+2026-07-10 — §13). Shared TS mirror: `src/lib/types/db.ts`. Spec:
+`docs/03-data-model-and-multi-tenancy.md`.
 
 **The one rule:** every row belongs to a tenant; no query, route, or policy may
 ever let one tenant see another tenant's data. Enforced in the database (RLS on
@@ -30,7 +32,8 @@ never trusted alone.
 
 Shared database, shared schema, row-level isolation (doc 03 §1). Hierarchy:
 `tenants → tenant_users / clients → properties, brand_kits, plans, tasks,
-audits, content_items, site_changes, visibility_results, metrics, alerts`.
+audits, content_items, site_changes, visibility_results, metrics, alerts,
+competitors, runs` (the last two added by the governed post-freeze batch, §13).
 
 ## 2. JWT claim contract
 
@@ -62,8 +65,8 @@ role. **`anon` has zero grants on tenant data.** Policies exist per command
 |---|---|---|
 | `platform_owner` | **No rows via tenant-facing policies** (doc 03 §2: never bypasses tenant isolation). Platform tooling runs server-side under `service_role` (BYPASSRLS) with its own audit. | none via policies |
 | `agency_admin` | everything in own tenant | everything in own tenant, incl. the admin-only surfaces: `tenants` (update), `tenant_users`, `clients` |
-| `operator` | everything in own tenant | all module tables (`properties`, `brand_kits`, `plans`, `tasks`, `audits`, `content_items`, `site_changes`, `visibility_results`, `metrics`, `alerts`); **not** `tenants` / `tenant_users` / `clients` |
-| `client_viewer` | **read-only, own `client_id` only**, on every client-scoped table, plus own tenant row (white-label theme) and own `tenant_users` row | **nothing** — no write policy anywhere matches it |
+| `operator` | everything in own tenant | all module tables (`properties`, `brand_kits`, `plans`, `tasks`, `audits`, `content_items`, `site_changes`, `visibility_results`, `metrics`, `alerts`, `competitors`, `runs`); **not** `tenants` / `tenant_users` / `clients` |
+| `client_viewer` | **read-only, own `client_id` only**, on every client-scoped table **except `runs`** (writer-only SELECT — ratified restriction, §13.3), plus own tenant row (white-label theme) and own `tenant_users` row | **nothing** — no write policy anywhere matches it |
 
 Per-table summary (all policies additionally pin `tenant_id = app.tenant_id()`;
 UPDATE policies re-check the pin in `WITH CHECK` so rows cannot be re-homed):
@@ -74,11 +77,15 @@ UPDATE policies re-check the pin in `WITH CHECK` so rows cannot be re-homed):
 | `tenant_users` | staff: whole tenant; viewer: own row (`auth_user_id = sub`) | admin only |
 | `clients` | staff: whole tenant; viewer: own client row | admin only |
 | all module tables | staff: whole tenant; viewer: rows with own `client_id` | admin + operator |
+| `competitors` *(0010)* | follows the module-table rule above (viewer: own client — M19 share-of-voice) | admin + operator |
+| `runs` *(0011)* | **writer-only** (admin + operator) — `client_viewer` intentionally EXCLUDED (ratified, §13.3) | admin + operator |
 
 The `client_viewer` read set intentionally covers everything its dashboard
 (M19) renders: visibility, metrics, work-done log (`site_changes`), content
-calendar (`content_items`), plans/tasks/audits/alerts — always pinned to its
-`client_id`. Sibling clients are invisible by policy AND tested.
+calendar (`content_items`), plans/tasks/audits/alerts, and (since 0010) its own
+`competitors` — always pinned to its `client_id`. Sibling clients are invisible
+by policy AND tested. `runs` is the one deliberate exception: the dashboard
+reads finished artifacts, never the raw queue (§13.3).
 
 **Claim-minting obligation (upstream, binding on the 1.x auth layer):** the
 auth/JWT-minting layer MUST source the `client_id` claim from
@@ -95,20 +102,26 @@ impossible — even for a bug in app code, even for the superuser — to point a
 row at another tenant's client/property/plan/kit/user:
 
 - `(tenant_id, client_id) → clients (tenant_id, id)` — properties, brand_kits,
-  plans, content_items, visibility_results, metrics, alerts, tenant_users.
+  plans, content_items, visibility_results, metrics, alerts, tenant_users,
+  competitors *(0010)*, runs *(0011)*.
 - `(tenant_id, client_id, plan_id) → plans (tenant_id, client_id, id)` — tasks.
   Three-column form: the task's plan must belong to the **same client**, too.
 - `(tenant_id, client_id, property_id) → properties (tenant_id, client_id, id)`
-  — audits, site_changes (same-client guarantee).
+  — audits, site_changes (same-client guarantee), runs *(0011 — `property_id`
+  nullable; the FK binds only when set: property-scoped kinds carry it,
+  client-scoped kinds leave it NULL)*.
 - `(tenant_id, client_id, brand_kit_id) → brand_kits (tenant_id, client_id, id)`
   — content_items.
-- `(tenant_id, assigned_to|applied_by|approved_by) → tenant_users (tenant_id, id)`
-  — tasks (SET NULL on the single column), site_changes (RESTRICT — audit
-  trail actors are never erased).
+- `(tenant_id, assigned_to|applied_by|approved_by|requested_by) → tenant_users
+  (tenant_id, id)` — tasks (SET NULL on the single column), site_changes
+  (RESTRICT — audit trail actors are never erased), content_items
+  `approved_by` *(0009 — RESTRICT: approval history keeps its humans)*, runs
+  `requested_by` *(0011 — SET NULL on the single column: a transient work-order
+  actor, not an audit trail)*.
 
-All FKs are `ON DELETE RESTRICT` (except the column-targeted
-`tasks.assigned_to` SET NULL): destructive cleanup is an explicit platform
-operation, never a cascade.
+All FKs are `ON DELETE RESTRICT` (except the column-targeted SET NULLs on
+`tasks.assigned_to` and `runs.requested_by`): destructive cleanup is an
+explicit platform operation, never a cascade.
 
 ## 5. Table reference
 
@@ -182,13 +195,26 @@ created_at desc)`, `(tenant_id, client_id, created_at desc)`.
 ### content_items
 `type` CHECK `blog|faq|caption|pillar|schema_copy`; `brand_kit_id` (same-client
 kit — composite FK, §4; all content is brand-forced); `automation_level` (§6);
-`body text not null` (the generated content itself);
+`title` *(0009)* nullable, CHECK ≤200 — **no backfill**: pre-0009 rows stay
+NULL and the UI renders an honest **"Untitled"**, never a title fabricated
+from the body; `body text not null` (the generated content itself);
+`body_hash` *(0009)* `text not null` — SHA-256 over `{title, body}`,
+maintained by a BEFORE INSERT/UPDATE trigger and **never caller-set** (the
+trigger is the SOLE hash producer — binding condition, §13.1);
 `humanization` `{humanized, detection_score, passes}`; `quality_review` /
-`compliance_review` — independent agent verdicts, NULL until reviewed;
-`status` CHECK `draft|in_review|approved|published`, **default `draft`**.
-**Structural review gate:** CHECK forbids `approved`/`published` unless BOTH
-verdicts are non-null — publishing without review is impossible by
-construction (doc 00 §7.3).
+`compliance_review` — independent agent verdicts, NULL until reviewed (the R3
+recorded shape is in §7); `approved_by` / `approved_at` *(0009)* — the named
+human approver (composite FK `(tenant_id, approved_by) → tenant_users`,
+RESTRICT) + server-clock stamp set by the approve action, never a caller;
+`status` CHECK `draft|in_review|needs_revision|approved|published`, **default
+`draft`** (`needs_revision` *(0009)* is the send-back target).
+**Structural review gate (strengthened by 0009):** `approved`/`published`
+requires BOTH verdicts present, **passed** (JSON boolean `true`, type-exact),
+and **bound to the row's CURRENT `body_hash`**; a humanization pass for
+machine prose (`schema_copy` and `human_only` exempt); and a named approver
+(`content_items_approver_present`). Full CHECK semantics + the legal
+transition table: §13.1. Publishing without a passed, hash-bound review is
+impossible by construction (doc 00 §7.3).
 
 ### site_changes
 `method` CHECK `wordpress|webflow|wix|edge_worker|pr`; `change_type` CHECK
@@ -222,6 +248,41 @@ index `(tenant_id, client_id, source, captured_at desc)`.
 `payload jsonb` default `{}` (shape owned by M17, §7);
 `acknowledged` default false; partial index on unacknowledged.
 
+### competitors *(0010 — governed post-freeze batch, §13.2)*
+| Column | Notes |
+|---|---|
+| `name` | display name, CHECK 1–120 chars; **case-insensitive-unique per client** — unique index `(tenant_id, client_id, lower(name))` (a unique CONSTRAINT can't carry `lower()`; the index also serves the M4/M19 list read and satisfies the tenant_id-leading assertion) |
+| `domain` | nullable **bare hostname** ("example.com" — no scheme/path/port; the real grammar is enforced at the write seam), CHECK ≤253 |
+| unique | `(tenant_id, id)` anchor; composite FK `(tenant_id, client_id) → clients` |
+
+`created_at` only — no `updated_at` (the authorized shape; the app surface is
+add/list/remove, no edit). RLS enabled + forced. SELECT: staff whole-tenant,
+`client_viewer` own-client via `app.client_scope` (M19 share-of-voice renders
+it); writes at the `is_writer` floor. **Per-client cap 10 is APP-ENFORCED ⚑**
+(`src/lib/competitors/`) — a CHECK cannot count sibling rows; test-pinned; on
+the ratify list (§13.2).
+
+### runs *(0011 — governed post-freeze batch, §13.3)*
+The read-only scan work-order queue (ARCHITECTURE RULING 2026-07-10). **Table
+only** — processor / `lease_next_run()` / sweeper are a separately-gated block.
+
+| Column | Notes |
+|---|---|
+| `property_id` | nullable — property-scoped kinds (`audit|monitor|decay|local`) carry it; client-scoped kinds (`visibility|entity`) leave it NULL; composite FK binds only when set (§4) |
+| `kind` | CHECK `audit|monitor|decay|local|entity|visibility` — one per intelligence scan module |
+| `status` | CHECK `queued|running|succeeded|failed|canceled`, default `queued`; legal transitions in §13.3 |
+| `attempts` | `int not null default 0`, CHECK ≥ 0 (retry counter; cap is app policy, ⚑ A6) |
+| `progress` | jsonb object (CHECK), bounded + **content-free** frontier — never crawled URLs/page content (§7) |
+| `heartbeat_at` | nullable — processor liveness; staleness drives the sweeper |
+| `requested_by` | enqueuing operator; NULL for system/sweeper re-queues; SET NULL FK (§4) |
+| `result_ref` | nullable jsonb object (CHECK) — content-free pointer to the produced artifact; NULL until succeeded (§7) |
+| `error_code` | **CLOSED enum** CHECK `crawl_refused|budget_exhausted_total|engine_error|orphaned|misconfigured` — never raw error text/URLs; a second CHECK allows it **only when `status='failed'`** |
+
+Trigger-maintained `updated_at`. Index `(tenant_id, client_id, created_at
+desc)`; the cross-tenant lease index lands WITH `lease_next_run()` in the
+queue-infra block. RLS enabled + forced; **SELECT is writer-only** (ratified —
+§13.3); INSERT/UPDATE/DELETE at the `is_writer` floor.
+
 ## 6. automation_level semantics (doc 03 §6)
 
 Carried by `tasks`, `content_items`, and `site_changes` (every task + every
@@ -248,14 +309,20 @@ vertical, overridable per client.
 Enforcement teeth in the schema: the narrowed `site_changes` automation-level
 CHECK + `site_changes_requires_approval` (**every** site change needs a
 recorded `approved_by` to leave `previewed` — no automation-level exemption
-exists) + the `content_items` review-verdict gate. A fully autonomous on-page
-publish or unreviewed content publish cannot be represented in this schema.
+exists) + the `content_items` review-verdict gate (0009-strengthened — §13.1).
+A fully autonomous on-page publish or unreviewed content publish cannot be
+represented in this schema.
 
-> Note: the `content_items` review gate enforces verdict **presence**
-> (non-null `quality_review` + `compliance_review` before
-> `approved`/`published`), not verdict **pass** — pass/fail semantics are
-> enforced by the reviewing agents at the app layer (lands at 1.5). Do not
-> mistake the CHECK for a pass-gate.
+> **Note (SUPERSEDED 2026-07-10 — migration 0009, §13.1):** the
+> `content_items` review gate originally enforced verdict **presence** only
+> (with pass/fail semantics left to the app layer). It is now a **pass-gate
+> AND a version binding**: `approved`/`published` requires both verdicts to
+> CONTAIN `passed: true` (JSON boolean, type-exact — string `"true"`, number
+> `1`, JSON `null` all reject) **and** the row's current `body_hash`, plus a
+> humanization pass where required and a named approver. The reviewing agents
+> still own verdict *production*; the DB now refuses unpassed or stale
+> verdicts structurally. One thing the CHECK still does NOT gate: `automation_level='human_only'`
+> exempts only the humanization leg, never the two verdicts or the approver.
 
 ## 7. jsonb shapes
 
@@ -273,9 +340,23 @@ publish or unreviewed content publish cannot be represented in this schema.
   stores the kit itself.
 - **`brand_kits.assets`**: `{logo_url, ...}` (`BrandAssets`).
 - **`clients.locations`**: array of `{name, address, geo}`.
-- **`content_items.humanization`**: `{humanized, detection_score, passes}`.
-- **`content_items.quality_review` / `compliance_review`**: opaque verdicts
-  owned by the reviewing agents.
+- **`content_items.humanization`**: `{humanized, detection_score, passes}` —
+  since 0009 the approval CHECK consults `passes` (must be the JSON boolean
+  `true` for machine prose; `schema_copy`/`human_only` exempt — §13.1).
+- **`content_items.quality_review` / `compliance_review`**: owned by the
+  reviewing agents, but since 0009 no longer fully opaque — the approval CHECK
+  requires each to CONTAIN `{passed: true, body_hash: <row's body_hash>}`
+  (jsonb containment; extra keys are fine, subset-match is intended). The R3
+  actions record `ContentReviewVerdict` (`src/lib/types/db.ts`):
+  `{passed, body_hash, reviewed_by?, reviewed_at?, note?}` — `body_hash` is
+  COPIED from the row as read, never recomputed (trigger-sole-producer binding
+  condition, §13.1); `note` carries the send-back reason (§13.5).
+- **`runs.progress`**: bounded, **content-free** progress frontier (e.g.
+  `{crawled, total, phase}`) — NEVER crawled URLs or page content (honesty
+  rule; `error_code` carries the only failure signal).
+- **`runs.result_ref`**: content-free pointer to the produced artifact (e.g.
+  `{"kind": "audit", "id": "<uuid>"}`); NULL until a run succeeds; the
+  concrete shape is ratified with the queue-infra block — never raw output.
 - **`site_changes.diff`**: `{before, after, target}` — `before`/`after` are the
   change payload; `target` (added by the 1.2 change-management layer, ratified
   2026-07-08 — Orchestrator + Code Review, schema-safe: the `diff_is_object`
@@ -386,8 +467,11 @@ ratification with the freeze; none contradict docs 00–07)
 
 - Harness + smoke suite: `supabase/tests/` (README there). `npm run
   test:isolation`; CI `isolation` job runs it against `postgres:16`.
-- RLS enabled **and forced** on all 13 tables is asserted by test, not by
-  convention. tenant_id NOT NULL + leading-indexed asserted per table.
+- RLS enabled **and forced** on all 15 tables (13 frozen + `competitors` /
+  `runs`, §13) is asserted by test, not by convention. tenant_id NOT NULL +
+  leading-indexed asserted per table. The suite's all-roles future-table
+  tripwire caught both new tables by design; the isolation suite stands at
+  **468 tests** after the 0009–0011 extension (batch gate record, 2026-07-10).
 - The QA agent's adversarial isolation suite (doc 03 §7 criterion 2) builds on
   `helpers/harness.ts` + `helpers/seed.ts` — every role × every table ×
   read/write, incl. sibling-client blindness for `client_viewer`.
@@ -459,8 +543,264 @@ Guards (`requireAuth` / `requireRole` / `requireOperator`) and `src/middleware.t
 > unchanged. This unblocks the first logged-in data-querying UI slice. Also
 > recorded in `docs/ops/environments.md` and the migration-0007/0008 headers.
 
+## 13. Governed post-freeze schema batch — 2026-07-10 (migrations 0009–0011 + write-path contracts)
+
+Authorized by the 2026-07-10 SCOPE AUTHORIZATION, ruled in part by the
+2026-07-10 ARCHITECTURE RULING, and LANDED per the "GOVERNED POST-FREEZE
+SCHEMA BATCH LANDED" gate record (all in `docs/BUILD-STATE.md`). Gate cycle:
+Code Review REJECT (1 Blocker — the strengthened CHECK originally failed OPEN
+on absent/JSON-null `body_hash`) and QA FAIL (same defect found
+independently, proven reachable by any `is_writer` via PostgREST) →
+remediated in one move (presence conjuncts + jsonb **containment**, two-valued
+and type-exact) → **both PASS**; isolation 468/468, unit 2635. Frozen
+migrations 0001–0008 untouched. This section is the binding contract for
+everything the batch added; §§1–5 above are already synced to it.
+
+### 13.1 content_items lifecycle (migration 0009)
+
+One file because every item alters the SAME `content_items` CHECK set
+(independent rollback of the whole content-lifecycle change; a commented
+manual DOWN block reverses to the frozen 0005 shape).
+
+- **`title`** — `text` nullable, CHECK ≤200 (`content_items_title_len`).
+  **No backfill**: existing rows stay NULL; the UI renders an honest
+  **"Untitled"**, never a title fabricated from the body. Title is shipped
+  client-facing text (M8 compliance pre-screen input when generated; M19
+  jargon rule at render) and **participates in the hash binding** — a
+  post-verdict title edit invalidates verdicts exactly like a body edit.
+- **`body_hash`** — `text not null`, maintained by the
+  `content_items_set_body_hash` BEFORE INSERT/UPDATE trigger
+  (`app.content_body_hash`). Digest — RATIFIED (Orchestrator, 2026-07-10):
+  the built-in `pg_catalog.sha256(bytea)`, NOT pgcrypto's `digest()` (same
+  SHA-256, no extension dependency, callable under `search_path = ''`, so
+  portable across the local harness and Supabase). Input is
+  `jsonb_build_object('title', title, 'body', body)::text` — NOT raw
+  concatenation: JSON unambiguously separates the fields (a body can never
+  impersonate the boundary) and distinguishes NULL title from empty-string
+  title. Backfilled via the same function before NOT NULL took effect.
+  **BINDING CONDITION of the ratification: THE TRIGGER IS THE SOLE HASH
+  PRODUCER.** Application code never recomputes this hash — the verdict
+  actions (`src/lib/production/review/actions.ts`) copy the row's STORED
+  `body_hash` exactly as read into each verdict. A second producer would
+  silently fork the binding; adding one requires the governed path.
+- **`needs_revision`** — status gains EXACTLY ONE new state (the send-back
+  target): `draft → in_review → {needs_revision | approved} → published`.
+- **Strengthened approval CHECK** (`content_items_reviewed_before_approval`,
+  replacing the frozen presence-only constraint UNDER THE SAME NAME).
+  `approved`/`published` requires, ALL structurally, fail-closed:
+  - `quality_review is not null` AND
+    `quality_review @> jsonb_build_object('passed', true, 'body_hash', body_hash)`;
+  - the same pair for `compliance_review`;
+  - humanization matrix: `humanization is not null AND humanization @>
+    '{"passes": true}'` for machine-produced prose
+    (`blog | faq | caption | pillar`); **EXEMPT for `type='schema_copy'` and
+    for `automation_level='human_only'`** (the exemption covers ONLY the
+    humanization leg — never the verdicts or the approver).
+  - `draft | in_review | needs_revision` are unconstrained by this gate.
+
+  **Why containment (the Blocker remediation + Orchestrator-directed type
+  tightening):** a Postgres CHECK passes on TRUE **or NULL**, and plain `=`
+  propagates NULL — so the first draft failed OPEN on hashless verdicts.
+  jsonb `@>` over non-null operands is two-valued and TYPE-EXACT: `passed`
+  must be the JSON boolean `true` (string `"true"`/`"t"`/`"1"`, number `1`,
+  JSON `null` all FAIL); `body_hash` must be PRESENT and equal (an omitted
+  key or JSON null yields FALSE, never NULL — an absent hash is not a bound
+  hash); no `::boolean` text-cast anywhere (casts accept truthy strings and
+  can raise). Extra verdict keys are fine — subset-match is intended.
+  **Consequence for verdict writers:** any body OR title edit re-hashes the
+  row and structurally invalidates prior verdicts; re-review is required to
+  re-approve.
+- **`approved_by` / `approved_at`** — the named human approver (CLAUDE.md
+  rule 5; the `site_changes.approved_by` precedent). Composite FK
+  `(tenant_id, approved_by) → tenant_users (tenant_id, id)` ON DELETE
+  RESTRICT (approval history keeps its humans). Separate CHECK
+  `content_items_approver_present`: no `approved`/`published` row without
+  `approved_by`. `approved_at` is set by the approve action from the server
+  clock, never by a caller.
+
+**The full legal transition table** (engine:
+`src/lib/production/review/transitions.ts` — pure, mirrors the CHECK
+one-for-one, pinned by tests; the DB CHECK stays authoritative):
+
+| From | To | Driver | Notes |
+|---|---|---|---|
+| `draft` | `in_review` | producer submit (M8/M9 path, pre-existing) | |
+| `in_review` | `needs_revision` | **send-back** (R3) | reason REQUIRED, recorded as the failing gate verdict's `note` (§13.5) |
+| `in_review` | `approved` | **approve** (R3) | every gate condition + the named approver |
+| `needs_revision` | `in_review` | **resubmit** (R3) | prior verdicts left in place — stale by hash, structurally unable to approve |
+| `approved` | `published` | **NOT WIRED** | publish stays behind change management (rule 4); no publish wiring authorized in this batch — and see the §13.6 linkage precondition |
+| edit while `draft` | `draft` | revise (R3) | |
+| edit while `in_review` / `needs_revision` / `approved` | `needs_revision` | revise (R3) — **demote-before-edit** | the trigger re-hashes; prior verdicts go structurally stale |
+| edit while `published` | — | **illegal** — revise refuses | re-publishing is a change-management concern |
+
+Verdicts may be recorded ONLY while `in_review`.
+
+### 13.2 competitors (migration 0010) — NEW table
+
+Shape, keys, and RLS posture in §5. Contract highlights:
+
+- **Why a table:** jsonb-on-`clients` was REJECTED — write-floor mismatch
+  (competitor management is operator work at the `is_writer` floor; `clients`
+  writes are admin-only) and both consumers (M4 share-of-voice, M19
+  dashboard) need queryable rows.
+- **Unique key:** one competitor NAME per client, case-insensitive — unique
+  index `(tenant_id, client_id, lower(name))`; duplicate inserts surface as
+  23505 → the app's `duplicate` refusal.
+- **Cap 10 per client — APP-ENFORCED ⚑** at the write seam
+  (`src/lib/competitors/actions.ts`, `COMPETITORS_PER_CLIENT_CAP`): a CHECK
+  cannot count sibling rows. Test-pinned; known accepted race (two
+  truly-concurrent adds can both pass the count — same class as `ensurePlan`);
+  the value is on the ⚑ ratify list.
+- **RLS:** enabled + forced; `client_viewer` reads its OWN client's
+  competitors (`app.client_scope` — M19 renders share-of-voice); writes
+  (insert/update/delete) at the `is_writer` floor. Write seam guards with
+  `requireOperator()`, reads with `requireAuth()` — RLS is the real gate.
+- **Domain grammar** (write seam, `src/lib/competitors/validate.ts`): bare
+  hostname only — full http(s) URLs are reduced to their hostname; anything
+  with a path/port/space refuses; trailing FQDN dot tolerated; the DB CHECK
+  (≤253) is the backstop.
+
+### 13.3 runs (migration 0011) — NEW table
+
+Shape in §5. Contract highlights:
+
+- **SCOPE INVARIANT (ruling):** a `runs` row is a READ-ONLY scan work-order.
+  It must NEVER vehicle a client-site write — writes stay behind
+  change-management (`site_changes`, rule 4). Nothing in the migration
+  references or enables a write path.
+- **Writer-only SELECT — RATIFIED (Orchestrator, 2026-07-10):**
+  `client_viewer` is intentionally EXCLUDED — the client dashboard reads
+  finished artifacts (`audits`, `visibility_results`, `metrics`), not the raw
+  queue; `runs` carries `client_id` for tenant-consistency + filtering, like
+  `tenant_users` carries it without being a viewer surface. This is a
+  ratified **deviation-by-restriction** from the §9-item-9 uniform viewer
+  read rule (more restrictive — cannot leak). Widening to `app.client_scope`
+  requires the governed post-freeze path.
+- **Closed `error_code` enum** (`crawl_refused | budget_exhausted_total |
+  engine_error | orphaned | misconfigured`) — never raw error text or URLs;
+  CHECK-limited to `status='failed'` (no failure signal may hide on a
+  non-failed row).
+- **Legal transitions** (pinned in `src/lib/runs/transitions.ts` + test;
+  enforced by the future queue actions — the DB stores states honestly, the
+  graph is app-logic): `queued → running` (processor lease);
+  `queued → canceled` (operator cancel, CAS on queued — the only cancel until
+  a real mid-run cancel exists); `running → succeeded | failed` (processor);
+  `running → failed` **by the sweeper only** for the stale-heartbeat case;
+  retry re-queues the SAME row (`failed → queued`, `attempts+1`, to a cap ⚑
+  A6); an operator re-run is a NEW row, never a terminal reopen;
+  `succeeded`/`canceled` are terminal and immutable, `failed` terminal except
+  the bounded retry.
+- **Deferred to the separately-gated queue-infra block (ruling A8):** the
+  processor, `SECURITY DEFINER lease_next_run()` (the ONLY permitted
+  service-role-class op on the run path, per A1), the sweeper, the
+  cross-tenant lease index (`FOR UPDATE SKIP LOCKED` support), and the
+  concrete `result_ref` shape. Gate: Code Review + a QA adversarial
+  concurrency/recovery suite.
+
+### 13.4 properties write-path contract (NO schema change)
+
+The frozen 0003 shape was verified sufficient — no migration. Two seams:
+
+- **`ensureWebsiteProperty`** (`src/lib/clients/properties.ts`) — the
+  onboarding property-row half, idempotent on BOTH the fresh and the
+  23505-replay path. Replay semantics (CRITICAL scope condition,
+  test-pinned): read the client's existing website properties oldest-first →
+  **none** ⇒ INSERT (`connection_method='none'`, no `auth_ref`); **exact
+  url+platform match** ⇒ return it untouched; **diverged** ⇒ UPDATE-THROUGH
+  the oldest (onboarding) row to the resubmitted values — a divergent replay
+  never strands a stale URL. Known accepted race: no per-client unique
+  constraint, so two truly-concurrent submits can double-insert; sequential
+  lost-response retries (the case idempotency closes) are fully idempotent.
+  Any failure returns `ok:false` → the caller surfaces an honest
+  partial-success warning (client saved, property not), never silent success.
+- **Workspace seam** (`src/lib/properties/`) — operator create/edit of a
+  client's website property (`type` pinned to `'website'`, so the frozen
+  `properties_website_has_platform` CHECK requires the validated platform).
+  **NO DELETE v1** — properties are ON DELETE RESTRICT FK parents (audits,
+  site_changes, runs); deletion is deferred to the Connections/lifecycle
+  block. Guard `requireOperator()` mirrors the `is_writer` RLS floor.
+- **`connection_method` locked to `'none'`** at every seam — never written
+  connected-looking without a real connection; `auth_ref` is NEVER written by
+  these seams (doc 03 §5). The Connections block owns transitions to
+  connected values, alongside a real vault `auth_ref`.
+- **Terminology correction — BINDING (Orchestrator REDIRECT, 2026-07-10):**
+  **`'pr'` in `properties.connection_method` (and `site_changes.method`) is
+  the Git/pull-request write method of doc 04** — one of the four auto-fix
+  write methods, alongside `api` and `edge_worker`. It is **NOT
+  press-release outreach** (that is M12 and has nothing to do with this
+  column). The press-release misreading was scrubbed from the batch;
+  hand-setting `'pr'` is refused like every connected value until its wiring
+  block lands. Do not re-propagate the misreading — cite this section.
+
+### 13.5 R3 review-lifecycle action contracts (`src/lib/production/review/`)
+
+Server actions (the HUMAN approval seam — AI drafts, humans approve). Shared
+posture: tenant scoping is CLAIM-SOURCED (browser sends only ids + the
+verdict/reason/edit); guard `requireOperator()` mirrors the `is_writer` RLS
+floor; **reviewer/approver identity is resolved from the verified `sub` via
+`tenant_users` — never caller-supplied**; every action returns
+`ReviewActionResult` (`ok` + new status, or a named refusal reason with
+interface-voice copy); the transitions engine gives honest pre-write refusals
+and the DB CHECKs stay the authoritative gate (a lost race surfaces as
+`write_failed`, never a bypass).
+
+| Action | Transition | Contract |
+|---|---|---|
+| `recordQualityVerdict` / `recordComplianceVerdict` | none (verdict write, `in_review` only) | Persists the GATE's decision (`passed: boolean` is passed in — never synthesized here); records `{passed, body_hash, reviewed_by, reviewed_at, note?}` with `body_hash` **copied from the row as read** (trigger-sole-producer binding condition); `note` ≤2000 |
+| `approveContentItem` | `in_review → approved` | Pre-checks the full gate (mirrors the CHECK, names the first blocker: missing/not-passed/stale per gate, humanization); stamps claim-resolved `approved_by` + server-clock `approved_at` |
+| `sendBackContentItem` | `in_review → needs_revision` | `gate` (`quality`\|`compliance`) + **`reason` REQUIRED** (bounded ≤2000) — RATIFIED: no dedicated send-back column; the send-back IS a real **failing verdict** (bound to the reviewed hash) with the reason as its `note`, plus the demotion, in ONE write |
+| `resubmitContentItem` | `needs_revision → in_review` | Prior verdicts left in place — stale by hash, structurally unable to approve until fresh verdicts land |
+| `reviseContentDraft` | demote-before-edit (table in §13.1) | The one legal body/title edit path; `title: null` clears to "Untitled"; body ≤200k seam cap (column uncapped — flagged); refuses on `published` |
+
+**Gate conditions attached to R3 (binding):** the Review & Approvals UI must
+RENDER the send-back note(s) bound to `needs_revision` rows (Orchestrator
+binding condition). Publish is NOT wired (§13.1 + §13.6).
+
+### 13.6 Carried preconditions (data-model relevant)
+
+- **Publish wiring must add change-management linkage:** `'published'` is
+  app-unreachable today but NOT DB-gated on change-management linkage — when
+  the publish path is wired, rule-4 linkage (change-log/diff/rollback) MUST
+  be enforced (QA observation; joins the R3/publish precondition set).
+- **Reviews home DEFERRED — explicit ruling:** no raw-reviews schema before
+  vendor semantics are known (rule 7). Aggregate signal stays in
+  `metrics(source='reviews')`; the reviews-home decision is a **named
+  prerequisite of the review-platform vendor-wiring block**, and no
+  reply-send wiring passes review until a persisted status-bearing gate
+  record exists (M15 Compliance precondition).
+- **⚑ Ratify at wiring:** competitors per-client cap 10 (§13.2); runs queue
+  thresholds (heartbeat/orphan/attempt-cap — ruling A6) at the queue-infra
+  wiring review.
+- **CR minors (optional hardening, non-gating):** control-char stripping in
+  the competitors/properties validators; M19 "In revision" label copy → next
+  Design Review.
+
 ## Changelog
 
+- **1.3.0 — 2026-07-10 — Governed post-freeze schema batch (migrations
+  0009–0011 + write-path contracts) — SIGNED OFF (Orchestrator + Code Review
+  PASS + QA PASS 468/468).** New §13 (the binding contract for the batch);
+  §§1, 3, 4, 5, 6, 7, 11 synced. **0009 content_items:** `title` (≤200,
+  nullable, no backfill — "Untitled" render rule), trigger-maintained
+  `body_hash` (pg_catalog.sha256 over `jsonb_build_object('title','body')`;
+  **the trigger is the SOLE hash producer** — binding condition),
+  `needs_revision` status, the strengthened fail-closed approval CHECK (jsonb
+  containment: boolean-true + exact hash binding; humanization matrix with
+  `schema_copy` + `human_only` exemptions — supersedes the §6
+  presence-not-pass note), `approved_by`/`approved_at` + approver-present
+  CHECK + composite FK. **0010 competitors** (new table; cap-10
+  app-enforced ⚑). **0011 runs** (new table; writer-only SELECT ratified;
+  closed `error_code` enum; lease/processor/sweeper deferred to the
+  queue-infra block). **Properties write path** (no schema change:
+  `ensureWebsiteProperty` replay semantics, workspace create/edit, no delete
+  v1, `connection_method` locked to `'none'`; **`'pr'` = the Git/pull-request
+  write method, NOT press-release** — Orchestrator REDIRECT encoded in
+  §13.4). **R3 lifecycle actions** documented (§13.5) incl. the full legal
+  transition table with demote-before-edit; publish NOT wired. Carried
+  preconditions recorded in §13.6 (publish→change-management linkage;
+  reviews-home deferred to the review-platform vendor block). Authored by
+  `lead-backend-data-architect`; synced by the `documentation` agent per the
+  batch gate record ("required before batch declared fully done").
 - **1.2.0 — 2026-07-08 — Reserved-`role`-claim collision RESOLVED (Option 2),
   pending Code Review gate.** The app role now travels in the **non-reserved
   `user_role` claim** instead of PostgREST's reserved `role` claim. Migration
