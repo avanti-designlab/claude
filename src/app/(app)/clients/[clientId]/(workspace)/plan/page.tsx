@@ -61,7 +61,21 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   approved: "Approved",
   published: "Published",
   reverted: "Reverted",
+  // 'done' (0013): a human marked their own task complete — plain work-tracking,
+  // never a review/publish approval (those are "Approved"/"Published").
+  done: "Done",
 };
+
+/**
+ * DISPLAY order for the status-filter select — a PAGE choice: "Done" reads with
+ * the working stages (right after "In progress"), not trailing "Reverted".
+ * Derived from TASK_STATUSES (never a reorder of it — that array mirrors the DB
+ * CHECK), so every status appears exactly once and a future status can't
+ * silently vanish from the filter.
+ */
+const STATUS_FILTER_ORDER: readonly TaskStatus[] = TASK_STATUSES.filter(
+  (s) => s !== "done",
+).flatMap((s) => (s === "in_progress" ? [s, "done" as TaskStatus] : [s]));
 
 type PillTone = "muted" | "accent" | "positive" | "warm" | "negative";
 
@@ -72,6 +86,7 @@ const STATUS_TONE: Record<TaskStatus, PillTone> = {
   approved: "positive",
   published: "positive",
   reverted: "negative",
+  done: "positive",
 };
 
 const AUTOMATION_LABEL: Record<AutomationLevel, string> = {
@@ -538,7 +553,7 @@ function StatusFilterBar({
         Status
         <select name="status" defaultValue={status} className={SELECT_CLASS}>
           <option value="all">Any status</option>
-          {TASK_STATUSES.map((s) => (
+          {STATUS_FILTER_ORDER.map((s) => (
             <option key={s} value={s}>
               {STATUS_LABEL[s]}
             </option>
@@ -576,8 +591,10 @@ function TaskCard({
   const moduleLabel = MODULE_LABEL[task.module] ?? null;
   const headline = detail.title ?? moduleLabel ?? "Plan task";
 
-  // The legal manual actions the SERVER vouches for (human_only + todo⇄in_progress);
-  // the control only shows when the caller can actually run the action.
+  // The legal manual actions the SERVER vouches for — the task-status edge
+  // table (0013): human_only todo ⇄ in_progress ⇄ done; ai_draft_human_approve
+  // todo ⇄ in_progress work-tracking only; auto none. The control only shows
+  // when the caller can actually run the action.
   const actions: ManualAction[] = canManage
     ? manualActionsFor(task.automationLevel, task.status)
     : [];

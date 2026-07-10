@@ -140,6 +140,10 @@ export const TASK_STATUSES = [
   "approved",
   "published",
   "reverted",
+  // 'done' (migration 0013): an honest, human-owned completion word. Legal ONLY
+  // on automation_level='human_only' (structural CHECK tasks_done_is_human_only)
+  // — never a bypass of the approved/published pipeline terminals.
+  "done",
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 

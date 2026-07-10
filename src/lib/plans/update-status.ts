@@ -2,10 +2,15 @@
 
 /**
  * updateTaskStatus — the ONE sanctioned thin write on `tasks.status`, added for
- * the plan tab (P1 slice). It lets a human move a HUMAN-OWNED plan task along the
- * legal, gate-free edge (todo ⇄ in_progress) and NOTHING else. The legality rules
- * — and the reasoning for why the subset is this narrow — live in task-status.ts;
- * this action re-enforces every one of them at the write with a compare-and-set,
+ * the plan tab (P1 slice). It lets a human move a plan task along a legal,
+ * gate-free, reversible edge and NOTHING else:
+ *   - human_only:               todo ⇄ in_progress AND in_progress ⇄ done
+ *   - ai_draft_human_approve:   todo ⇄ in_progress ONLY (work-tracking; `done`
+ *                               and every pipeline/gate word stay unreachable)
+ *   - auto:                     no manual move at all
+ * The legality rules — and the reasoning for why the subset is this narrow —
+ * live in task-status.ts (one edge table drives both the UI and this action).
+ * This action re-enforces every one of them at the write with a compare-and-set,
  * so a stale or hostile client can never widen the edge.
  *
  * SECURITY posture mirrors cancelRun / the M2 audit action exactly:
@@ -16,21 +21,24 @@
  *    tasks_update's is_writer() honestly — task status is day-to-day operator
  *    work, so this is the operator floor, NOT the stricter agency_admin gate the
  *    plan-REGENERATION action deliberately keeps. RLS remains the real floor.
- *  - CAS pins THREE predicates, not just the id:
- *      automation_level = 'human_only'  — a machine-owned (auto) or pipeline
- *        (ai_draft_human_approve) task matches ZERO rows and is refused; the
- *        human/AI ownership boundary is enforced in the DB, not just the UI.
- *      status = requiredSourceFor(to)   — the task must still hold the exact
- *        source the target implies (todo⇄in_progress), so a concurrent change is
- *        an honest "it already moved", never a silent clobber.
- *      id + tenant_id                   — claim-sourced tenant; RLS re-pins it.
+ *  - CAS pins, beyond the id, the predicates `manualCasFor(to)` derives from the
+ *    SAME edge table the UI renders:
+ *      automation_level IN cas.levels — 'auto' is always excluded, so a
+ *        machine-owned task matches ZERO rows; a `done` target's level set is
+ *        human_only only, so a pipeline task can't be marked done (the 0013
+ *        DB CHECK tasks_done_is_human_only is the authoritative backstop).
+ *      status IN cas.sources          — the task must still hold one of the exact
+ *        source statuses the target implies (a concurrent change is an honest
+ *        "it already moved", never a silent clobber).
+ *      id + tenant_id                 — claim-sourced tenant; RLS re-pins it.
  *  - ONLY status is written (no payload/assignee/automation_level): the update
- *    patch is exactly `{ status }`.
+ *    patch is exactly `{ status }` — a manual move can never change ownership.
  *
- * NO existence oracle: a nonexistent id, another tenant's id, a non-human_only
- * task, and a task that simply already moved are ALL the same 0-row observation
- * → one honest "conflict" outcome. The id is UUID-validated first only to reject
- * obvious garbage before a round-trip, never to reveal what exists (doc 03 §4).
+ * NO existence oracle: a nonexistent id, another tenant's id, a task whose level
+ * the move isn't legal on, and a task that simply already moved are ALL the same
+ * 0-row observation → one honest "conflict" outcome. The id is UUID-validated
+ * first only to reject obvious garbage before a round-trip, never to reveal what
+ * exists (doc 03 §4).
  *
  * This does NOT touch content_items (the R3 content lifecycle owns that surface);
  * it moves a PLAN task's own status only.
@@ -40,7 +48,7 @@ import { AuthorizationError, requireOperator } from "@/lib/auth/guards";
 import { isUuidV4 } from "@/lib/clients/validate";
 import { createClient } from "@/lib/supabase/server";
 import type { TaskStatus } from "@/lib/types/db";
-import { isLegalManualTarget, requiredSourceFor } from "./task-status";
+import { isLegalManualTarget, manualCasFor } from "./task-status";
 
 /** FROZEN CONTRACT — the plan-tab control consumes this exact shape. */
 export type UpdateTaskStatusResult =
@@ -93,7 +101,8 @@ export async function updateTaskStatus(input: {
   }
 
   // The target must be inside the sanctioned legal set BEFORE any round-trip: a
-  // tampered/garbage `to` (e.g. "published") is rejected here, not at the DB.
+  // tampered/garbage `to` (e.g. "published", "in_review") is rejected here, not
+  // at the DB.
   const to = input?.to;
   if (!isLegalManualTarget(to)) {
     return {
@@ -102,26 +111,40 @@ export async function updateTaskStatus(input: {
       error: ILLEGAL_TRANSITION_ERROR,
     };
   }
-  const from = requiredSourceFor(to);
+
+  // The CAS predicates for this target — source status(es) + the automation
+  // levels the move is legal on — derived from the same edge table the UI
+  // renders (task-status.ts). null only if `to` targets no legal edge (can't
+  // happen after isLegalManualTarget succeeds, but guarded, never assumed).
+  const cas = manualCasFor(to);
+  if (!cas) {
+    return {
+      ok: false,
+      reason: "illegal_transition",
+      error: ILLEGAL_TRANSITION_ERROR,
+    };
+  }
 
   const supabase = await createClient();
-  // CAS: claim-sourced tenant (RLS re-pins it) + id + human_only + the exact
-  // source status. select('id') turns a 0-row match into an honest "conflict",
-  // never a silent no-op. Only `status` is written.
+  // CAS: claim-sourced tenant (RLS re-pins it) + id + the automation levels this
+  // move is legal on ('auto' always excluded; a `done` target is human_only-only
+  // here AND by the 0013 DB CHECK) + the exact source status(es) the target
+  // implies. select('id') turns a 0-row match into an honest "conflict", never a
+  // silent no-op. Only `status` is written.
   const res = await supabase
     .from("tasks")
     .update({ status: to })
     .eq("tenant_id", claims.tenantId)
     .eq("id", taskId)
-    .eq("automation_level", "human_only")
-    .eq("status", from)
+    .in("automation_level", [...cas.levels])
+    .in("status", [...cas.sources])
     .select("id");
   if (res.error) {
     return { ok: false, reason: "write_failed", error: WRITE_FAILED_ERROR };
   }
   if (!Array.isArray(res.data) || res.data.length === 0) {
-    // No matching row: the task moved, isn't human_only, or isn't visible under
-    // RLS. Indistinguishable by design — one honest refusal.
+    // No matching row: the task moved, the move isn't legal on its level, or it
+    // isn't visible under RLS. Indistinguishable by design — one honest refusal.
     return { ok: false, reason: "conflict", error: CONFLICT_ERROR };
   }
   return { ok: true, status: to };

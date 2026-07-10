@@ -29,6 +29,8 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   approved: "Approved",
   published: "Published",
   reverted: "Reverted",
+  // 'done' (0013): a human-owned task marked complete — plain work-tracking.
+  done: "Done",
 };
 
 /**
@@ -43,6 +45,7 @@ const TASK_STATUS_TONE: Record<TaskStatus, WashPillTone> = {
   approved: "positive",
   published: "positive",
   reverted: "negative",
+  done: "positive",
 };
 
 /** Deterministic short date ("Jul 9") — server-rendered, locale-pinned. */

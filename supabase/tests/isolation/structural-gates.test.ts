@@ -547,6 +547,88 @@ describe("'auto' is structurally impossible on site_changes (doc 00 §2, CLAUDE.
   });
 });
 
+describe("tasks 'done' status requires human_only (migration 0013)", () => {
+  // The honest completion word is fenced to GENUINE human work: 'done' is legal
+  // ONLY on automation_level='human_only'. A machine-owned (auto) or pipeline
+  // (ai_draft_human_approve) task can never be 'done' — approved/published stay
+  // the load-bearing audit terminals. Enforced by tasks_done_is_human_only on
+  // BOTH the INSERT and UPDATE routes (the F1 automation-CHECK precedent), below
+  // RLS, holding even for the superuser. No transition trigger exists (ruled
+  // unwarranted) — this coupling is the whole structural story.
+
+  it("INSERT status='done' on a default (ai_draft_human_approve) task is rejected", async () => {
+    // No automation_level given → column default 'ai_draft_human_approve'. The
+    // status enum accepts 'done', so the ONLY constraint that can block is the
+    // coupling — deterministic assertion.
+    await expectRejected(
+      `insert into tasks (tenant_id, client_id, plan_id, module, status)
+       values ($1, $2, $3, 'audit', 'done')`,
+      [a.tenantId, a.clientId, a.planId],
+      /tasks_done_is_human_only/
+    );
+  });
+
+  it("INSERT status='done' on an 'auto' task is rejected", async () => {
+    await expectRejected(
+      `insert into tasks (tenant_id, client_id, plan_id, module, automation_level, status)
+       values ($1, $2, $3, 'rank_tracking', 'auto', 'done')`,
+      [a.tenantId, a.clientId, a.planId],
+      /tasks_done_is_human_only/
+    );
+  });
+
+  it("UPDATE an ai_draft_human_approve task to 'done' is rejected", async () => {
+    // The seeded a.taskId is a default (ai_draft_human_approve) task in 'todo'.
+    await expectRejected(
+      `update tasks set status = 'done' where id = $1`,
+      [a.taskId],
+      /tasks_done_is_human_only/
+    );
+  });
+
+  it("UPDATE an 'auto' task to 'done' is rejected", async () => {
+    const ins = await db.admin.query<{ id: string }>(
+      `insert into tasks (tenant_id, client_id, plan_id, module, automation_level)
+       values ($1, $2, $3, 'rank_tracking', 'auto') returning id`,
+      [a.tenantId, a.clientId, a.planId]
+    );
+    await expectRejected(
+      `update tasks set status = 'done' where id = $1`,
+      [ins.rows[0].id],
+      /tasks_done_is_human_only/
+    );
+  });
+
+  it("positive: INSERT a human_only task directly as 'done' succeeds", async () => {
+    const res = await db.admin.query(
+      `insert into tasks (tenant_id, client_id, plan_id, module, automation_level, status)
+       values ($1, $2, $3, 'strategy', 'human_only', 'done')`,
+      [a.tenantId, a.clientId, a.planId]
+    );
+    expect(res.rowCount).toBe(1);
+  });
+
+  it("positive: UPDATE a human_only task to 'done' (and reopen it) succeeds — reversible", async () => {
+    const ins = await db.admin.query<{ id: string }>(
+      `insert into tasks (tenant_id, client_id, plan_id, module, automation_level, status)
+       values ($1, $2, $3, 'compliance_signoff', 'human_only', 'in_progress') returning id`,
+      [a.tenantId, a.clientId, a.planId]
+    );
+    const id = ins.rows[0].id;
+    const done = await db.admin.query(
+      `update tasks set status = 'done' where id = $1`,
+      [id]
+    );
+    expect(done.rowCount).toBe(1);
+    // Reversible work-tracking: done → in_progress ("Reopen") is a plain update.
+    const reopened = await db.admin.query(
+      `update tasks set status = 'in_progress' where id = $1`,
+      [id]
+    );
+    expect(reopened.rowCount).toBe(1);
+  });
+});
+
 describe("automation_level CHECK rejects unknown values (contract §6)", () => {
   // params built lazily (inside each test) — `a` is populated only by beforeAll.
   const cases: {

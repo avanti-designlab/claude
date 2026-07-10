@@ -181,11 +181,14 @@ output; shape owned by M1 at 1.1).
 ### tasks
 `plan_id` (same-tenant **and same-client** plan — three-column FK, §4),
 `module` (open set), `automation_level` (§6), `status` CHECK
-`todo|in_progress|in_review|approved|published|reverted` default `todo`,
-`assigned_to` (same-tenant user, nullable), `payload jsonb` default `{}` — payload
-conventions are per-module and published by each module owner at 1.x; the data
-layer stores them opaquely. Hot indexes: `(tenant_id, plan_id, status)`,
-`(tenant_id, client_id, status)`, partial on `assigned_to`.
+`todo|in_progress|in_review|approved|published|reverted|done` default `todo`
+(`done` *(0013)* is legal ONLY on `automation_level='human_only'` — CHECK
+`tasks_done_is_human_only`; the honest completion word, never a pipeline
+terminal — §13.7), `assigned_to` (same-tenant user, nullable), `payload jsonb`
+default `{}` — payload conventions are per-module and published by each module
+owner at 1.x; the data layer stores them opaquely. Hot indexes:
+`(tenant_id, plan_id, status)`, `(tenant_id, client_id, status)`, partial on
+`assigned_to`.
 
 ### audits
 Immutable captures: `score jsonb`, `fixes jsonb` (aeo-audit skill output).
@@ -309,9 +312,11 @@ vertical, overridable per client.
 Enforcement teeth in the schema: the narrowed `site_changes` automation-level
 CHECK + `site_changes_requires_approval` (**every** site change needs a
 recorded `approved_by` to leave `previewed` — no automation-level exemption
-exists) + the `content_items` review-verdict gate (0009-strengthened — §13.1).
-A fully autonomous on-page publish or unreviewed content publish cannot be
-represented in this schema.
+exists) + the `content_items` review-verdict gate (0009-strengthened — §13.1) +
+the `tasks` done⇒human_only coupling (0013 — the honest completion word can only
+land on genuine human work, never on a machine/pipeline task; §13.7). A fully
+autonomous on-page publish or unreviewed content publish cannot be represented
+in this schema.
 
 > **Note (SUPERSEDED 2026-07-10 — migration 0009, §13.1):** the
 > `content_items` review gate originally enforced verdict **presence** only
@@ -775,8 +780,74 @@ binding condition). Publish is NOT wired (§13.1 + §13.6).
   the competitors/properties validators; M19 "In revision" label copy → next
   Design Review.
 
+### 13.7 tasks status lifecycle (migration 0013)
+
+Authorized by the 2026-07-10 "PLAN TAB DEEP BUILD SHIPPED" gate record
+(ORCHESTRATOR RULINGS 1 + 2, `docs/BUILD-STATE.md`). Governed post-freeze change
+(CLAUDE.md rule 1); frozen migrations 0001–0012 untouched. doc 03 §3/§6.
+
+- **`done` joins the status enum** — the ONLY change to the value set:
+  `todo | in_progress | in_review | approved | published | reverted | done`. It
+  is an honest, human-owned completion word (a plain "I finished this task"),
+  NOT a pipeline terminal: `approved`/`published` stay the load-bearing AUDIT
+  vocabulary (the content-review + change-management terminals, rules 3–5), and
+  `done` must never overload them.
+- **`done` is legal ONLY on `automation_level='human_only'`** — narrow
+  structural CHECK `tasks_done_is_human_only`
+  (`status <> 'done' OR automation_level = 'human_only'`). A machine-owned
+  (`auto`) or pipeline (`ai_draft_human_approve`) task can never be `done`.
+  Two-valued/fail-closed (both columns NOT NULL, so the CHECK is never NULL).
+  Enforced on the INSERT **and** UPDATE routes, below RLS — QA blessing tests
+  (`supabase/tests/isolation/structural-gates.test.ts`), the F1
+  automation-CHECK precedent.
+- **NO transition trigger** (contrast `runs_transition_guard`, 0012 — the
+  Orchestrator ruled the FSM treatment unwarranted here). `done` is REVERSIBLE
+  work-tracking (done ⇄ in_progress, "Reopen"), not a verdict; edge legality is
+  app-logic (`src/lib/plans/task-status.ts` — ONE edge table drives both the UI
+  and the `updateTaskStatus` CAS). The migration constrains only the value SET
+  and the done⇒human_only coupling — exactly what must hold regardless of app
+  code.
+
+**The legal MANUAL transition table** (pure engine
+`src/lib/plans/task-status.ts`, re-enforced by the `updateTaskStatus` CAS; the DB
+constrains the value set + the done⇒human_only coupling, never the edges):
+
+| From | To | Levels | Control | Notes |
+|---|---|---|---|---|
+| `todo` | `in_progress` | human_only, ai_draft_human_approve | "Start task" | gate-free work-tracking |
+| `in_progress` | `todo` | human_only, ai_draft_human_approve | "Move back to to-do" | reversible |
+| `in_progress` | `done` | **human_only ONLY** | "Mark done" | completion; never a review approval |
+| `done` | `in_progress` | **human_only ONLY** | "Reopen" | reversible — `done` is not a terminal |
+
+`auto` tasks offer NO manual control. `in_review | approved | published |
+reverted` are NEVER a manual target for any level — pipeline/gate words are never
+a free-form task write, refused pre-DB by `isLegalManualTarget`. **ai_draft
+work-tracking is bounded** (ruling 2): no pipeline writer moves these tasks off
+`todo` yet, so hand-tracking `todo ⇄ in_progress` is honest; `done` stays
+structurally excluded; and a recorded **wiring-time condition** stands — when the
+pipeline→task writer lands, its gate must define how this manual state reconciles
+with the pipeline's own status writes. The `updateTaskStatus` CAS re-pins
+`automation_level IN (levels)` + `status IN (sources)` per target; the level union
+for the `in_progress` target is sound because `done` is human_only-only in the DB
+(an ai_draft row can never occupy the `done` source), with the 0013 CHECK the
+authoritative backstop.
+
 ## Changelog
 
+- **1.4.0 — 2026-07-10 — tasks `done` status (migration 0013) — governed
+  post-freeze change (Orchestrator ruling; gates: Code Review + QA isolation
+  blessing tests + this contract sync).** `done` joins the tasks status enum
+  (the ONLY value-set change) fenced by `tasks_done_is_human_only`
+  (`status <> 'done' OR automation_level = 'human_only'`) so the honest
+  completion word can never bypass the approved/published pipeline terminals; NO
+  transition trigger (reversible work-tracking, ruled). The manual action
+  (`updateTaskStatus`, `src/lib/plans/task-status.ts`) extends: `human_only`
+  gains `in_progress ⇄ done`; `ai_draft_human_approve` gains `todo ⇄ in_progress`
+  (bounded work-tracking, recorded pipeline-reconcile condition); `auto`
+  immovable. New §13.7 (value-set change + the coupling CHECK + the manual
+  transition table); `### tasks` synced; `TASK_STATUSES` mirror + the plan/
+  dashboard status labels gained `done`. Isolation 536 (530 + 6 blessing tests);
+  unit 2793. Frozen migrations 0001–0012 untouched.
 - **1.3.0 — 2026-07-10 — Governed post-freeze schema batch (migrations
   0009–0011 + write-path contracts) — SIGNED OFF (Orchestrator + Code Review
   PASS + QA PASS 468/468).** New §13 (the binding contract for the batch);
