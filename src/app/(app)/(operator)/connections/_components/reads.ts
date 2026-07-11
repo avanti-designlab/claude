@@ -9,14 +9,12 @@ import "server-only";
  */
 
 import { tryCreateClient } from "../../../_components/reads";
-import type { ClientStatus } from "@/lib/types/db";
-import type { Vertical } from "@/lib/types/playbook";
 
+/** Exactly what the pages render — id (routing) + name (identity). Widen only
+ *  with a consumer (e.g. a status pill on the list rows at wiring time). */
 export interface ConnectionsClientRow {
   id: string;
   name: string;
-  vertical: Vertical;
-  status: ClientStatus;
 }
 
 export type ConnectionsClientList =
@@ -31,7 +29,7 @@ export async function loadConnectionsClientList(): Promise<ConnectionsClientList
   try {
     const { data, error } = await supabase
       .from("clients")
-      .select("id, name, vertical, status")
+      .select("id, name")
       .order("created_at", { ascending: false });
     if (error || !data) return { status: "read_failed" };
     return { status: "ok", rows: data as ConnectionsClientRow[] };
@@ -56,7 +54,7 @@ export async function loadConnectionsClientHeader(
   try {
     const { data, error } = await supabase
       .from("clients")
-      .select("id, name, vertical, status")
+      .select("id, name")
       .eq("id", clientId)
       .maybeSingle();
     if (error) return { status: "read_failed" };

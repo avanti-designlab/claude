@@ -9,6 +9,7 @@ import {
 import { Entrance } from "@/components/moments";
 import {
   EmptyState,
+  FailedState,
   PageContainer,
   PageHeader,
   PanelCard,
@@ -26,21 +27,21 @@ import { loadConnectionsClientList } from "./_components/reads";
 export const metadata: Metadata = {
   title: "Connections — AEO/GEO + Brand Production OS",
   description:
-    "Which external services are connected — the platform's own, and each client's.",
+    "Which external services are connected — the platform’s own, and each client’s.",
 };
 
 /**
- * Connections (global) — restructured per the Orchestrator's scope ruling
+ * Connections (global) — restructured per the Orchestrator’s scope ruling
  * (2026-07-11, operator-directed: "certain connectors are one-time for the
  * whole app; others need to be installed per client"). TWO clearly-labeled
  * halves, one shared catalog (./catalog.ts):
  *
- *  - PLATFORM CONNECTIONS — connect once, powers every client (the agency's
+ *  - PLATFORM CONNECTIONS — connect once, powers every client (the agency’s
  *    own AI/vendor subscriptions).
- *  - CLIENT CONNECTIONS — set up per client (each client's own GA4, Search
+ *  - CLIENT CONNECTIONS — set up per client (each client’s own GA4, Search
  *    Console, call tracking, Business Profile, review profiles, social
  *    channels, and website), with the RLS-scoped client list routing to each
- *    client's own /connections/[clientId] page. The website type folds in
+ *    client’s own /connections/[clientId] page. The website type folds in
  *    here (registration is live on Properties; the row says so).
  *
  * ALL PRIOR HONESTY RULES CARRY UNCHANGED: nothing is wired, no vendor-config
@@ -49,13 +50,17 @@ export const metadata: Metadata = {
  * this page is the client list (RLS-scoped); its failure renders as a read
  * failure, never as "no clients".
  *
- * GUARD MECHANIC (Code Review, 2026-07-10 — still binding): in any
- * env-provisioned build this route renders DYNAMIC because the (app) layout's
- * session read touches cookies(); the env-less build bakes a static 307 →
- * /login. Operator confinement depends on the (app) layout session read AND
- * this group's guardOperatorSurface() staying in the layout chain — a refactor
- * moving either (or adding `revalidate`/static hints) must re-verify. The same
- * applies to the per-client sub-route.
+ * GUARD MECHANIC (re-verified by Code Review 2026-07-11 — this slice CHANGED
+ * it): this route now renders ƒ DYNAMIC in EVERY build config, env-less
+ * included, because the page's own client-list read touches cookies()
+ * (tryCreateClient → createClient() reads them before the env check throws).
+ * The pre-slice mechanic — an env-less static 307 → /login baked at build
+ * time — no longer applies here (it still does on read-less operator pages
+ * like /measurement). Confinement is request-time and fail-closed: the (app)
+ * layout's verified-session read redirects a null session to /login, and this
+ * group's guardOperatorSurface() confines roles. A refactor moving either out
+ * of the layout chain (or adding `revalidate`/static hints here) must
+ * re-verify. The same applies to the per-client sub-route.
  */
 
 type ConnectionStatus = "not_connected";
@@ -118,7 +123,7 @@ function NotConnectedCell() {
 
 function ClientTypeRow({ connector, first }: { connector: ClientConnector; first: boolean }) {
   // The website type is the one client connector with a live half today:
-  // registration ships on each client's Properties panel.
+  // registration ships on each client’s Properties panel.
   const isWebsite = connector.key === WEBSITE_CONNECTOR_KEY;
   return (
     <PortRow
@@ -151,7 +156,7 @@ export default async function ConnectionsPage() {
         <PageHeader
           eyebrow="Workspace"
           title="Connections"
-          description="Two kinds of connections power the platform: the agency's own services, connected once — and each client's own accounts, set up per client."
+          description="Two kinds of connections power the platform: the agency’s own services, connected once — and each client’s own accounts, set up per client."
         />
       </Entrance>
 
@@ -168,7 +173,7 @@ export default async function ConnectionsPage() {
       <Entrance step={2}>
         <PanelCard
           title="Platform connections"
-          description="Connect once — these power every client. The agency's own AI and data subscriptions."
+          description="Connect once — these power every client. The agency’s own AI and data subscriptions."
         >
           <ul className="flex flex-col">
             {PLATFORM_CONNECTORS.map((port, i) => (
@@ -201,7 +206,7 @@ export default async function ConnectionsPage() {
       <Entrance step={4}>
         <PanelCard
           title="Set up by client"
-          description="Each client's own connections home — their status in one place"
+          description="Each client’s own connections home — their status in one place"
         >
           {clients.status === "env_unset" ? (
             <EmptyState
@@ -210,11 +215,9 @@ export default async function ConnectionsPage() {
               description="The client list lives in the connected workspace. Once the workspace database is wired up, your clients appear here with their own connections pages."
             />
           ) : clients.status === "read_failed" ? (
-            // A read blip must never render as "no clients yet".
-            <p className="px-1 py-2 text-sm text-muted">
-              We couldn&rsquo;t load your client list just now. This is a
-              temporary read issue — refresh to try again.
-            </p>
+            // A read blip must never render as "no clients yet" — the shared
+            // failed-state primitive, same as every operator surface.
+            <FailedState subject="your client list" />
           ) : clients.rows.length === 0 ? (
             <EmptyState
               icon={UsersRoundIcon}

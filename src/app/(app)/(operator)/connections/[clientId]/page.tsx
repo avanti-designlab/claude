@@ -24,26 +24,28 @@ import { loadConnectionsClientHeader } from "../_components/reads";
 export const metadata: Metadata = {
   title: "Client connections — AEO/GEO + Brand Production OS",
   description:
-    "One client's own connections — their analytics, profiles, channels, and website.",
+    "One client’s own connections — their analytics, profiles, channels, and website.",
 };
 
 /**
- * One client's connections home (Orchestrator scope ruling, 2026-07-11 —
+ * One client’s connections home (Orchestrator scope ruling, 2026-07-11 —
  * operator-directed: "we need to have those connectors available for each
  * client since each have their own systems"). The per-client sub-route pattern
- * (brand-assets precedent): client-scoped by the URL's clientId, RLS the real
- * boundary below, NOT a workspace tab — the workspace tab set is
- * viewer-visible, and this surface becomes the credential/OAuth home at wiring
- * time, so it lives under the operator-guarded connections route and survives
- * that transition in place.
+ * (brand-assets precedent): client-scoped by the URL’s clientId, RLS the real
+ * boundary below, NOT a workspace tab — the tab-grouping decision for an 11th
+ * tab is a recorded pending item, the bar already scrolls on mobile, and this
+ * surface becomes the credential/OAuth home at wiring time, so it lives under
+ * the operator-guarded connections route and survives that transition in
+ * place.
  *
  * TODAY this is status-only and STRUCTURAL: no vendor-config storage exists,
  * so every connector reads "Not set up yet" by design — no credential forms,
- * no fake connect buttons. The one live half is the client's website:
+ * no fake connect buttons. The one live half is the client’s website:
  * registration ships on their Properties panel, and that row routes there.
  * At wiring time each row gains its real connect affordance HERE, behind the
- * same guardOperatorSurface() chain (the global page's guard-mechanic note
- * applies to this route too).
+ * same guardOperatorSurface() chain (the global page’s guard-mechanic note —
+ * ƒ dynamic in every config, request-time fail-closed — applies to this route
+ * too: the header read here touches cookies() the same way).
  */
 export default async function ClientConnectionsPage({
   params,
@@ -61,7 +63,7 @@ export default async function ClientConnectionsPage({
       <PageHeader
         eyebrow="Connections · Client"
         title={title}
-        description="This client's own accounts — their analytics, profiles, channels, and website. Nothing here is shared with another client."
+        description="This client’s own accounts — their analytics, profiles, channels, and website. Nothing here is shared with another client."
         actions={
           <Button asChild variant="ghost" size="sm">
             <Link href="/connections">
@@ -81,7 +83,7 @@ export default async function ClientConnectionsPage({
           <EmptyState
             icon={CloudOffIcon}
             title="Workspace not connected"
-            description="Client records live in the connected workspace. Once the workspace database is wired up, this client's connections load here."
+            description="Client records live in the connected workspace. Once the workspace database is wired up, this client’s connections load here."
           />
         </Entrance>
       </PageContainer>
@@ -108,7 +110,7 @@ export default async function ClientConnectionsPage({
       <Entrance step={1}>
         <PanelCard
           title="Their connections"
-          description="Each of these is authorized with this client's own accounts when vendor wiring goes live."
+          description="Each of these is authorized with this client’s own accounts when vendor wiring goes live."
         >
           <ul className="flex flex-col">
             {CLIENT_CONNECTORS.map((connector, i) => (
