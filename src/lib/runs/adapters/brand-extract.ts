@@ -41,10 +41,10 @@ import { checkEgressHost, type ResolvePort } from "@/lib/intelligence/crawl";
 import {
   extractBrandCandidates,
   toBrandKitDraft,
+  tokenize,
   type BrandKitDraft,
   type ExtractedBrandCandidates,
 } from "@/lib/production/brand-extract";
-import { tokenize } from "@/lib/production/brand-extract/html-scan";
 import type { FetchPort } from "@/lib/write-methods/shared";
 import {
   BRAND_EXTRACT_AGGREGATE_BUDGET_MS,
@@ -178,6 +178,32 @@ function cappedCandidateUrls(urls: ReadonlyArray<string | null>, max: number): s
   return out;
 }
 
+/**
+ * Postgres jsonb cannot store \u0000 — a NUL smuggled through a hostile page's
+ * markup into any candidate string would make the draft insert fail on every
+ * retry (fail-closed but wasteful). Strip it from every string in the draft,
+ * recursively, right before persist. Nothing legitimate contains NUL.
+ *
+ * Defense-in-depth: today every draft string is already NUL-free by construction
+ * (the font grammar rejects control chars, URL parsing percent-encodes NUL, and
+ * notes are fixed engine strings) — this guards FUTURE draft fields. Exported
+ * for its direct test pin only.
+ */
+export function stripNulDeep<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.replaceAll("\u0000", "") as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map(stripNulDeep) as T;
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, stripNulDeep(v)])
+    ) as T;
+  }
+  return value;
+}
+
 function buildPersistedDraft(
   candidates: ExtractedBrandCandidates,
   stylesheetsFetched: number,
@@ -192,7 +218,7 @@ function buildPersistedDraft(
       `${stylesheetsFetched} stylesheet(s) were read; ${stylesheetsSkipped} could not be fetched (unreachable, non-public, or over the size limit) and were skipped — the proposed palette may be partial.`
     );
   }
-  return {
+  return stripNulDeep({
     ...base,
     notes,
     logoCandidates: cappedCandidateUrls(
@@ -203,7 +229,7 @@ function buildPersistedDraft(
       candidates.imagery.map((i) => i.url),
       BRAND_EXTRACT_MAX_IMAGERY_CANDIDATES
     ),
-  };
+  });
 }
 
 /**

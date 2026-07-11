@@ -18,7 +18,7 @@ import type { RunRow } from "@/lib/types/db";
 import type { FetchPort, FetchPortInit, FetchPortResponse } from "@/lib/write-methods/shared";
 import type { AdapterContext } from "../execute";
 import { RunExecutionError } from "../outcome";
-import { brandExtractAdapter } from "./brand-extract";
+import { brandExtractAdapter, stripNulDeep } from "./brand-extract";
 
 const HOME = "https://acme.example/";
 const HOME_HTML =
@@ -307,5 +307,43 @@ describe("brandExtractAdapter — closed-enum failure mapping", () => {
     ).catch((e) => e);
     expect(err).toBeInstanceOf(RunExecutionError);
     expect((err as RunExecutionError).errorCode).toBe("engine_error");
+  });
+});
+
+describe("persisted-draft hygiene — NUL strip (jsonb cannot store \u0000)", () => {
+  it("stripNulDeep removes NUL from every string, recursively, preserving shape", () => {
+    const dirty = {
+      name: "Ac\u0000me",
+      list: ["a\u0000", "b", ["nested\u0000"]],
+      deep: { note: "x\u0000y", count: 3, on: true, none: null },
+      clean: "untouched",
+    };
+    expect(stripNulDeep(dirty)).toEqual({
+      name: "Acme",
+      list: ["a", "b", ["nested"]],
+      deep: { note: "xy", count: 3, on: true, none: null },
+      clean: "untouched",
+    });
+  });
+
+  it("the persisted draft passes through the strip (no NUL survives to the insert)", async () => {
+    // No engine path can produce a NUL today (font grammar rejects control chars,
+    // URLs percent-encode NUL, notes are fixed strings) — this pins the WIRING:
+    // whatever buildPersistedDraft emits went through stripNulDeep.
+    const calls: FetchCall[] = [];
+    const port = scriptedPort(
+      {
+        [HOME]: resp(200, HOME_HTML),
+        "https://acme.example/style.css": resp(200, STYLE_CSS),
+        "https://acme.example/about": resp(404, ""),
+      },
+      calls
+    );
+    const { supabase, captured } = fakeSupabase();
+    await brandExtractAdapter(
+      ctxFor({ supabase, fetchPort: port, resolvePort: scriptedResolve() })
+    );
+    const row = captured.inserts[0].row as Record<string, unknown>;
+    expect(JSON.stringify(row.draft)).not.toContain("\u0000");
   });
 });

@@ -14,6 +14,18 @@
 
 export { extractBrandCandidates, toBrandKitDraft } from "./extract";
 
+// The HTML tokenizer is part of the public surface: the fetch adapter reuses it
+// to find <link rel=stylesheet> hrefs in the ONE page it scans for stylesheets,
+// so stylesheet discovery and the engine's own scan can never disagree on how
+// HTML parses. Pure, like everything else exported here.
+export { tokenize } from "./html-scan";
+export type {
+  HtmlCloseToken,
+  HtmlOpenToken,
+  HtmlTextToken,
+  HtmlToken,
+} from "./html-scan";
+
 export type {
   BrandKitDraft,
   ColorCandidate,
