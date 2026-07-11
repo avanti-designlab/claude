@@ -74,10 +74,16 @@ function boundedString(value: unknown, max: number): string | null {
 function boundedStringList(value: unknown, maxItems: number, maxChars: number): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
+  // Deduped: the panel keys list items by content, so a hostile draft with
+  // duplicate entries must not produce duplicate React keys (the adapter
+  // dedupes on the legitimate path; this boundary re-guarantees it).
+  const seen = new Set<string>();
   for (const item of value) {
     if (out.length >= maxItems) break;
     const s = boundedString(item, maxChars);
-    if (s !== null) out.push(s);
+    if (s === null || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
   }
   return out;
 }

@@ -124,6 +124,34 @@ describe("parseStoredExtractDraft — hostile input (throw-free, absent ≠ fabr
     expect(view.notes).toHaveLength(24);
   });
 
+  it("drops an over-length font stack (512) and survives hostile typography values", () => {
+    const view = parseStoredExtractDraft(
+      {
+        typography: {
+          display: "F".repeat(600), // > 512 — dropped
+          body: ["Georgia"], // wrong type — dropped
+          mono: { stack: "Menlo" }, // wrong type — dropped
+        },
+      },
+      ID,
+      AT
+    );
+    expect(view.typography).toEqual({});
+  });
+
+  it("dedupes list entries (duplicate keys must never reach the panel)", () => {
+    const view = parseStoredExtractDraft(
+      {
+        logoCandidates: ["https://a.example/l.png", "https://a.example/l.png"],
+        notes: ["same note", "same note", "other"],
+      },
+      ID,
+      AT
+    );
+    expect(view.logoCandidates).toEqual(["https://a.example/l.png"]);
+    expect(view.notes).toEqual(["same note", "other"]);
+  });
+
   it("covers every offered color key (the form's key set — drift breaks this pin)", () => {
     const all: Record<string, string> = {};
     for (const k of DRAFT_COLOR_KEYS) all[k] = "#123456";

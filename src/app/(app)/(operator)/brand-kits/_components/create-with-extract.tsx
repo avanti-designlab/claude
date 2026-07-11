@@ -26,14 +26,19 @@ export function CreateKitWithExtract({
   clientName: string;
   initialExtractState: BrandExtractState;
 }) {
-  const [prefill, setPrefill] = React.useState<ExtractFormPrefill | null>(null);
+  // Every CONFIRMED apply gets its own generation, so re-applying the same
+  // draft (e.g. after changing the logo pick, or to reset edits back to the
+  // proposal) is a REAL remount — the confirm's "anything typed is replaced"
+  // promise is always true, never a silent no-op (Design M2).
+  const [applied, setApplied] = React.useState<{
+    generation: number;
+    prefill: ExtractFormPrefill;
+  } | null>(null);
   const formRegionRef = React.useRef<HTMLDivElement>(null);
-  // Focus the form region only when a prefill is APPLIED (not on mount).
-  const appliedRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (appliedRef.current) formRegionRef.current?.focus();
-  }, [prefill]);
+    if (applied) formRegionRef.current?.focus();
+  }, [applied]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -41,18 +46,20 @@ export function CreateKitWithExtract({
         clientId={clientId}
         clientName={clientName}
         initialState={initialExtractState}
-        onUse={(p) => {
-          appliedRef.current = true;
-          setPrefill(p);
-        }}
+        onUse={(p) =>
+          setApplied((prev) => ({
+            generation: (prev?.generation ?? 0) + 1,
+            prefill: p,
+          }))
+        }
       />
       <div ref={formRegionRef} tabIndex={-1} className="outline-none">
         <BrandKitForm
-          key={prefill?.draftId ?? "blank"}
+          key={applied ? `${applied.prefill.draftId}:${applied.generation}` : "blank"}
           mode="create"
           clientId={clientId}
           clientName={clientName}
-          extractPrefill={prefill ?? undefined}
+          extractPrefill={applied?.prefill}
         />
       </div>
     </div>

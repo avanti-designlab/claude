@@ -4,8 +4,8 @@
  * Paste-URL brand pull — the operator flow over the LANDED brand_extract queue
  * kind. Paste the client's website address → the background processor fetches
  * it through the egress-guarded, socket-pinned crawler seam → the pure engine
- * proposes a draft kit → THIS panel shows the proposal for review. "Use in the
- * form" only PREFILLS the ingest form below (via the wrapper remounting it) —
+ * proposes a draft kit → THIS panel shows the proposal for review. "Fill the
+ * form below" only PREFILLS the ingest form (via the wrapper remounting it) —
  * the proposed values pass through the same preview → WCAG contrast gate →
  * explicit confirm lock as hand-typed input. Nothing is pre-approved, nothing
  * auto-locks (AI drafts, humans approve).
@@ -22,6 +22,9 @@
  *    normalized hex; anything else renders as text, never as a style value).
  *  - Auto-refresh runs ONLY while a run is queued/running, pauses when the tab
  *    is hidden, and stops at terminal (the audit-runs cadence).
+ *  - PER-PROPOSAL STATE LIVES IN THE PROPOSAL: `DraftReview` is keyed by
+ *    draftId and owns the logo choice + both inline confirms, so nothing chosen
+ *    on a dismissed proposal can ever leak into a newer one (Design M1).
  *
  * Utilitarian operator surface (doc 06 §4/§5): no glow, no signature motion.
  */
@@ -124,16 +127,20 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
   const [url, setUrl] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
-  // Chosen logo for the prefill (radio) — keyed per draft below.
-  const [chosenLogo, setChosenLogo] = React.useState<string | null | undefined>(undefined);
-  const [confirmUse, setConfirmUse] = React.useState(false);
-  const [confirmDismiss, setConfirmDismiss] = React.useState(false);
 
   const run = state.ok ? state.run : null;
   const draft = state.ok ? state.draft : null;
   const watching = run !== null && (run.status === "queued" || run.status === "running");
 
   /* ---- state refresh (manual + gentle auto while queued/running) ---- */
+
+  // Mirror of `state` for transition detection OUTSIDE the setState updater —
+  // updaters must stay pure (StrictMode double-invokes them), so announcements
+  // can never live inside one.
+  const stateRef = React.useRef(state);
+  React.useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const refresh = React.useCallback(async () => {
     let next: BrandExtractState;
@@ -142,23 +149,24 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
     } catch {
       return; // transient — keep the last honest state rather than flicker
     }
-    setState((prev) => {
-      // Announce the arrival of a proposal / a terminal failure once.
-      const prevRun = prev.ok ? prev.run : null;
-      const prevDraft = prev.ok ? prev.draft : null;
-      if (next.ok) {
-        if (next.draft && (!prevDraft || prevDraft.draftId !== next.draft.draftId)) {
-          announce("A proposed brand kit is ready to review.");
-        } else if (
-          next.run &&
-          next.run.status === "failed" &&
-          (!prevRun || prevRun.status !== "failed")
-        ) {
-          announce("The brand pull failed.");
-        }
+    // Announce the arrival of a proposal / a terminal failure once, comparing
+    // against the mirrored previous state (pure updater; no announce replay).
+    const prev = stateRef.current;
+    const prevRun = prev.ok ? prev.run : null;
+    const prevDraft = prev.ok ? prev.draft : null;
+    if (next.ok) {
+      if (next.draft && (!prevDraft || prevDraft.draftId !== next.draft.draftId)) {
+        announce("A proposed brand kit is ready to review.");
+      } else if (
+        next.run &&
+        next.run.status === "failed" &&
+        (!prevRun || prevRun.status !== "failed")
+      ) {
+        announce("The brand pull failed.");
       }
-      return next;
-    });
+    }
+    stateRef.current = next;
+    setState(next);
   }, [clientId]);
 
   React.useEffect(() => {
@@ -173,6 +181,19 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
       document.removeEventListener("visibilitychange", tick);
     };
   }, [watching, refresh]);
+
+  /* ---- keyboard focus continuity after a confirmed dismiss ----
+     The proposal (with focus inside it) unmounts; the paste form appears.
+     Land focus on the address input — the next real action. The announcer
+     covers screen readers; this covers keyboard users (Design m6). */
+  const pasteInputRef = React.useRef<HTMLInputElement>(null);
+  const wantPasteFocus = React.useRef(false);
+  React.useEffect(() => {
+    if (wantPasteFocus.current && !draft && !watching) {
+      wantPasteFocus.current = false;
+      pasteInputRef.current?.focus();
+    }
+  });
 
   /* ---- start a pull ---- */
 
@@ -196,34 +217,33 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
 
   /* ---- dismiss the proposal ---- */
 
-  const dismiss = async () => {
-    if (busy || !draft) return;
+  const dismiss = async (draftId: string) => {
+    if (busy) return;
     setBusy(true);
     setNotice(null);
     try {
-      const res = await discardBrandExtractDraft({ clientId, draftId: draft.draftId });
+      const res = await discardBrandExtractDraft({ clientId, draftId });
       if (!res.ok) setNotice(res.error);
-      else announce("Proposed kit dismissed.");
+      else {
+        announce("Proposed kit dismissed.");
+        wantPasteFocus.current = true;
+      }
     } catch {
       setNotice(SEAM_UNREACHABLE);
     }
-    setConfirmDismiss(false);
     await refresh();
     setBusy(false);
   };
 
   /* ---- hand the reviewed values to the form ---- */
 
-  const useInForm = () => {
-    if (!draft) return;
-    const logo = chosenLogo === undefined ? draft.logoUrl : chosenLogo;
+  const applyToForm = (d: ExtractDraftView, chosenLogo: string | null) => {
     onUse({
-      draftId: draft.draftId,
-      colors: draft.colors,
-      typography: draft.typography,
-      logoUrl: logo,
+      draftId: d.draftId,
+      colors: d.colors,
+      typography: d.typography,
+      logoUrl: chosenLogo,
     });
-    setConfirmUse(false);
     announce("Form filled with the proposed values. Review and adjust below.");
   };
 
@@ -242,25 +262,37 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
             Pull the brand from their website
           </h2>
         </div>
-        {watching ? <StatusPill tone="accent">Reading the site</StatusPill> : null}
-        {!watching && draft ? <StatusPill tone="warm">Proposal ready</StatusPill> : null}
+        {/* The pill never overstates: queued is "Queued", not "Reading". */}
+        {watching ? (
+          <StatusPill tone="accent">
+            {run.status === "queued" ? "Queued" : "Reading the site"}
+          </StatusPill>
+        ) : draft ? (
+          <StatusPill tone="warm">Proposal ready</StatusPill>
+        ) : null}
       </div>
 
       {!state.ok ? (
-        <p className="text-sm text-muted">{state.error}</p>
+        // A read blip mid-pull must not dead-end the panel: the honest error
+        // plus a retry — one click resumes the watch when the read recovers.
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted">{state.error}</p>
+          <div>
+            <Button type="button" variant="outline" size="sm" onClick={refresh}>
+              <RotateCwIcon aria-hidden /> Check again
+            </Button>
+          </div>
+        </div>
       ) : draft ? (
+        // Keyed by draftId: the logo choice + confirm states are THIS proposal's
+        // and reset structurally when a newer proposal arrives (Design M1).
         <DraftReview
+          key={draft.draftId}
           draft={draft}
           run={run}
           busy={busy}
-          chosenLogo={chosenLogo === undefined ? draft.logoUrl : chosenLogo}
-          onChooseLogo={setChosenLogo}
-          confirmUse={confirmUse}
-          onConfirmUse={setConfirmUse}
-          confirmDismiss={confirmDismiss}
-          onConfirmDismiss={setConfirmDismiss}
-          onUse={useInForm}
-          onDismiss={dismiss}
+          onUse={(chosenLogo) => applyToForm(draft, chosenLogo)}
+          onDismiss={() => dismiss(draft.draftId)}
         />
       ) : watching && run ? (
         <WatchingState run={run} onRefresh={refresh} />
@@ -272,6 +304,7 @@ export function ExtractPanel({ clientId, clientName, initialState, onUse }: Extr
           busy={busy}
           onStart={start}
           failedRun={run !== null && run.status === "failed" ? run : null}
+          inputRef={pasteInputRef}
         />
       )}
 
@@ -295,6 +328,7 @@ function PasteForm({
   busy,
   onStart,
   failedRun,
+  inputRef,
 }: {
   clientName: string;
   url: string;
@@ -302,19 +336,26 @@ function PasteForm({
   busy: boolean;
   onStart: () => void;
   failedRun: ExtractRunView | null;
+  inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs leading-5 text-muted">
         Paste {clientName}&rsquo;s website address and the platform reads it —
         colors, fonts, logo and imagery leads — and proposes a starting kit. You
-        review everything before anything is saved; the accessibility check and
-        the lock step stay exactly the same.
+        review everything first: nothing joins the kit until it passes the
+        form&rsquo;s accessibility check and you lock it yourself.
       </p>
       {failedRun ? (
         <p className={"text-xs leading-5 " + NEGATIVE_TEXT_CLASS}>
-          The last pull{failedRun.inputUrl ? ` of ${failedRun.inputUrl}` : ""} didn&rsquo;t
-          make it: {errorCodeCopy(failedRun.errorCode)}
+          The last pull
+          {failedRun.inputUrl ? (
+            <>
+              {" of "}
+              <span className="font-mono break-all">{failedRun.inputUrl}</span>
+            </>
+          ) : null}{" "}
+          didn&rsquo;t make it: {errorCodeCopy(failedRun.errorCode)}
         </p>
       ) : null}
       <div className="flex flex-col gap-1.5">
@@ -324,6 +365,7 @@ function PasteForm({
         <div className="flex flex-wrap items-center gap-2">
           <Input
             id="brand-extract-url"
+            ref={inputRef}
             value={url}
             onChange={(e) => onUrl(e.target.value)}
             placeholder="https://theclient.com"
@@ -384,31 +426,30 @@ function WatchingState({
   );
 }
 
+/**
+ * One proposal's review card. MUST be rendered with key=draftId — the logo
+ * choice and both inline confirms live here so they die with the proposal.
+ */
 function DraftReview({
   draft,
   run,
   busy,
-  chosenLogo,
-  onChooseLogo,
-  confirmUse,
-  onConfirmUse,
-  confirmDismiss,
-  onConfirmDismiss,
   onUse,
   onDismiss,
 }: {
   draft: ExtractDraftView;
   run: ExtractRunView | null;
   busy: boolean;
-  chosenLogo: string | null;
-  onChooseLogo: (v: string | null) => void;
-  confirmUse: boolean;
-  onConfirmUse: (v: boolean) => void;
-  confirmDismiss: boolean;
-  onConfirmDismiss: (v: boolean) => void;
-  onUse: () => void;
+  onUse: (chosenLogo: string | null) => void;
   onDismiss: () => void;
 }) {
+  const [chosenLogo, setChosenLogo] = React.useState<string | null>(draft.logoUrl);
+  const [confirmUse, setConfirmUse] = React.useState(false);
+  const [confirmDismiss, setConfirmDismiss] = React.useState(false);
+  // Cancel returns focus to the trigger it came from (Design m6).
+  const useTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const dismissTriggerRef = React.useRef<HTMLButtonElement>(null);
+
   const colorEntries = DRAFT_COLOR_KEYS.filter((k) => draft.colors[k] !== undefined);
   const faceEntries = DRAFT_FACE_KEYS.filter((k) => draft.typography[k] !== undefined);
   // The logo choice set: the engine's top pick + alternates, deduped, order kept.
@@ -418,6 +459,16 @@ function DraftReview({
   const sourceLine =
     run && run.status === "succeeded" && run.inputUrl ? run.inputUrl : null;
 
+  const cancelUse = () => {
+    setConfirmUse(false);
+    // Focus returns after the trigger remounts — defer one frame.
+    requestAnimationFrame(() => useTriggerRef.current?.focus());
+  };
+  const cancelDismiss = () => {
+    setConfirmDismiss(false);
+    requestAnimationFrame(() => dismissTriggerRef.current?.focus());
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs leading-5 text-muted">
@@ -426,8 +477,10 @@ function DraftReview({
             {" "}from <span className="font-mono break-all">{sourceLine}</span>
           </>
         ) : null}
-        . These are suggestions read from the site — review, adjust, and nothing
-        is saved until you complete the form&rsquo;s own review and lock steps.
+        . These are suggestions read from the site — review and adjust; nothing
+        joins the kit until you complete the form&rsquo;s own review and lock
+        steps. Addresses below are shown as text only (nothing is loaded from
+        the site here) — add real files to the client&rsquo;s asset library.
       </p>
 
       {colorEntries.length > 0 ? (
@@ -477,10 +530,6 @@ function DraftReview({
           <legend className="text-xs font-medium text-ink">
             Logo — pick the address to prefill
           </legend>
-          <p className="text-[11px] leading-4 text-muted">
-            Shown as addresses only (nothing is loaded from the site here). Add
-            the real files to the client&rsquo;s asset library for production use.
-          </p>
           <div className="flex flex-col gap-1.5">
             {logoOptions.map((option) => (
               <label key={option} className="flex items-start gap-2 text-xs">
@@ -488,7 +537,7 @@ function DraftReview({
                   type="radio"
                   name="extract-logo-choice"
                   checked={chosenLogo === option}
-                  onChange={() => onChooseLogo(option)}
+                  onChange={() => setChosenLogo(option)}
                   className="mt-0.5 accent-accent"
                 />
                 <span className="font-mono break-all text-ink">{option}</span>
@@ -499,7 +548,7 @@ function DraftReview({
                 type="radio"
                 name="extract-logo-choice"
                 checked={chosenLogo === null}
-                onChange={() => onChooseLogo(null)}
+                onChange={() => setChosenLogo(null)}
                 className="mt-0.5 accent-accent"
               />
               <span className="text-muted">No logo for now</span>
@@ -542,16 +591,18 @@ function DraftReview({
               is replaced.
             </span>
             {/* Cancel takes focus (house rule: a held Enter can never confirm). */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              autoFocus
-              onClick={() => onConfirmUse(false)}
-            >
+            <Button type="button" variant="outline" size="sm" autoFocus onClick={cancelUse}>
               Cancel
             </Button>
-            <Button type="button" size="sm" disabled={busy} onClick={onUse}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setConfirmUse(false);
+                onUse(chosenLogo);
+              }}
+            >
               Fill the form
             </Button>
           </>
@@ -560,31 +611,40 @@ function DraftReview({
             <span className="text-xs text-muted">
               Dismiss this proposal? You can pull the site again any time.
             </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              autoFocus
-              onClick={() => onConfirmDismiss(false)}
-            >
+            <Button type="button" variant="outline" size="sm" autoFocus onClick={cancelDismiss}>
               Cancel
             </Button>
-            <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={onDismiss}>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              onClick={onDismiss}
+            >
               {busy ? <LoaderCircleIcon aria-hidden className="animate-spin" /> : null}
               Dismiss
             </Button>
           </>
         ) : (
           <>
-            <Button type="button" size="sm" disabled={busy} onClick={() => onConfirmUse(true)}>
-              Use in the form below
+            {/* One verb carried through: Fill the form below → Fill the form →
+                "Form filled with the proposed values." (Design m3) */}
+            <Button
+              type="button"
+              ref={useTriggerRef}
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmUse(true)}
+            >
+              Fill the form below
             </Button>
             <Button
               type="button"
+              ref={dismissTriggerRef}
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => onConfirmDismiss(true)}
+              onClick={() => setConfirmDismiss(true)}
             >
               Dismiss proposal
             </Button>
