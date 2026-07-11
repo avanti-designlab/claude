@@ -18,7 +18,8 @@ import type { RunRow } from "@/lib/types/db";
 import type { FetchPort, FetchPortInit, FetchPortResponse } from "@/lib/write-methods/shared";
 import type { AdapterContext } from "../execute";
 import { RunExecutionError } from "../outcome";
-import { brandExtractAdapter, stripNulDeep } from "./brand-extract";
+import { extractBrandCandidates } from "@/lib/production/brand-extract";
+import { brandExtractAdapter, buildPersistedDraft, stripNulDeep } from "./brand-extract";
 
 const HOME = "https://acme.example/";
 const HOME_HTML =
@@ -326,24 +327,24 @@ describe("persisted-draft hygiene — NUL strip (jsonb cannot store \u0000)", ()
     });
   });
 
-  it("the persisted draft passes through the strip (no NUL survives to the insert)", async () => {
+  it("buildPersistedDraft strips a smuggled NUL (true wiring pin — fails if the strip is unwired)", () => {
     // No engine path can produce a NUL today (font grammar rejects control chars,
-    // URLs percent-encode NUL, notes are fixed strings) — this pins the WIRING:
-    // whatever buildPersistedDraft emits went through stripNulDeep.
-    const calls: FetchCall[] = [];
-    const port = scriptedPort(
-      {
-        [HOME]: resp(200, HOME_HTML),
-        "https://acme.example/style.css": resp(200, STYLE_CSS),
-        "https://acme.example/about": resp(404, ""),
-      },
-      calls
-    );
-    const { supabase, captured } = fakeSupabase();
-    await brandExtractAdapter(
-      ctxFor({ supabase, fetchPort: port, resolvePort: scriptedResolve() })
-    );
-    const row = captured.inserts[0].row as Record<string, unknown>;
-    expect(JSON.stringify(row.draft)).not.toContain("\u0000");
+    // URLs percent-encode NUL, notes are fixed strings), so the dirty string is
+    // injected AFTER extraction — the future-field scenario the strip guards.
+    // Deleting the stripNulDeep(...) wrapper in buildPersistedDraft fails this.
+    const candidates = extractBrandCandidates({
+      html: HOME_HTML,
+      pageUrl: HOME,
+      cssBlobs: [STYLE_CSS],
+    });
+    candidates.logos.push({
+      kind: "og-image",
+      url: "https://acme.example/lo\u0000go-alt.png",
+      reason: "test-injected dirty candidate",
+    });
+    const draft = buildPersistedDraft(candidates, 1, 0);
+    expect(JSON.stringify(draft)).not.toContain("\u0000");
+    // Stripped, not dropped: the dirty candidate survives, minus the NUL.
+    expect(draft.logoCandidates).toContain("https://acme.example/logo-alt.png");
   });
 });

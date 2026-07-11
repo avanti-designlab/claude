@@ -397,4 +397,57 @@ describe("input_url is run identity (migration 0016) — the recorded brand_extr
     expect(row.status).toBe("running");
     expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
   });
+
+  /* QA pins (0016 verification gate): the guard now compares input_url on
+   * EVERY update, so every live queue edge on a brand_extract run (non-null
+   * input_url riding through unchanged) is pinned here — a future guard
+   * change that breaks heartbeat/complete/fail on non-null-input_url rows
+   * must fail THIS suite, not just a live probe. */
+
+  it("QA pin: heartbeat/progress writes still allowed on a RUNNING brand_extract run (non-null input_url rides the compare unchanged)", async () => {
+    const running = await insertBrandExtractRun({ status: "running", heartbeatAt: new Date().toISOString() });
+    const hb = await queryAs(
+      db.admin, "authenticated", writer(),
+      `update runs set heartbeat_at = now(), progress = '{"step":"fetching"}'::jsonb where id = $1 and status = 'running'`,
+      [running]
+    );
+    expect(hb.rowCount).toBe(1);
+    expect(await inputUrlOf(running)).toBe(EXTRACT_URL);
+  });
+
+  it("QA pin: holder completion (running→succeeded + result_ref) still allowed on a brand_extract run, input_url intact", async () => {
+    const running = await insertBrandExtractRun({ status: "running", heartbeatAt: new Date().toISOString() });
+    const done = await queryAs(
+      db.admin, "authenticated", writer(),
+      `update runs set status = 'succeeded', result_ref = '{"table":"brand_extract_drafts"}'::jsonb where id = $1 and status = 'running'`,
+      [running]
+    );
+    expect(done.rowCount).toBe(1);
+    expect((await runRow(running)).status).toBe("succeeded");
+    expect(await inputUrlOf(running)).toBe(EXTRACT_URL);
+  });
+
+  it("QA pin: holder failure (running→failed + error_code) still allowed on a brand_extract run, input_url intact", async () => {
+    const running = await insertBrandExtractRun({ status: "running", heartbeatAt: new Date().toISOString() });
+    const failed = await queryAs(
+      db.admin, "authenticated", writer(),
+      `update runs set status = 'failed', error_code = 'crawl_refused' where id = $1 and status = 'running'`,
+      [running]
+    );
+    expect(failed.rowCount).toBe(1);
+    const row = await runRow(running);
+    expect(row.status).toBe("failed");
+    expect(row.error_code).toBe("crawl_refused");
+    expect(await inputUrlOf(running)).toBe(EXTRACT_URL);
+  });
+
+  it("QA pin: input_url → NULL is refused as identity too (both directions of `is distinct from`, not just the 0015 coupling CHECK)", async () => {
+    const queued = await insertBrandExtractRun();
+    await expectQueryRejected(
+      db.admin, "authenticated", writer(),
+      `update runs set input_url = null where id = $1`, [queued],
+      /runs_transition_refused: row identity is immutable/
+    );
+    expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
+  });
 });

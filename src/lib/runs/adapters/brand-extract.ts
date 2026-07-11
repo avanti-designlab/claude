@@ -197,14 +197,17 @@ export function stripNulDeep<T>(value: T): T {
     return value.map(stripNulDeep) as T;
   }
   if (value !== null && typeof value === "object") {
+    // Keys are stripped too: today every draft key is an engine-defined literal,
+    // but a future map keyed by extracted content would reopen the jsonb failure.
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, stripNulDeep(v)])
+      Object.entries(value).map(([k, v]) => [stripNulDeep(k), stripNulDeep(v)])
     ) as T;
   }
   return value;
 }
 
-function buildPersistedDraft(
+/** Exported for its direct test pin (the NUL-strip wiring proof) only. */
+export function buildPersistedDraft(
   candidates: ExtractedBrandCandidates,
   stylesheetsFetched: number,
   stylesheetsSkipped: number
