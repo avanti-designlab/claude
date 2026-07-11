@@ -308,8 +308,9 @@ export function BrandKitForm(props: BrandKitFormProps) {
 
   const prefill = mode === "revise" ? props.prefill : null;
   // Create-mode prefill from a reviewed extract draft. State initializers read
-  // it ONCE at mount — the wrapper remounts the form (key=draftId) to apply a
-  // new draft, so a prefill can never silently overwrite in-progress typing.
+  // it ONCE at mount — the wrapper remounts the form (key=draftId:generation,
+  // a fresh generation per confirmed apply) to apply a draft, so a prefill can
+  // never silently overwrite in-progress typing and a re-apply is never a no-op.
   const extractPrefill = mode === "create" ? (props.extractPrefill ?? null) : null;
 
   // Colors: pre-filled from the current kit for revise; from the reviewed
