@@ -5,6 +5,7 @@ import {
   ArrowLeftIcon,
   CheckCircle2Icon,
   ExternalLinkIcon,
+  ImagesIcon,
   LockIcon,
   PaletteIcon,
   PencilIcon,
@@ -130,6 +131,11 @@ export default async function BrandKitDetailPage({
                   <ArrowLeftIcon aria-hidden /> All kits
                 </Link>
               </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/brand-kits/${clientId}/assets`}>
+                  <ImagesIcon aria-hidden /> Assets
+                </Link>
+              </Button>
               {kit ? (
                 <Button asChild size="sm">
                   <Link href={`/brand-kits/${clientId}/revise`}>
@@ -160,11 +166,18 @@ export default async function BrandKitDetailPage({
           <EmptyState
             icon={PaletteIcon}
             title="No brand kit yet"
-            description="Content and media generation stay blocked until this client has a locked brand kit. Ingest one to capture their palette, type, and voice."
+            description="Content and media generation stay blocked until this client has a locked brand kit. Ingest one to capture their palette, type, and voice. Their asset library is available now, with or without a kit."
             action={
-              <Button asChild size="sm">
-                <Link href={`/brand-kits/new/${clientId}`}>Ingest a kit</Link>
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button asChild size="sm">
+                  <Link href={`/brand-kits/new/${clientId}`}>Ingest a kit</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/brand-kits/${clientId}/assets`}>
+                    <ImagesIcon aria-hidden /> Asset library
+                  </Link>
+                </Button>
+              </div>
             }
           />
         </Entrance>

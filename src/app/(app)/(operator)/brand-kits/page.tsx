@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRightIcon, LockIcon, PaletteIcon, PlusIcon } from "lucide-react";
+import { ArrowRightIcon, ImagesIcon, LockIcon, PaletteIcon, PlusIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -118,12 +118,23 @@ async function load(): Promise<Load> {
 export default async function BrandKitsPage() {
   const result = await load();
 
-  const ingestAction = (
-    <Button asChild size="sm">
-      <Link href="/brand-kits/new">
-        <PlusIcon aria-hidden /> Ingest a kit
-      </Link>
-    </Button>
+  // Asset library is reachable even with zero kits (clients can hold assets
+  // without a locked kit); ingest is offered only once kits exist.
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <Button asChild variant="outline" size="sm">
+        <Link href="/brand-kits/assets">
+          <ImagesIcon aria-hidden /> Asset library
+        </Link>
+      </Button>
+      {result.ok && result.kits.length > 0 ? (
+        <Button asChild size="sm">
+          <Link href="/brand-kits/new">
+            <PlusIcon aria-hidden /> Ingest a kit
+          </Link>
+        </Button>
+      ) : null}
+    </div>
   );
 
   return (
@@ -133,7 +144,7 @@ export default async function BrandKitsPage() {
           eyebrow="Studios"
           title="Brand Kits"
           description="Each client's brand — palette, type, voice, and likeness — encoded once into a locked, enforceable kit so everything ships looking like the same brand."
-          actions={result.ok && result.kits.length > 0 ? ingestAction : undefined}
+          actions={headerActions}
         />
       </Entrance>
 
