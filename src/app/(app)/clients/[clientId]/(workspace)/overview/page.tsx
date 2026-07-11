@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
+  ArrowRightIcon,
   ClipboardListIcon,
   FileSearchIcon,
   MapPinnedIcon,
@@ -193,10 +194,21 @@ export default async function OverviewTab({
 
       {/* The minimal Properties surface (remediation Part B): list + add + edit
           through the landed seam only — no delete (v1 ruling), no connect
-          affordance (none exists yet; the panel says so). */}
+          affordance (none exists yet; the panel says so). The aside routes to
+          this client's own connections home (scope ruling 2026-07-11) — their
+          accounts beyond the site itself live there, per client. */}
       <PanelCard
         title="Properties"
         description="The sites we work on for this client — saved here, connected later"
+        aside={
+          <Link
+            href={`/connections/${clientId}`}
+            className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            Their connections
+            <ArrowRightIcon aria-hidden className="size-3" strokeWidth={2} />
+          </Link>
+        }
       >
         {properties.ok ? (
           <PropertiesPanel clientId={clientId} initial={properties.rows} />
