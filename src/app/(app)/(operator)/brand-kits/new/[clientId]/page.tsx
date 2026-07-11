@@ -8,8 +8,9 @@ import { Entrance } from "@/components/moments";
 import { isUuidV4 } from "@/lib/clients/validate";
 import { readLockedBrandKit } from "@/lib/production/brand-kit/actions";
 import { FailedState, PageContainer, PageHeader } from "../../../../_components/surface";
+import { getBrandExtractState } from "../../_actions/extract";
 import { loadClientHeader } from "../../_components/kit-reads";
-import { BrandKitForm } from "../../_components/brand-kit-form";
+import { CreateKitWithExtract } from "../../_components/create-with-extract";
 
 export const metadata: Metadata = {
   title: "Ingest a brand kit — AEO/GEO + Brand Production OS",
@@ -34,7 +35,10 @@ export default async function IngestFormPage({
   const client = await loadClientHeader(clientId);
   if (!client) notFound();
 
-  const existing = await readLockedBrandKit({ clientId });
+  const [existing, extractState] = await Promise.all([
+    readLockedBrandKit({ clientId }),
+    getBrandExtractState(clientId),
+  ]);
   if (!existing.ok) {
     if (existing.reason === "not_found") notFound();
     return (
@@ -68,8 +72,14 @@ export default async function IngestFormPage({
         />
       </Entrance>
       {/* No Entrance wrapper: forms stay OUT of the load choreography (doc 06
-          §4 / moments policy — dense forms appear instantly). */}
-      <BrandKitForm mode="create" clientId={clientId} clientName={client.name} />
+          §4 / moments policy — dense forms appear instantly). The extract panel
+          rides along: paste the site -> review the proposal -> prefill THIS form;
+          the preview/contrast/lock steps below are unchanged. */}
+      <CreateKitWithExtract
+        clientId={clientId}
+        clientName={client.name}
+        initialExtractState={extractState}
+      />
     </PageContainer>
   );
 }

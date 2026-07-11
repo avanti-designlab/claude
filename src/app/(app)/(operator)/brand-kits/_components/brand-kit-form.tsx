@@ -58,6 +58,7 @@ import {
   type BrandKitPreviewResult,
   type ResolvedPreviewTokens,
 } from "../_actions/preview";
+import { consumeBrandExtractDraft } from "../_actions/extract";
 import {
   createBrandKit,
   reviseBrandKit,
@@ -116,8 +117,27 @@ export interface RevisePrefill {
   logoUrl: string | null;
 }
 
+/**
+ * Create-mode prefill from a reviewed brand-extract draft (the paste-URL flow).
+ * PROPOSED values only — they land in the same editable fields and pass through
+ * the same preview → contrast gate → confirm lock as hand-typed input; nothing
+ * is pre-approved. `draftId` lets a successful create mark the draft consumed
+ * (best-effort bookkeeping, after the kit persists).
+ */
+export interface ExtractFormPrefill {
+  draftId: string;
+  colors: Partial<Record<ColorKey, string>>;
+  typography: { display?: string; body?: string; mono?: string };
+  logoUrl: string | null;
+}
+
 type BrandKitFormProps =
-  | { mode: "create"; clientId: string; clientName: string }
+  | {
+      mode: "create";
+      clientId: string;
+      clientName: string;
+      extractPrefill?: ExtractFormPrefill;
+    }
   | { mode: "revise"; clientId: string; clientName: string; prefill: RevisePrefill };
 
 type Phase = "edit" | "review" | "refused";
@@ -287,8 +307,13 @@ export function BrandKitForm(props: BrandKitFormProps) {
   const router = useRouter();
 
   const prefill = mode === "revise" ? props.prefill : null;
+  // Create-mode prefill from a reviewed extract draft. State initializers read
+  // it ONCE at mount — the wrapper remounts the form (key=draftId) to apply a
+  // new draft, so a prefill can never silently overwrite in-progress typing.
+  const extractPrefill = mode === "create" ? (props.extractPrefill ?? null) : null;
 
-  // Colors: pre-filled from the current kit for revise; blank for create.
+  // Colors: pre-filled from the current kit for revise; from the reviewed
+  // extract draft when the operator chose "use in the form"; blank otherwise.
   const [colors, setColors] = React.useState<Record<ColorKey, string>>(() => {
     const base = {
       surface: "",
@@ -303,15 +328,21 @@ export function BrandKitForm(props: BrandKitFormProps) {
     } as Record<ColorKey, string>;
     if (prefill) {
       for (const key of Object.keys(base) as ColorKey[]) base[key] = prefill.colors[key] ?? "";
+    } else if (extractPrefill) {
+      for (const key of Object.keys(base) as ColorKey[]) {
+        base[key] = extractPrefill.colors[key] ?? "";
+      }
     }
     return base;
   });
   const [faces, setFaces] = React.useState(() => ({
-    display: prefill?.typography.display ?? "",
-    body: prefill?.typography.body ?? "",
-    mono: prefill?.typography.mono ?? "",
+    display: prefill?.typography.display ?? extractPrefill?.typography.display ?? "",
+    body: prefill?.typography.body ?? extractPrefill?.typography.body ?? "",
+    mono: prefill?.typography.mono ?? extractPrefill?.typography.mono ?? "",
   }));
-  const [logoUrl, setLogoUrl] = React.useState(prefill?.logoUrl ?? "");
+  const [logoUrl, setLogoUrl] = React.useState(
+    prefill?.logoUrl ?? extractPrefill?.logoUrl ?? ""
+  );
   const [descriptors, setDescriptors] = React.useState<Item[]>(() =>
     toItems(prefill?.voice.descriptors ?? [], "d"),
   );
@@ -472,6 +503,19 @@ export function BrandKitForm(props: BrandKitFormProps) {
       if (mode === "create") {
         const res = await createBrandKit(buildCreateInput());
         if (res.ok) {
+          // Draft bookkeeping AFTER the kit persists: mark the source draft
+          // consumed. Best-effort — the kit is the artifact; a failure here
+          // leaves a stale proposed draft that the next pull supersedes.
+          if (extractPrefill) {
+            try {
+              await consumeBrandExtractDraft({
+                clientId,
+                draftId: extractPrefill.draftId,
+              });
+            } catch {
+              /* never block navigation on bookkeeping */
+            }
+          }
           router.push(`/brand-kits/${clientId}?created=1`);
           return; // keep busy true through navigation
         }
