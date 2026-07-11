@@ -27,6 +27,7 @@ import { tryGetProcessorRuntimeConfig, type ProcessorRuntimeConfig } from "@/lib
 import { liveResolvePort } from "@/lib/intelligence/audit/live-fetch";
 import type { RunRow } from "@/lib/types/db";
 import { auditAdapter } from "./adapters/audit";
+import { brandExtractAdapter } from "./adapters/brand-extract";
 import { HEARTBEAT_INTERVAL_MS } from "./config";
 import {
   makeThrottledHeartbeat,
@@ -221,7 +222,7 @@ export function liveProcessorDeps(): ProcessorDeps | null {
       return asLeasedRun(data);
     },
     contextFor: (run) => contextFor(cfg, run),
-    adapters: { audit: auditAdapter },
+    adapters: { audit: auditAdapter, brand_extract: brandExtractAdapter },
     log: logProcessorEvent,
   };
 }

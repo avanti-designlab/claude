@@ -11,6 +11,7 @@ function leasedRun(): RunRow {
     tenant_id: "tenant-1",
     client_id: "client-1",
     property_id: "prop-1",
+    input_url: null,
     kind: "audit",
     status: "running",
     attempts: 0,

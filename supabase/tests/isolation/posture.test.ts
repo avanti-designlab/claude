@@ -153,7 +153,7 @@ describe("catalog matches the documented constants — a new table without cover
   it("live tenant_id tables == TENANT_ID_TABLES", () => {
     expect(schema.tenantIdTables).toEqual([...TENANT_ID_TABLES].sort());
   });
-  it("live client_id columns == every viewer-scoped table except `clients` (scopes on id), plus `tenant_users` + `runs`", () => {
+  it("live client_id columns == every viewer-scoped table except `clients` (scopes on id), plus `tenant_users` + `runs` + `brand_extract_drafts`", () => {
     // The physical client_id column set differs from the semantic
     // CLIENT_SCOPED_TABLES list:
     //  - `clients` is scoped on its own `id` (no client_id column);
@@ -162,11 +162,15 @@ describe("catalog matches the documented constants — a new table without cover
     //  - `runs` carries client_id for tenant-consistency + client filtering,
     //    but its SELECT is writer-only (internal scan queue) — it is not a
     //    client_viewer surface, so it is excluded from CLIENT_SCOPED_TABLES and
-    //    listed here alongside tenant_users.
+    //    listed here alongside tenant_users;
+    //  - `brand_extract_drafts` (0015) likewise carries client_id but its SELECT
+    //    is writer-only (pre-approval brand-extract drafts), so it is excluded
+    //    from CLIENT_SCOPED_TABLES too.
     const expectedClientIdColumns = [
       ...CLIENT_SCOPED_TABLES.filter((t) => t !== "clients"),
       "tenant_users",
       "runs",
+      "brand_extract_drafts",
     ].sort();
     expect(schema.clientIdTables).toEqual(expectedClientIdColumns);
   });

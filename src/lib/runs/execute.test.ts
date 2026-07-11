@@ -20,6 +20,7 @@ function leasedRun(kind: RunRow["kind"] = "audit"): RunRow {
     tenant_id: "tenant-1",
     client_id: "client-1",
     property_id: "prop-1",
+    input_url: null,
     kind,
     status: "running", // post-lease
     attempts: 0,

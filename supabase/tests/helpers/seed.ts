@@ -32,6 +32,8 @@ export interface SeededTenant {
   alertId: string;
   competitorId: string;
   runId: string;
+  /** A `proposed` brand_extract draft under the primary client (0015). */
+  brandExtractDraftId: string;
 }
 
 const THEME = {
@@ -242,6 +244,16 @@ export async function seedTenant(
     [tenantId, clientId, propertyId, operatorUserId]
   );
 
+  // brand_extract_drafts (0015) — one LIVE (proposed) draft under the primary
+  // client (writer-only reads; client_viewer must be blind to it). Only ONE
+  // proposed draft per client is allowed (partial unique index).
+  const brandExtractDraftId = await insertReturningId(
+    admin,
+    `insert into brand_extract_drafts (tenant_id, client_id, draft, status)
+     values ($1, $2, '{"colors":{},"typography":{},"voice":{"descriptors":[],"samples":[],"do":[],"dont":[]},"voiceNeedsAi":true,"notes":[],"logoCandidates":[],"imageryCandidates":[]}'::jsonb, 'proposed') returning id`,
+    [tenantId, clientId]
+  );
+
   return {
     tenantId,
     adminUserId,
@@ -265,6 +277,7 @@ export async function seedTenant(
     alertId,
     competitorId,
     runId,
+    brandExtractDraftId,
   };
 }
 

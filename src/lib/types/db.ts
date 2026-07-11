@@ -268,7 +268,7 @@ export function isPropertyPlatform(value: unknown): value is PropertyPlatform {
 /* runs — the scan work-order queue (migration 0011)                   */
 /* ------------------------------------------------------------------ */
 
-/** Run kinds — one per intelligence scan module (migration 0011 CHECK). */
+/** Run kinds — one per intelligence scan module (migration 0011 + 0015 CHECK). */
 export const RUN_KINDS = [
   "audit", // M2 audit engine
   "monitor", // M5 crawler/render monitoring
@@ -276,6 +276,8 @@ export const RUN_KINDS = [
   "local", // M14 local assessment
   "entity", // M12 PR entity leverage
   "visibility", // M3 visibility tracker
+  "brand_extract", // brand-from-URL extraction (migration 0015) — client-scoped,
+  //                   carries runs.input_url (a pasted URL), not a property
 ] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 
@@ -550,6 +552,13 @@ export interface RunRow {
   client_id: string;
   /** Set for property-scoped kinds (audit/monitor/decay/local); NULL otherwise. */
   property_id: string | null;
+  /**
+   * brand_extract ONLY (migration 0015): the operator-pasted target URL. NULL for
+   * every other kind (coupling CHECK runs_input_url_only_brand_extract). It is the
+   * run's SHAPE-checked input; the adapter's per-fetch egress guard is the real
+   * SSRF defense, never this value.
+   */
+  input_url: string | null;
   kind: RunKind;
   status: RunStatus;
   attempts: number;
@@ -562,6 +571,28 @@ export interface RunRow {
   result_ref: Json | null;
   /** Closed enum; set only on a failed run. */
   error_code: RunErrorCode | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * `brand_extract_drafts` (migration 0015) — the persisted brand_extract artifact:
+ * a client-scoped, human-reviewed DRAFT brand kit proposed from a pasted URL. The
+ * `draft` jsonb is the deterministic BrandKitDraft plus capped logo/imagery
+ * candidate URL lists (see src/lib/runs/adapters/brand-extract.ts). It is
+ * UNTRUSTED extracted input — it prefills the M7 ingest form and is re-validated
+ * at review→lock, never emitted into CSS. `run_id` is the producing run (nulled
+ * if that transient work-order is pruned). At most one `proposed` draft per client
+ * (partial unique index); enqueuing a new brand_extract supersedes prior proposed
+ * drafts → `discarded`.
+ */
+export interface BrandExtractDraftRow {
+  id: string;
+  tenant_id: string;
+  client_id: string;
+  run_id: string | null;
+  draft: Json;
+  status: "proposed" | "consumed" | "discarded";
   created_at: string;
   updated_at: string;
 }

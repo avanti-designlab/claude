@@ -34,7 +34,9 @@ export function adminDatabaseUrl(): string {
 
 /**
  * All tables of the F1 schema (doc 03 §3) + the governed post-freeze additions
- * (competitors 0010, runs 0011), in dependency order (parents before children).
+ * (competitors 0010, runs 0011, brand_assets 0014, brand_extract_drafts 0015),
+ * in dependency order (parents before children — brand_extract_drafts FKs both
+ * clients and runs, so it lands last).
  */
 export const ALL_TABLES = [
   "tenants",
@@ -53,6 +55,7 @@ export const ALL_TABLES = [
   "alerts",
   "competitors",
   "runs",
+  "brand_extract_drafts",
 ] as const;
 export type TableName = (typeof ALL_TABLES)[number];
 
@@ -64,10 +67,11 @@ export const TENANT_ID_TABLES = ALL_TABLES.filter(
 /**
  * Tables whose reads are client_viewer-SCOPED (own-client only, via
  * app.client_scope). `competitors` joins them (M19 renders share-of-voice).
- * `runs` is intentionally NOT here: it carries a client_id column for
- * tenant-consistency but its SELECT is writer-only (internal scan queue), so —
- * like `tenant_users` — it is a client_id-bearing table that is not a
- * client_viewer surface (see posture.test.ts).
+ * `runs` and `brand_extract_drafts` are intentionally NOT here: each carries a
+ * client_id column for tenant-consistency but its SELECT is writer-only (the
+ * internal scan queue / the pre-approval brand-extract drafts), so — like
+ * `tenant_users` — they are client_id-bearing tables that are not client_viewer
+ * surfaces (see posture.test.ts).
  */
 export const CLIENT_SCOPED_TABLES = [
   "clients",

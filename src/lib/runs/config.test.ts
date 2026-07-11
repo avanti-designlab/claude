@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { REQUEST_TIMEOUT_MS } from "@/lib/intelligence/crawl/types";
 import {
+  BRAND_EXTRACT_AGGREGATE_BUDGET_MS,
+  BRAND_EXTRACT_INPUT_URL_MAX_CHARS,
+  BRAND_EXTRACT_MAX_FETCH_BYTES,
+  BRAND_EXTRACT_MAX_STYLESHEETS,
   HEARTBEAT_INTERVAL_MS,
   isHeartbeatStale,
   ORPHAN_STALE_MS,
@@ -74,5 +79,28 @@ describe("orphanCutoffIso", () => {
 describe("attempt cap", () => {
   it("is the ratified provisional cap of 3", () => {
     expect(RETRY_ATTEMPT_CAP).toBe(3);
+  });
+});
+
+describe("brand_extract shallow-fetch bounds (interactive, inside the route window)", () => {
+  it("the aggregate budget is TIGHTER than the audit crawl budget (interactive expectation)", () => {
+    expect(BRAND_EXTRACT_AGGREGATE_BUDGET_MS).toBeGreaterThan(0);
+    expect(BRAND_EXTRACT_AGGREGATE_BUDGET_MS).toBeLessThan(SCAN_CRAWL_BUDGET_MS);
+  });
+
+  it("even a final in-flight fetch admitted just before the deadline finishes inside the crawl window", () => {
+    // A fetch is admitted while now() < deadline, then may run up to one per-request
+    // timeout. budget + REQUEST_TIMEOUT_MS must stay within the route's honest crawl
+    // window, so brand_extract never overruns into a mid-write platform kill.
+    expect(BRAND_EXTRACT_AGGREGATE_BUDGET_MS + REQUEST_TIMEOUT_MS).toBeLessThanOrEqual(
+      SCAN_CRAWL_BUDGET_MS
+    );
+  });
+
+  it("the work + size caps are positive and sane", () => {
+    expect(BRAND_EXTRACT_MAX_STYLESHEETS).toBe(10);
+    expect(BRAND_EXTRACT_MAX_FETCH_BYTES).toBe(2 * 1024 * 1024);
+    // The enqueue shape cap matches the runs.input_url CHECK bound (0015).
+    expect(BRAND_EXTRACT_INPUT_URL_MAX_CHARS).toBe(2048);
   });
 });

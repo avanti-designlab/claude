@@ -230,6 +230,19 @@ export const WRITE_SPECS: TableWriteSpec[] = [
     }),
     ownRowId: (t) => t.runId,
   },
+  {
+    table: "brand_extract_drafts",
+    writers: ["agency_admin", "operator"],
+    // status='discarded' (not 'proposed') so the own-tenant positive control never
+    // collides with the seeded LIVE proposed draft on the one-proposed-per-client
+    // partial unique index — the RLS WITH CHECK stays the sole gate under test.
+    buildInsert: (t) => ({
+      text: `insert into brand_extract_drafts (tenant_id, client_id, draft, status)
+             values ($1, $2, '{}'::jsonb, 'discarded')`,
+      params: [t.tenantId, t.clientId],
+    }),
+    ownRowId: (t) => t.brandExtractDraftId,
+  },
 ];
 
 /** Roles that must be REJECTED as writers of a given spec (the complement). */

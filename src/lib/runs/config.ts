@@ -75,6 +75,56 @@ export const RETRY_BASE_BACKOFF_MS = 30_000;
 export const RETRY_MAX_BACKOFF_MS = 5 * 60_000;
 
 /* ------------------------------------------------------------------ */
+/* brand_extract shallow-fetch bounds (⚑ ratify at wiring review)      */
+/*                                                                     */
+/* The brand_extract adapter is a DISTINCT shallow-fetch routine (not  */
+/* crawlSite): homepage → linked stylesheets → optional /about, each   */
+/* routed INDIVIDUALLY through the socket-pinned egress-guarded seam.   */
+/* Its budget is sized to INTERACTIVE expectation — deliberately much   */
+/* tighter than the 50s audit crawl budget (a ~12-fetch pull must not   */
+/* run long). The route's maxDuration (SCAN_MAX_DURATION_SECONDS) is    */
+/* shared with the audit path; the invariants that keep this budget     */
+/* inside that window are pinned in config.test.ts.                     */
+/* ------------------------------------------------------------------ */
+
+/** Max linked stylesheets fetched from the homepage (cross-origin allowed, each
+ *  egress-guarded). Bounds WORK; the aggregate budget below bounds TIME. */
+export const BRAND_EXTRACT_MAX_STYLESHEETS = 10;
+
+/** Per-fetch byte cap (homepage, each stylesheet, /about). 2 MiB — mirrors the
+ *  audit crawler's per-page-cap discipline (Content-Length precheck + post-read
+ *  length check); an over-cap body is refused, never truncated. */
+export const BRAND_EXTRACT_MAX_FETCH_BYTES = 2 * 1024 * 1024;
+
+/**
+ * AGGREGATE wall-clock budget (ms) bounding the WHOLE shallow pull (homepage +
+ * all stylesheets + /about), checked BETWEEN fetches. Interactive, and far below
+ * the audit crawl budget. config.test.ts pins the two safety invariants:
+ *   - it is < SCAN_CRAWL_BUDGET_MS (tighter than the audit path), and
+ *   - budget + REQUEST_TIMEOUT_MS <= SCAN_CRAWL_BUDGET_MS, so even one final
+ *     in-flight fetch admitted just before the deadline still finishes inside
+ *     the route's honest crawl window (never a mid-write platform kill).
+ */
+export const BRAND_EXTRACT_AGGREGATE_BUDGET_MS = 30_000;
+
+/** Enqueue-time SHAPE cap on the pasted URL — mirrors the runs.input_url CHECK
+ *  bound (migration 0015 runs_input_url_len). */
+export const BRAND_EXTRACT_INPUT_URL_MAX_CHARS = 2048;
+
+/** Per candidate URL length cap in the persisted draft (mirrors LOGO_URL_MAX_CHARS
+ *  in the brand-kit validate seam — kept in sync, not imported, to keep config
+ *  free of skill imports). */
+export const BRAND_EXTRACT_CANDIDATE_URL_MAX_CHARS = 2048;
+
+/** Count caps on the persisted draft's candidate URL lists. */
+export const BRAND_EXTRACT_MAX_LOGO_CANDIDATES = 8;
+export const BRAND_EXTRACT_MAX_IMAGERY_CANDIDATES = 8;
+
+/** Serialized `draft` jsonb cap — mirrors the brand_extract_drafts_draft_bounded
+ *  CHECK (migration 0015). The count + URL caps keep a real draft well under it. */
+export const BRAND_EXTRACT_DRAFT_MAX_CHARS = 65_536;
+
+/* ------------------------------------------------------------------ */
 /* Pure helpers                                                        */
 /* ------------------------------------------------------------------ */
 

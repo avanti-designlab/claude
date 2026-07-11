@@ -30,9 +30,11 @@ const CLIENT_ID = "4a9f3b5c-6d7e-4f8a-9b0c-1d2e3f4a5b6c";
 
 type Result = { data: unknown; error: unknown };
 
-/** A chainable supabase-js stub: per-table terminal results + captured insert. */
+/** A chainable supabase-js stub: per-table terminal results + captured insert +
+ *  captured update. The update chain (.update().eq().eq()) is awaited directly,
+ *  so the builder is thenable. */
 function fakeClient(config: Record<string, Result>) {
-  const captured: Record<string, { row?: unknown }> = {};
+  const captured: Record<string, { row?: unknown; update?: unknown }> = {};
   const client = {
     from(table: string) {
       captured[table] = captured[table] ?? {};
@@ -43,8 +45,13 @@ function fakeClient(config: Record<string, Result>) {
           captured[table].row = row;
           return builder;
         },
+        update: (row: unknown) => {
+          captured[table].update = row;
+          return builder;
+        },
         maybeSingle: async () => config[table],
         single: async () => config[table],
+        then: (resolve: (v: Result) => void) => resolve({ data: null, error: null }),
       };
       return builder;
     },
@@ -55,6 +62,7 @@ function fakeClient(config: Record<string, Result>) {
 beforeEach(() => {
   requireOperatorMock.mockResolvedValue(OPERATOR);
   kickMock.mockReset();
+  createClientMock.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -142,6 +150,71 @@ describe("enqueueRun — happy path", () => {
     createClientMock.mockResolvedValue(client);
     const res = await enqueueRun({ kind: "audit", propertyId: PROPERTY_ID });
     expect(res).toMatchObject({ ok: false, reason: "enqueue_failed" });
+    expect(kickMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("enqueueRun — brand_extract (client-scoped paste-URL path)", () => {
+  const HOME = "https://client-site.example/";
+
+  it("a non-uuid clientId → not_found (never reaches Postgres)", async () => {
+    const res = await enqueueRun({ kind: "brand_extract", clientId: "nope", url: HOME });
+    expect(res).toMatchObject({ ok: false, reason: "not_found" });
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it("a non-http(s) / blocked-literal / empty URL → invalid_url (shape check, no Postgres)", async () => {
+    for (const url of ["", "ftp://x.example", "http://127.0.0.1/", "not-a-url", "http://localhost/"]) {
+      const res = await enqueueRun({ kind: "brand_extract", clientId: CLIENT_ID, url });
+      expect(res, url).toMatchObject({ ok: false, reason: "invalid_url" });
+    }
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it("an RLS-empty client read → not_found (another tenant's client id looks the same)", async () => {
+    const { client } = fakeClient({ clients: { data: null, error: null } });
+    createClientMock.mockResolvedValue(client);
+    const res = await enqueueRun({ kind: "brand_extract", clientId: CLIENT_ID, url: HOME });
+    expect(res).toMatchObject({ ok: false, reason: "not_found" });
+    expect(kickMock).not.toHaveBeenCalled();
+  });
+
+  it("happy path: inserts a client-scoped run carrying input_url, supersedes prior proposed drafts, kicks", async () => {
+    const { client, captured } = fakeClient({
+      clients: { data: { id: CLIENT_ID }, error: null },
+      tenant_users: { data: { id: "tu-1" }, error: null },
+      runs: { data: { id: "run-be-1" }, error: null },
+    });
+    createClientMock.mockResolvedValue(client);
+
+    const res = await enqueueRun({ kind: "brand_extract", clientId: CLIENT_ID, url: HOME });
+    expect(res).toEqual({ ok: true, runId: "run-be-1" });
+
+    // Tenant CLAIM-SOURCED; property_id NULL; the pasted URL rides input_url.
+    expect(captured.runs.row).toEqual({
+      tenant_id: "tenant-1",
+      client_id: CLIENT_ID,
+      property_id: null,
+      kind: "brand_extract",
+      status: "queued",
+      requested_by: "tu-1",
+      input_url: HOME,
+    });
+    // SUPERSEDE RIDER: prior proposed drafts → discarded.
+    expect(captured.brand_extract_drafts.update).toEqual({ status: "discarded" });
+    expect(kickMock).toHaveBeenCalledWith("process");
+  });
+
+  it("a failed run insert → enqueue_failed (no kick, no supersede)", async () => {
+    const { client, captured } = fakeClient({
+      clients: { data: { id: CLIENT_ID }, error: null },
+      tenant_users: { data: { id: "tu-1" }, error: null },
+      runs: { data: null, error: { code: "23514" } },
+    });
+    createClientMock.mockResolvedValue(client);
+    const res = await enqueueRun({ kind: "brand_extract", clientId: CLIENT_ID, url: HOME });
+    expect(res).toMatchObject({ ok: false, reason: "enqueue_failed" });
+    expect(captured.brand_extract_drafts?.update).toBeUndefined();
     expect(kickMock).not.toHaveBeenCalled();
   });
 });
