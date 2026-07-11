@@ -22,6 +22,11 @@
  *   6. ROW IDENTITY IS IMMUTABLE — kind swap, client_id swap (own-tenant
  *      sibling), requested_by rewrite all refused; requested_by→NULL (the FK
  *      SET NULL shape) is allowed.
+ *   7. input_url IS RUN IDENTITY (migration 0016; Orchestrator integrity
+ *      ruling 2026-07-11) — a same-tenant writer's input_url rewrite on its
+ *      own queued OR running brand_extract run is refused, the owner+GUC
+ *      privileged context is refused too, and the legal edges (queued→canceled,
+ *      the real lease) still work with input_url riding through unchanged.
  *
  * Requires local Postgres (supabase/tests/README.md).
  */
@@ -90,6 +95,28 @@ async function runRow(id: string): Promise<{ status: string; attempts: number; e
     [id]
   );
   return res.rows[0];
+}
+
+/** The enqueue-recorded brand_extract target for §7's pins. */
+const EXTRACT_URL = "https://prospect.example.com";
+
+/** Superuser INSERT of a brand_extract run (0015: the kind REQUIRES a non-null
+ *  input_url; client-scoped — property_id NULL, the pre-onboarding shape). */
+async function insertBrandExtractRun(opts: { status?: string; heartbeatAt?: string | null } = {}): Promise<string> {
+  const res = await db.admin.query<{ id: string }>(
+    `insert into runs (tenant_id, client_id, kind, status, heartbeat_at, input_url)
+     values ($1, $2, 'brand_extract', $3, $4, $5) returning id`,
+    [a.tenantId, a.clientId, opts.status ?? "queued", opts.heartbeatAt ?? null, EXTRACT_URL]
+  );
+  return res.rows[0].id;
+}
+
+async function inputUrlOf(id: string): Promise<string | null> {
+  const res = await db.admin.query<{ input_url: string | null }>(
+    `select input_url from runs where id = $1`,
+    [id]
+  );
+  return res.rows[0].input_url;
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,5 +318,83 @@ describe("row identity immutable post-insert", () => {
     );
     expect(toNull.rowCount).toBe(1);
     expect((await runRow(queued)).requested_by).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 7. input_url is run identity (migration 0016)                       */
+/* ------------------------------------------------------------------ */
+
+describe("input_url is run identity (migration 0016) — the recorded brand_extract target is immutable post-enqueue", () => {
+  it("a same-tenant writer's input_url rewrite on its own QUEUED brand_extract run is refused (pre-lease: would rewrite what gets fetched)", async () => {
+    const queued = await insertBrandExtractRun();
+    await expectQueryRejected(
+      db.admin, "authenticated", writer(),
+      `update runs set input_url = 'https://rewritten.example.com' where id = $1`, [queued],
+      /runs_transition_refused: row identity is immutable/
+    );
+    expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
+  });
+
+  it("a same-tenant writer's input_url rewrite on its own RUNNING brand_extract run is refused (post-lease: would rewrite the displayed target)", async () => {
+    const running = await insertBrandExtractRun({ status: "running", heartbeatAt: new Date().toISOString() });
+    await expectQueryRejected(
+      db.admin, "authenticated", writer(),
+      `update runs set input_url = 'https://rewritten.example.com' where id = $1`, [running],
+      /runs_transition_refused: row identity is immutable/
+    );
+    expect(await inputUrlOf(running)).toBe(EXTRACT_URL);
+  });
+
+  it("the PRIVILEGED path refuses it too — owner + op GUC leasing with an input_url rewrite riding along", async () => {
+    const queued = await insertBrandExtractRun();
+    // Owner (db.admin) + the transaction-local op GUC IS the definer execution
+    // context the guard privileges — identity must still be refused there.
+    await db.admin.query("begin");
+    try {
+      await db.admin.query(`select pg_catalog.set_config('app.runs_queue_op', 'lease', true)`);
+      await expect(
+        db.admin.query(
+          `update runs set status = 'running', heartbeat_at = now(), input_url = 'https://rewritten.example.com' where id = $1`,
+          [queued]
+        )
+      ).rejects.toThrow(/runs_transition_refused: row identity is immutable/);
+    } finally {
+      await db.admin.query("rollback");
+    }
+    const row = await runRow(queued);
+    expect(row.status).toBe("queued");
+    expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
+  });
+
+  it("positive control: tenant cancel (queued→canceled) still works on a brand_extract run, input_url unchanged", async () => {
+    const queued = await insertBrandExtractRun();
+    const cancel = await queryAs(
+      db.admin, "authenticated", writer(),
+      `update runs set status = 'canceled' where id = $1 and status = 'queued'`, [queued]
+    );
+    expect(cancel.rowCount).toBe(1);
+    expect((await runRow(queued)).status).toBe("canceled");
+    expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
+  });
+
+  it("positive control: the REAL lease still claims a brand_extract run, input_url surviving unchanged", async () => {
+    const queued = await insertBrandExtractRun();
+    await db.admin.query("begin");
+    try {
+      await db.admin.query("set local role service_role");
+      const leased = await db.admin.query<{ id: string; input_url: string | null }>(
+        `select id, input_url from public.lease_next_run()`
+      );
+      expect(leased.rows[0].id).toBe(queued);
+      expect(leased.rows[0].input_url).toBe(EXTRACT_URL);
+      await db.admin.query("commit");
+    } catch (err) {
+      await db.admin.query("rollback");
+      throw err;
+    }
+    const row = await runRow(queued);
+    expect(row.status).toBe("running");
+    expect(await inputUrlOf(queued)).toBe(EXTRACT_URL);
   });
 });
