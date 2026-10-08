@@ -1,13 +1,16 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { Home, Link2, ShieldCheck, Sprout } from 'lucide-react';
+import { Globe, Home, Instagram, Phone, ShieldCheck, Sprout } from 'lucide-react';
 import { AmgLogo, EthosWordmark } from '../components/Logos';
 import { DarkStage, MaskLine, display, ui } from '../components/Kit';
 import { C, easeInOut } from '../theme';
-import { lerp, pop, rise } from '../motion';
-import { INVITE_URL } from './Cta';
+import { lerp, pop } from '../motion';
 
-// Closing lockup: both brands, the promise, three values, and the link.
+export const AMG_WEB = 'insuranceamg.com';
+export const AMG_IG = '@amginsurance';
+export const AMG_PHONE = '+1 (248) 592-0080';
+
+// Closing lockup: both brands, the promise, three values, and AMG's contact info.
 export const EndCard: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -24,10 +27,10 @@ export const EndCard: React.FC = () => {
         </div>
 
         <div style={{ marginTop: 130, textAlign: 'center' }}>
-          <MaskLine at={18} style={display(86, 800)}>
+          <MaskLine at={18} style={display(86, 700)}>
             More than insurance.
           </MaskLine>
-          <MaskLine at={24} style={display(86, 800, C.lime)}>
+          <MaskLine at={24} style={display(86, 700, C.lime)}>
             A brighter tomorrow.
           </MaskLine>
         </div>
@@ -71,23 +74,48 @@ export const EndCard: React.FC = () => {
 
         <div
           style={{
-            marginTop: 90,
+            marginTop: 80,
             display: 'flex',
             alignItems: 'center',
             gap: 16,
-            padding: '22px 36px',
+            padding: '24px 44px',
             borderRadius: 999,
             background: C.lime,
-            ...ui(32, 700, C.deep),
+            ...ui(40, 700, C.deep),
             transform: `scale(${pop(frame, fps, 58)})`,
             boxShadow: `0 0 ${30 + Math.sin(frame / 6) * 12}px rgba(188,240,49,0.45)`,
           }}
         >
-          <Link2 size={34} color={C.deep} strokeWidth={2.6} />
-          {INVITE_URL}
+          <Globe size={40} color={C.deep} strokeWidth={2.4} />
+          {AMG_WEB}
         </div>
-        <div style={{ marginTop: 26, opacity: rise(frame, 66, 14), ...ui(28, 600, 'rgba(255,255,255,0.7)'), letterSpacing: '0.04em' }}>
-          or send us a DM — we're here to help
+        <div style={{ marginTop: 26, display: 'flex', gap: 18 }}>
+          {[
+            { icon: Instagram, label: AMG_IG },
+            { icon: Phone, label: AMG_PHONE },
+          ].map(({ icon: Icon, label }, i) => {
+            const s = pop(frame, fps, 64 + i * 5);
+            return (
+              <div
+                key={label}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '18px 28px',
+                  borderRadius: 999,
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '2px solid rgba(255,255,255,0.18)',
+                  ...ui(30, 600, C.white),
+                  transform: `scale(${s})`,
+                  opacity: Math.min(1, s * 1.4),
+                }}
+              >
+                <Icon size={32} color={C.lime} strokeWidth={2.3} />
+                {label}
+              </div>
+            );
+          })}
         </div>
       </AbsoluteFill>
     </DarkStage>

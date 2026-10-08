@@ -39,10 +39,10 @@ export const Hook: React.FC = () => {
             <LiveDot /> Big News
           </Pill>
           <div style={{ height: 40 }} />
-          <MaskLine at={42} style={{ ...display(170, 900), textAlign: 'center', textTransform: 'uppercase' }}>
+          <MaskLine at={42} style={{ ...display(170, 800), textAlign: 'center', textTransform: 'uppercase' }}>
             Exciting
           </MaskLine>
-          <MaskLine at={47} style={{ ...display(104, 900, C.lime), textAlign: 'center', textTransform: 'uppercase', letterSpacing: '-0.015em' }}>
+          <MaskLine at={47} style={{ ...display(104, 800, C.lime), textAlign: 'center', textTransform: 'uppercase', letterSpacing: '-0.015em' }}>
             Announcement
           </MaskLine>
           <Underline at={58} />

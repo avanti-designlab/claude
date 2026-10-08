@@ -40,13 +40,13 @@ export const Headline: React.FC = () => {
           <span style={{ ...ui(30, 600, C.white), letterSpacing: '0.04em', marginLeft: 6 }}>Now partnered</span>
         </div>
 
-        <MaskLine at={14} style={display(104, 800)}>
+        <MaskLine at={14} style={display(104, 700)}>
           AMG Insurance
         </MaskLine>
-        <MaskLine at={18} style={display(104, 800)}>
+        <MaskLine at={18} style={display(104, 700)}>
           Group is now
         </MaskLine>
-        <MaskLine at={22} style={display(104, 800)}>
+        <MaskLine at={22} style={display(104, 700)}>
           partnered with
         </MaskLine>
         <div style={{ position: 'relative', marginTop: 18, alignSelf: 'flex-start' }}>
@@ -64,7 +64,7 @@ export const Headline: React.FC = () => {
             }}
           />
           <div style={{ position: 'relative' }}>
-            <MaskLine at={30} style={{ ...display(104, 800, sweep > 0.5 ? C.deep : C.lime), padding: '6px 0 2px' }}>
+            <MaskLine at={30} style={{ ...display(104, 700, sweep > 0.5 ? C.deep : C.lime), padding: '6px 0 2px' }}>
               Ethos Life
             </MaskLine>
           </div>
@@ -84,7 +84,7 @@ export const Headline: React.FC = () => {
             }}
           />
           <div style={{ position: 'relative' }}>
-            <MaskLine at={34} style={{ ...display(104, 800, frame > 60 ? C.deep : C.lime), padding: '6px 0 2px' }}>
+            <MaskLine at={34} style={{ ...display(104, 700, frame > 60 ? C.deep : C.lime), padding: '6px 0 2px' }}>
               Insurance!
             </MaskLine>
           </div>

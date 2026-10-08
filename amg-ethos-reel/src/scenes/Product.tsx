@@ -29,10 +29,10 @@ export const Product: React.FC = () => {
     <LightStage>
       <AbsoluteFill>
         <div style={{ position: 'absolute', top: 250, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <MaskLine at={8} style={{ ...display(92, 800, C.deep), textAlign: 'center' }}>
+          <MaskLine at={8} style={{ ...display(92, 700, C.deep), textAlign: 'center' }}>
             Life insurance,
           </MaskLine>
-          <MaskLine at={13} style={{ ...display(92, 800, C.green), textAlign: 'center' }}>
+          <MaskLine at={13} style={{ ...display(92, 700, C.green), textAlign: 'center' }}>
             made simple.
           </MaskLine>
         </div>

@@ -276,12 +276,12 @@ export const Cursor: React.FC<{ path: Array<{ f: number; x: number; y: number }>
   );
 };
 
-export const display = (size: number, weight = 800, color = C.white): React.CSSProperties => ({
+export const display = (size: number, weight = 700, color = C.white): React.CSSProperties => ({
   fontFamily: FONT_DISPLAY,
   fontWeight: weight,
   fontSize: size,
   lineHeight: 1.02,
-  letterSpacing: '-0.025em',
+  letterSpacing: '-0.02em',
   color,
 });
 

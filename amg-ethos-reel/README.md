@@ -19,7 +19,7 @@ Final files are in `deliverables/`:
 | 9.9–16.9s | **Product** | A SaaS-style phone mockup runs an online application (about you → coverage → review → submitted ✓) while four benefit cards pop in |
 | 16.4–21.4s | **Family** | Golden-hour family footage: "Protect what matters most." with *Your family. Your future. Our priority.* chips |
 | 20.9–25.9s | **CTA** | A browser card types the invite link, the cursor clicks **Get started**, then a DM bubble: "Our team is here to help you every step of the way." |
-| 25.5–29.3s | **End card** | AMG \| ETHOS lockup, "More than insurance. A brighter tomorrow.", three value tiles, and the link |
+| 25.5–29.3s | **End card** | AMG \| ETHOS lockup, "More than insurance. A brighter tomorrow.", three value tiles, and AMG's contact info: insuranceamg.com · @amginsurance · +1 (248) 592-0080 |
 
 Every transition is a brand-circle wipe (the circle motif from AMG's posts) that starts where the eye already is: the AMG mark, the + badge, the phone, the button.
 
@@ -28,7 +28,7 @@ Every transition is a brand-circle wipe (the circle motif from AMG's posts) that
 From the client's approved posts (`AMG_IG_Post_*.pdf`):
 
 - **Colors:** AMG deep green `#1F4833`, mid green `#1E915D`, lime `#BCF031`, light `#F1F1F1`, footer green `#336043`, plus Ethos teal `#054843` for Ethos marks
-- **Type:** AMG's posts use Gilroy (commercial). The reel uses **Poppins** (closest free geometric match) for display type and **Inter** for UI type
+- **Type:** AMG's posts use Gilroy (commercial). The reel uses **Poppins** (closest free geometric match) for display type, at Bold (700) with ExtraBold (800) only on the opening hook, and **Inter** for UI type
 - **Logos:**
   - The AMG dot mark is rebuilt as exact vector geometry (4×4 grid, lime group + white group), so each dot can animate on its own
   - The AMG wordmark and the Ethos logos are auto-traced to vector (`tools/trace.cjs` → `src/logoPaths.ts`)
@@ -45,7 +45,7 @@ npm run sound             # regenerate public/soundtrack.wav (after timing chang
 
 In sandboxes without Chrome download access, set `REMOTION_BROWSER` to a local Chrome Headless Shell binary.
 
-- **Copy:** each scene lives in `src/scenes/*.tsx`. The invite URL is `INVITE_URL` in `src/scenes/Cta.tsx`
+- **Copy:** each scene lives in `src/scenes/*.tsx`. The Ethos application link is `INVITE_URL` in `src/scenes/Cta.tsx`. AMG's website, Instagram and phone are `AMG_WEB`, `AMG_IG` and `AMG_PHONE` in `src/scenes/EndCard.tsx`
 - **Timing:** scene start and length are in `T` in `src/theme.ts`. If you change them, mirror `SCENES` in `tools/sound.py` and run `npm run sound`
 - **Footage:** `public/family.mp4` (H.264, 9:16). Swap it for any vertical clip
 - **Quick QA:** `node tools/qa-stills.mjs 120 400 700` renders those frames plus a contact sheet into `out/qa/`

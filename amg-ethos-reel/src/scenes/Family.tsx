@@ -25,14 +25,14 @@ export const Family: React.FC = () => {
       />
 
       <div style={{ position: 'absolute', top: 250, left: 90, right: 90 }}>
-        <MaskLine at={8} style={display(132, 800)}>
+        <MaskLine at={8} style={display(132, 700)}>
           Protect
         </MaskLine>
-        <MaskLine at={13} style={display(132, 800)}>
+        <MaskLine at={13} style={display(132, 700)}>
           what matters
         </MaskLine>
         <div style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
-          <MaskLine at={18} style={display(132, 800, C.lime)}>
+          <MaskLine at={18} style={display(132, 700, C.lime)}>
             most.
           </MaskLine>
           <div style={{ transform: `scale(${pop(frame, fps, 30)})`, marginTop: 10 }}>

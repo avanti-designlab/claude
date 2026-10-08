@@ -4,6 +4,7 @@ import { ArrowRight, Link2, Lock, MessageCircle, RotateCw, Send } from 'lucide-r
 import { AmgMark, EthosWordmark } from '../components/Logos';
 import { Cursor, DarkStage, LiveDot, MaskLine, Pill, Typed, display, ui } from '../components/Kit';
 import { C } from '../theme';
+import { AMG_IG } from './EndCard';
 import { pop, rise } from '../motion';
 
 export const INVITE_URL = 'agents.ethoslife.com/invite/24ef7';
@@ -26,10 +27,10 @@ export const Cta: React.FC = () => {
           </Pill>
         </div>
         <div style={{ marginTop: 40, textAlign: 'center' }}>
-          <MaskLine at={8} style={display(112, 800)}>
+          <MaskLine at={8} style={display(112, 700)}>
             Your coverage
           </MaskLine>
-          <MaskLine at={13} style={display(112, 800, C.lime)}>
+          <MaskLine at={13} style={display(112, 700, C.lime)}>
             starts here.
           </MaskLine>
         </div>
@@ -132,6 +133,7 @@ export const Cta: React.FC = () => {
               ...ui(32, 500, C.white),
             }}
           >
+            <div style={{ ...ui(24, 700, C.lime), marginBottom: 6, letterSpacing: '0.02em' }}>{AMG_IG}</div>
             {frame < 112 ? (
               <TypingDots />
             ) : (
